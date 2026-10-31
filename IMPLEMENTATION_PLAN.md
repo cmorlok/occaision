@@ -2,6 +2,7 @@
 
 > **Target Audience:** Implementing Software Engineering LLM / Developer  
 > **Reference Requirements:** `REQUIREMENTS.md`  
+> **Engineering Rules:** `AGENTS.md`  
 > **Architecture:** Local Python FastAPI Backend (`127.0.0.1:8000`) + Local Web Dashboard + Firefox WebExtension (Manifest V3)  
 
 ---
@@ -10,28 +11,55 @@
 
 > **MANDATORY:** Read and follow all engineering rules in `AGENTS.md` before writing a single line of code.
 
-1. **Strict Incremental TDD Loop (Test First $\rightarrow$ Implement $\rightarrow$ Test $\rightarrow$ Fix $\rightarrow$ Commit):**
+1. **Strict Incremental TDD Loop (Env Setup $\rightarrow$ Test First $\rightarrow$ Implement $\rightarrow$ Test $\rightarrow$ Fix $\rightarrow$ Commit):**
    * **Never** implement multiple phases or the whole codebase before running tests.
-   * For each phase, follow this exact loop:
+   * First complete **Phase 0 (Development Environment Setup)** and verify `pytest --version` and `node --version` work.
+   * For each subsequent phase (Phase 1 to Phase 4), follow this exact loop:
      1. **Write Tests First (RED):** Implement `tests/test_phaseX_*.py` based on the phase's Acceptance Criteria.
      2. **Run `pytest`:** Verify the new tests fail for the expected reason.
      3. **Implement Production Code:** Write the phase's modules cleanly and modularly.
-     4. **Test & Fix Loop (GREEN):** Run `pytest -v` (running the **entire** test suite to catch regressions). Fix any errors one by one until 100% of tests pass.
+     4. **Test & Fix Loop (GREEN):** Run `.venv/bin/pytest -v` (running the **entire** test suite to catch regressions). Fix any errors one by one until 100% of tests pass.
      5. **No Test Cheating:** Never delete, skip, or weaken assertions in a test to make it pass.
-     6. **Git Commit:** Once `pytest -v` is 100% green for the phase, check `git status` and create a clean Conventional Commit (`feat(phaseX): ...`) before starting the next phase.
+     6. **Git Commit:** Once `.venv/bin/pytest -v` is 100% green for the phase, check `git status` and create a clean Conventional Commit (`feat(phaseX): ...`) before starting the next phase.
 2. **Do Not Guess Contracts:** Use the exact file paths, Pydantic schemas, REST endpoint routes, DOM IDs, and extension message payloads specified in this document.
-3. **Offline/Deterministic Testability:** Every external dependency (Google Gemini API, eBay.de HTTP requests, `rembg` neural network inference if slow in unit tests) MUST be injectable or mockable so the entire `pytest` suite runs deterministically in < 10 seconds without requiring live internet or a live API key.
+3. **Offline/Deterministic Testability:** Every external dependency (Google Gemini API, eBay.de HTTP requests, `rembg` neural network inference) MUST be injectable or mockable so the entire `pytest` suite runs deterministically in < 10 seconds without requiring live internet, a live API key, or a 176 MB ONNX download during unit tests.
 4. **Hard Constraints to Enforce in Code:**
    - **Privacy:** Never send original full-resolution or EXIF-containing images to the Gemini API. Always strip EXIF/GPS metadata first and downscale to max `1024x1024` px before calling Gemini.
    - **Ricardo Title Limit:** Strictly $\le 60$ characters (validate and truncate/clean in Python as a hard safeguard even if the LLM returns > 60 chars).
    - **Tutti Title Limit:** Strictly $\le 80$ characters.
+   - **Swiss German Orthography:** Replace `ß` with `ss` in all generated titles and descriptions.
    - **Swiss Legal Disclaimer:** Every Ricardo and Tutti description must contain the private sale warranty disclaimer (`"Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."`).
    - **CORS / CSP Bypass in Extension:** The Firefox Content Script (`content.js`) must **NEVER** call `fetch("http://127.0.0.1:8000/...")` directly. All HTTP calls to the local backend must happen inside `background.js` via `browser.runtime.onMessage` / `chrome.runtime.onMessage`.
 
 ---
 
-## 2. Repository Structure & Dependencies
+## 2. Phase 0: Development Environment & Repository Setup
 
+Before writing application code, set up a clean, reproducible development environment.
+
+### 2.1 System Prerequisites (Linux / Debian / Ubuntu / macOS)
+Ensure the following OS-level packages are present (required by `rembg`/`opencv-python-headless`, `pillow-heif`, and JS syntax verification):
+
+```bash
+# On Debian/Ubuntu Linux:
+sudo apt-get update && sudo apt-get install -y \
+    python3 python3-venv python3-pip python3-dev \
+    libgl1 libglib2.0-0 libheif-dev \
+    nodejs
+```
+
+*(Note: **Python 3.11 or 3.12** is strongly recommended so `onnxruntime` and `numba`/`pymatting` install from prebuilt binary wheels without source compilation.)*
+
+### 2.2 Python Virtual Environment Setup
+Create an isolated virtual environment in `/app/.venv` (which is gitignored):
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install --upgrade pip setuptools wheel
+.venv/bin/pip install -r requirements.txt
+```
+
+### 2.3 Repository Structure
 Create the following project structure in `/app`:
 
 ```text
@@ -39,6 +67,7 @@ Create the following project structure in `/app`:
 ├── .env.example
 ├── requirements.txt
 ├── pytest.ini
+├── AGENTS.md
 ├── REQUIREMENTS.md
 ├── IMPLEMENTATION_PLAN.md
 ├── data/                        # Runtime directory (gitignored, auto-created)
@@ -54,26 +83,27 @@ Create the following project structure in `/app`:
 │   └── services/
 │       ├── __init__.py
 │       ├── image_service.py     # HEIC->JPG, EXIF strip, auto-contrast, Blur, rembg Cutout, 1024px AI resize
-│       ├── ebay_service.py      # eBay DE sold listings fetcher/parser & verification link builder
-│       └── ai_service.py        # Gemini API integration with Search Grounding & structured output
+│       ├── ebay_service.py      # eBay DE sold listings fetcher (curl_cffi) & verification link builder
+│       └── ai_service.py        # Gemini API integration with Search Grounding & JSON extraction
 ├── frontend/
 │   ├── index.html               # Local Web Dashboard UI
 │   ├── styles.css               # Clean, responsive dashboard styling
 │   └── app.js                   # Dashboard state, drag&drop upload, iterative AI re-run, live char counters
 ├── extension/
 │   ├── manifest.json            # Firefox WebExtension Manifest V3
-│   ├── background.js            # Service worker / background script communicating with 127.0.0.1:8000
-│   ├── content.js               # Smart-Panel UI, step-by-step React DOM injector, DataTransfer image uploader
+│   ├── background.js            # Background script communicating with 127.0.0.1:8000 & permission helper
+│   ├── content.js               # Smart-Panel UI, Xray-safe File/DataTransfer injector, React setter
 │   └── panel.css                # Isolated CSS for the floating Smart-Panel on ricardo.ch & tutti.ch
 └── tests/
-    ├── conftest.py              # Shared pytest fixtures (temp data dir, sample EXIF images, mock HTML)
+    ├── conftest.py              # Shared pytest fixtures (temp data dir, synthetic EXIF images, mock HTML)
     ├── test_phase1_image_and_storage.py
     ├── test_phase2_pricing_and_ai.py
     ├── test_phase3_api_and_ui.py
     └── test_phase4_extension.py
 ```
 
-### 2.1 `requirements.txt`
+### 2.4 `requirements.txt`
+Use these exact package specifications to avoid known dependency/wheel issues:
 ```text
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
@@ -83,21 +113,25 @@ pydantic-settings>=2.2.0
 python-dotenv>=1.0.1
 Pillow>=10.3.0
 pillow-heif>=0.16.0
-rembg>=2.0.56
-onnxruntime>=1.17.0
+numba>=0.60.0
+onnxruntime>=1.18.0
+rembg[cpu]>=2.0.57
 httpx>=0.27.0
+curl-cffi>=0.7.0
 beautifulsoup4>=4.12.3
+lxml>=5.2.0
 google-genai>=0.3.0
 pytest>=8.1.0
 pytest-asyncio>=0.23.6
 ```
 
-### 2.2 `.env.example`
+### 2.5 `.env.example`
 ```ini
 GEMINI_API_KEY=your_google_ai_studio_api_key_here
 GEMINI_MODEL=gemini-2.5-flash
 ENABLE_SEARCH_GROUNDING=true
 EUR_TO_CHF_RATE=0.94
+REMBG_MODEL=u2netp
 DATA_DIR=./data
 HOST=127.0.0.1
 PORT=8000
@@ -111,7 +145,7 @@ Implement the following exact Pydantic v2 models in `backend/models.py`:
 
 ```python
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 class DraftStatus(str, Enum):
@@ -154,7 +188,7 @@ class DraftImage(BaseModel):
     id: str
     original_filename: str
     active_mode: ImageVariantMode = ImageVariantMode.OPTIMIZED
-    variants: dict[ImageVariantMode, str] = Field(default_factory=dict)  # Relative URLs e.g. "/api/drafts/{id}/images/{img_id}/optimized"
+    variants: Dict[ImageVariantMode, str] = Field(default_factory=dict)  # Relative URLs e.g. "/api/drafts/{id}/images/{img_id}/optimized"
     width: int
     height: int
     exif_stripped: bool = True
@@ -215,7 +249,7 @@ class Draft(BaseModel):
 
 ---
 
-## 4. Phase-by-Phase Implementation Specification
+## 4. Phase-by-Phase Implementation Specification & Technical Safeguards
 
 ---
 
@@ -236,33 +270,36 @@ class Draft(BaseModel):
   import pillow_heif
   pillow_heif.register_heif_opener()
   ```
-* Implement `ImageService`:
+* **Performance Safeguard (`rembg` ONNX Session Reuse):**
+  * Calling `rembg.remove(img)` without a `session` reloads the ONNX model from disk on *every single image* (taking 4–6 seconds and violating the `< 3s` requirement).
+  * `ImageService` MUST lazily initialize and cache a single `self._rembg_session = rembg.new_session(model_name)` (default `"u2netp"` or `"u2net"` from `REMBG_MODEL` config) and pass `session=self._rembg_session` to `rembg.remove(img, session=self._rembg_session)`.
+  * *Testability requirement:* Allow injecting a custom `mask_extractor: Optional[Callable[[Image.Image], Image.Image]] = None` in `ImageService.__init__` so unit tests run in milliseconds without downloading the ONNX weights.
+* Implement `ImageService` pipeline steps:
   1. **Orientation & EXIF Stripping (`clean_and_orient(raw_bytes: bytes) -> Image.Image`):**
      * Open image with `PIL.Image.open(io.BytesIO(raw_bytes))`.
      * Call `ImageOps.exif_transpose(img)` FIRST so smartphone portrait photos are rotated upright.
      * Convert to `RGB` mode.
-     * Create a brand new `Image.new("RGB", img.size)` and paste pixel data (or save without `exif` info) so **zero EXIF/GPS/camera metadata remains**.
+     * Create a brand new `Image.new("RGB", img.size)` and paste pixel data so **zero EXIF/GPS/camera metadata remains**.
   2. **Default Optimized Variant (`create_optimized_variant(clean_img: Image.Image) -> Image.Image`):**
      * Apply subtle auto-contrast: `ImageOps.autocontrast(clean_img, cutoff=0.5)`.
-     * Limit max dimension to `2048px` (`thumbnail((2048, 2048), Image.Resampling.LANCZOS)`) for fast browser upload while keeping high clarity.
+     * Limit max dimension to `2048px` (`thumbnail((2048, 2048), Image.Resampling.LANCZOS)`).
      * Save as `<image_id>_optimized.jpg` (JPEG quality=90, no EXIF).
   3. **AI Input Downscaled Variant (`create_ai_input_variant(clean_img: Image.Image) -> bytes`):**
      * Copy `clean_img`, resize via `thumbnail((1024, 1024), Image.Resampling.LANCZOS)`.
      * Save as `<image_id>_ai.jpg` (JPEG quality=85, no EXIF). Never exceed `1024px` on either axis.
   4. **On-Demand / Cached Cutout Variant (`get_or_create_cutout(draft_id, image_id)`):**
-     * Run `rembg.remove(optimized_img)` to obtain RGBA foreground.
+     * Extract RGBA foreground via `self.extract_foreground(optimized_img)`.
      * Composite foreground onto a clean neutral light-gray/white canvas `Image.new("RGB", rgba.size, (248, 249, 250))`.
      * Save to `<image_id>_cutout.jpg`.
-     * *Testability requirement:* Allow injecting a custom `mask_extractor: Callable[[Image.Image], Image.Image]` into `ImageService.__init__` so unit tests can test cutout and blur pipelines instantly without downloading a 170MB U2Net ONNX model during unit tests if needed, while defaulting to `rembg.remove` in production.
   5. **On-Demand / Cached Background Blur Variant (`get_or_create_blurred(draft_id, image_id)`):**
-     * Extract RGBA foreground via `mask_extractor` (`rembg.remove`).
+     * Extract RGBA foreground via `self.extract_foreground(optimized_img)`.
      * Take `optimized_img`, apply `ImageFilter.GaussianBlur(radius=18)` to create blurred background.
-     * Composite the sharp RGBA foreground over the blurred background using the alpha channel as mask: `Image.composite(optimized_img, blurred_bg, rgba.split()[3])`.
+     * Composite the sharp foreground over the blurred background using the alpha channel as mask: `Image.composite(optimized_img, blurred_bg, rgba.split()[3])`.
      * Save to `<image_id>_blurred.jpg`.
 
 #### 4.1.3 Phase 1 Automated Acceptance Criteria (`tests/test_phase1_image_and_storage.py`)
 Write automated `pytest` tests verifying:
-1. **`test_exif_and_gps_completely_stripped`**: Create a synthetic JPEG containing EXIF tags (Make, Model, GPSInfo), process it through `ImageService.process_upload()`, reload the saved `<image_id>_optimized.jpg` and `<image_id>_ai.jpg`, and assert `img.getexif()` is completely empty (`len(img.getexif()) == 0`).
+1. **`test_exif_and_gps_completely_stripped`**: Create a synthetic JPEG containing EXIF tags (Make, Model, GPSInfo), process it through `ImageService.process_upload()`, reload the saved `<image_id>_optimized.jpg` and `<image_id>_ai.jpg`, and assert `len(img.getexif()) == 0`.
 2. **`test_ai_image_downscaled_to_max_1024px`**: Upload a `3000x2000` image and assert `<image_id>_ai.jpg` has dimensions `1024x683` ($\le 1024$ on both axes), while `<image_id>_optimized.jpg` is `2048x1365`.
 3. **`test_heic_upload_converted_to_jpg`**: Generate an in-memory HEIF/HEIC image via `pillow_heif`, pass it to `process_upload()`, and assert it succeeds and outputs valid RGB `.jpg` files.
 4. **`test_cutout_and_blur_generation`**: Process an image and trigger `cutout` and `blurred` modes; assert both `.jpg` files exist on disk, match the optimized image dimensions, and have RGB mode.
@@ -272,7 +309,10 @@ Write automated `pytest` tests verifying:
 
 ### PHASE 2: Hybrid Price Engine & Gemini AI Service
 
-#### 4.2.1 `backend/services/ebay_service.py`
+#### 4.2.1 `backend/services/ebay_service.py` (With TLS-Fingerprint Bypass)
+* **Technical Reality & Safeguard:**
+  * Standard Python `httpx` or `requests` calls to `ebay.de` are frequently blocked by eBay's anti-bot TLS/JA3 fingerprinting (returning a `splashui/challenge` CAPTCHA page or `403`/`503`).
+  * Therefore, `fetch_sold_stats()` MUST use **`curl_cffi.requests.AsyncSession(impersonate="chrome")`** (with fallback to `httpx` if `curl_cffi` is unavailable) so the TLS handshake and HTTP/2 frame fingerprint match a real Chrome browser.
 * Implement `EbayService`:
   1. **`build_verification_links(query: str) -> VerificationLinks`**:
      * URL-encode `query`.
@@ -281,48 +321,54 @@ Write automated `pytest` tests verifying:
      * `toppreise_url`: `https://www.toppreise.ch/produktsuche?q={q}`
      * `digitec_url`: `https://www.digitec.ch/de/search?q={q}`
   2. **`parse_sold_html(html: str, query: str, eur_to_chf: float = 0.94) -> EbaySoldStats`**:
-     * Parse eBay search result items (`.s-item` blocks) using `BeautifulSoup`.
-     * Ignore placeholder items (e.g., title `"Shop on eBay"` or price ranges with `"bis"` / `"to"`).
-     * Extract prices from `.s-item__price` using regex matching German/European currency formats (e.g. `EUR 145,00`, `145,00 €`, `1.250,50`).
-     * If $\ge 4$ prices are found, apply interquartile trimming (remove bottom 10% and top 10% extreme outliers, e.g., defective parts or bundles).
+     * First check if `html` is a challenge page (`"splashui/challenge"` or `"Pardon Our Interruption"` in `html`); if so, return `EbaySoldStats(query=query, sample_count=0)`.
+     * Parse eBay search result items using `BeautifulSoup(html, "lxml")`, supporting both `.s-item` and `.s-card` item containers.
+     * Ignore placeholder items (e.g., title `"Shop on eBay"` or price ranges containing `"bis"` / `"to"`).
+     * Extract prices from `.s-item__price` / `.s-card__price` using regex matching German/European currency formats (`EUR 145,00`, `145,00 €`, `1.250,50`).
+     * If $\ge 4$ prices are found, apply interquartile/10% trimming (remove bottom 10% and top 10% extreme outliers).
      * Compute `min_eur`, `max_eur`, `median_eur`, and `median_chf = round(median_eur * eur_to_chf, 2)`.
   3. **`fetch_sold_stats(query: str) -> EbaySoldStats`**:
-     * Perform async HTTP GET with realistic desktop `User-Agent` header and 6.0s timeout.
-     * On network error or captcha/block, log a warning and return `EbaySoldStats(query=query, sample_count=0)` gracefully without crashing the pipeline.
+     * Use `curl_cffi.requests.AsyncSession(impersonate="chrome")` with `Accept-Language: de-DE,de;q=0.9` and a 8.0s timeout.
+     * On any network error or anti-bot block, log a warning and return `EbaySoldStats(query=query, sample_count=0)` gracefully without crashing.
 
-#### 4.2.2 `backend/services/ai_service.py`
-* Implement `AIService`:
-  * Load `GEMINI_API_KEY`, `GEMINI_MODEL` (default `gemini-2.5-flash`), and `ENABLE_SEARCH_GROUNDING` from `config.py`.
-  * **Input Preparation:**
-    * Load only the `<image_id>_ai.jpg` (`<= 1024px`, EXIF-free) files for the draft's images (or if the user selected `cutout` / `blurred` and enabled pre-cutout privacy, resize that variant to `<= 1024px`).
-  * **Prompt & Grounding:**
-    * Enable Google Search Grounding (`tools=[{"google_search": {}}]`) when `ENABLE_SEARCH_GROUNDING=True` so Gemini looks up the current Swiss retail price (Digitec/Galaxus, Toppreise.ch) and product specifications.
-    * Instruct Gemini to:
-      1. Identify the exact brand and model from the images and `user_notes`.
-      2. Perform a **Visual Quality & Completeness Check**: inspect the uploaded photos and return `missing_photo_hints` (in German) if important details for buyers are missing (e.g., *"Typenschild / Modellnummer nicht sichtbar"*, *"Nahaufnahme der erwähnten Gebrauchsspuren fehlt"*, *"Originalverpackung / Zubehör im Text erwähnt, aber nicht auf den Fotos"*).
-      3. Combine the provided **eBay DE Sold Stats** (in CHF) and the **Swiss New Price (Digitec/Toppreise)** to recommend:
-         * `ricardo_start_chf` (attractive auction start price, typically ~65–75% of realistic second-hand market value, rounded to whole CHF or .00/.50).
-         * `ricardo_buynow_chf` (realistic Swiss second-hand market value, factoring in Ricardo's ~10–12% commission and never exceeding 80% of current Swiss new price unless collectible).
-         * `tutti_vhb_chf` (slightly above expected final price to leave 5–10% negotiation room, no platform fee).
-      4. Generate the **Ricardo listing** (German, Swiss spelling `ss` instead of `ß`):
-         * `title`: **Maximum 60 characters**, keyword-optimized (`Brand + Model + Key Spec + Condition`), no filler words like *"Super!"* or *"Top Zustand!!!"*.
-         * `description`: Structured sections (`Zustand`, `Lieferumfang`, `Technische Daten`, `Versand & Abholung`, and mandatory legal clause: `Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.`).
-      5. Generate the **Tutti listing** (German, Swiss spelling `ss` instead of `ß`):
-         * `title`: Maximum 80 characters.
-         * `category_suggestion`: e.g. `"Audio & TV > Kopfhörer"`.
-         * `description`: Friendly, trustworthy classified ad text including pickup/shipping & TWINT hint and mandatory legal clause (`Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.`).
-  * **Post-Processing Safeguards (Mandatory in Python):**
-    * Replace any `ß` with `ss` in generated titles and descriptions (Swiss standard).
-    * Enforce `len(ricardo.title) <= 60` (if > 60, truncate cleanly at last word boundary $\le 60$ chars).
-    * Enforce `len(tutti.title) <= 80`.
-    * Ensure `"Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme"` is present in both descriptions; if missing, append `\n\nPrivatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.`.
+#### 4.2.2 `backend/services/ai_service.py` (With Tool + JSON Compatibility Fix)
+* **Critical Gemini API Safeguard (`google_search` + JSON Output):**
+  * **Technical Reality:** On the Gemini API (`google-genai`), combining `tools=[types.Tool(google_search=types.GoogleSearch())]` AND `response_mime_type="application/json"` in the same `GenerateContentConfig` raises `400 INVALID_ARGUMENT: Tool use with a response mime type: 'application/json' is unsupported` on standard production endpoints.
+  * **Mandatory Implementation Pattern:**
+    * When `enable_search_grounding=True`, pass `tools=[types.Tool(google_search=types.GoogleSearch())]` and **leave `response_mime_type` unset** (`None`).
+    * Instruct Gemini in the system prompt to return **only a valid JSON object** matching the schema below.
+    * Implement a helper `extract_and_parse_json(raw_text: str) -> dict` in `ai_service.py` that strips optional Markdown code fences (` ```json ... ``` `) or extracts the outermost `{ ... }` block and validates it via Pydantic (`AIAnalysisPayload.model_validate_json(...)`).
+    * If `enable_search_grounding=False`, you may optionally set `response_mime_type="application/json"`, while still running `extract_and_parse_json()` for uniform handling.
+* **Input Preparation:**
+  * Load only the `<image_id>_ai.jpg` (`<= 1024px`, EXIF-free) files for the draft's images.
+* **Prompt Instructions:**
+  1. Identify the exact brand and model from the images and `user_notes`.
+  2. **Visual Quality & Completeness Check:** Return `missing_photo_hints` (in German) if important details for buyers are missing (e.g., *"Typenschild / Modellnummer nicht sichtbar"*, *"Nahaufnahme der erwähnten Gebrauchsspuren fehlt"*).
+  3. **Hybrid Price Strategy:** Combine the provided **eBay DE Sold Stats** (in CHF) and the **Swiss New Price (Digitec/Toppreise via Google Search Grounding)** to recommend:
+     * `ch_new_price_chf`: Current Swiss retail price (if found).
+     * `ricardo_start_chf`: Attractive auction start price (~65–75% of realistic second-hand market value).
+     * `ricardo_buynow_chf`: Realistic Swiss second-hand value (factoring in Ricardo's ~10–12% commission and never exceeding 80% of current Swiss new price unless collectible).
+     * `tutti_vhb_chf`: Slightly above expected final price for 5–10% negotiation margin.
+  4. **Ricardo Listing (Swiss German `ss` instead of `ß`):**
+     * `title`: **Maximum 60 characters**, keyword-optimized (`Brand + Model + Key Spec + Condition`).
+     * `description`: Structured sections (`Zustand`, `Lieferumfang`, `Technische Daten`, `Versand & Abholung`, and mandatory legal clause: `Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.`).
+  5. **Tutti Listing (Swiss German `ss` instead of `ß`):**
+     * `title`: Maximum 80 characters.
+     * `category_suggestion`: e.g. `"Audio & TV > Kopfhörer"`.
+     * `description`: Friendly classified ad text including pickup/shipping & TWINT hint and mandatory legal clause (`Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.`).
+* **Post-Processing Safeguards (Mandatory in Python):**
+  * Replace any `ß` with `ss` in all generated titles and descriptions.
+  * Enforce `len(ricardo.title) <= 60` (truncate cleanly at word boundary if > 60 chars).
+  * Enforce `len(tutti.title) <= 80`.
+  * Ensure `"Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme"` is present in both descriptions; if missing, append `\n\nPrivatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.`.
 
 #### 4.2.3 Phase 2 Automated Acceptance Criteria (`tests/test_phase2_pricing_and_ai.py`)
 Write automated `pytest` tests verifying:
-1. **`test_ebay_sold_html_parser_and_currency_conversion`**: Feed realistic eBay.de HTML containing sold items (`EUR 150,00`, `EUR 160,00`, `EUR 170,00`, plus a `EUR 1,00` outlier and a `"EUR 100,00 bis EUR 200,00"` range item) into `parse_sold_html()`. Assert range items are skipped, median EUR is accurately calculated, and `median_chf` is converted properly.
+1. **`test_ebay_sold_html_parser_and_currency_conversion`**: Feed realistic eBay.de HTML containing sold items (`EUR 150,00`, `EUR 160,00`, `EUR 170,00`, plus a `EUR 1,00` outlier and a `"EUR 100,00 bis EUR 200,00"` range item) into `parse_sold_html()`. Assert range items are skipped, median EUR is accurately calculated, and `median_chf` is converted properly. Also test that challenge HTML returns `sample_count == 0` gracefully.
 2. **`test_verification_links_generation`**: Verify `build_verification_links("Sony WH-1000XM4")` produces valid URLs containing `LH_Sold=1&LH_Complete=1` for eBay, `ricardo.ch`, `toppreise.ch`, and `digitec.ch`.
-3. **`test_ai_post_processing_safeguards`**: Pass a mock AI response with a 75-character Ricardo title containing `ß` (`"Großartiger Sony WH-1000XM4 Kopfhörer in weiß mit Zubehör und Originalverpackung"`) and a description missing the warranty disclaimer. Assert the service outputs a Ricardo title $\le 60$ chars, replaces `ß` with `ss`, and appends the mandatory Swiss legal disclaimer.
-4. **`test_iterative_reanalysis_preserves_draft_id_and_updates_hints`**: Create a draft with 1 photo, run mocked AI analysis returning `missing_photo_hints=["Bitte Typenschild fotografieren"]`, upload a 2nd photo to the same draft, re-run AI analysis, and verify the existing draft is updated in-place with updated hints and listing fields.
+3. **`test_ai_json_extractor_and_grounding_config_compatibility`**: Verify that when `enable_search_grounding=True`, `GenerateContentConfig` does NOT set `response_mime_type="application/json"` (preventing the 400 API error), and `extract_and_parse_json()` cleanly parses JSON even when wrapped in ` ```json ... ``` ` markdown fences and preamble text.
+4. **`test_ai_post_processing_safeguards`**: Pass a mock AI response with a 75-character Ricardo title containing `ß` and a description missing the warranty disclaimer. Assert the service outputs a Ricardo title $\le 60$ chars, replaces `ß` with `ss`, and appends the mandatory Swiss legal disclaimer.
+5. **`test_iterative_reanalysis_preserves_draft_id_and_updates_hints`**: Create a draft with 1 photo, run mocked AI analysis returning `missing_photo_hints=["Bitte Typenschild fotografieren"]`, upload a 2nd photo to the same draft, re-run AI analysis, and verify the existing draft is updated in-place.
 
 ---
 
@@ -384,7 +430,7 @@ Write automated `pytest` tests using `fastapi.testclient.TestClient`:
 
 ---
 
-### PHASE 4: Firefox WebExtension (Manifest V3) with Smart-Panel
+### PHASE 4: Firefox WebExtension (Manifest V3) with Smart-Panel & Xray Vision Compatibility
 
 #### 4.4.1 `extension/manifest.json`
 ```json
@@ -400,6 +446,9 @@ Write automated `pytest` tests using `fastapi.testclient.TestClient`:
     "*://*.ricardo.ch/*",
     "*://*.tutti.ch/*"
   ],
+  "action": {
+    "default_title": "Tutti & Ricardo AI Assistant (Berechtigungen prüfen)"
+  },
   "background": {
     "scripts": ["background.js"]
   },
@@ -420,43 +469,68 @@ Write automated `pytest` tests using `fastapi.testclient.TestClient`:
 }
 ```
 
-#### 4.4.2 Background Worker Message Contract (`extension/background.js`)
-`background.js` listens via `(globalThis.browser || globalThis.chrome).runtime.onMessage.addListener` and handles three action types:
-1. **`{ action: "LIST_DRAFTS" }`**:
-   * Fetches `GET http://127.0.0.1:8000/api/drafts`.
-   * Returns `{ ok: true, drafts: [...] }` or `{ ok: false, error: "..." }`.
-2. **`{ action: "GET_DRAFT", draftId: "<id>" }`**:
-   * Fetches `GET http://127.0.0.1:8000/api/drafts/<id>`.
-   * Returns `{ ok: true, draft: {...} }`.
-3. **`{ action: "FETCH_DRAFT_IMAGES", draftId: "<id>" }`**:
-   * Fetches the draft metadata, then fetches each image's `/api/drafts/<id>/images/<img_id>/active` binary endpoint, converts the `ArrayBuffer` to a Base64 Data URL (`data:image/jpeg;base64,...`), and returns:
-     `{ ok: true, images: [{ id, filename: "<id>_<mode>.jpg", mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,..." }] }`.
-   * *Why:* Passing Base64 strings over the extension message bus allows `content.js` to reconstruct native `File` objects inside the page context and attach them to `<input type="file">` via `DataTransfer` without triggering any CORS or CSP blocks on `ricardo.ch` or `tutti.ch`.
+#### 4.4.2 Background Worker & Host Permission Helper (`extension/background.js`)
+* **Firefox MV3 Host Permissions Safeguard:**
+  * In Firefox Manifest V3, `host_permissions` may not be auto-granted on installation until approved by the user.
+  * Register an `action.onClicked` listener in `background.js` that calls `permissions.request({ origins: ["http://127.0.0.1:8000/*", "http://localhost:8000/*", "*://*.ricardo.ch/*", "*://*.tutti.ch/*"] })` so clicking the extension toolbar icon immediately prompts and grants all required host permissions if missing.
+* **Message Bus Contract:**
+  `background.js` listens via `(globalThis.browser || globalThis.chrome).runtime.onMessage.addListener` and handles three action types (returning `true` when using `sendResponse` asynchronously):
+  1. **`{ action: "LIST_DRAFTS" }`**:
+     * Fetches `GET http://127.0.0.1:8000/api/drafts`.
+     * Returns `{ ok: true, drafts: [...] }` or `{ ok: false, error: "..." }`.
+  2. **`{ action: "GET_DRAFT", draftId: "<id>" }`**:
+     * Fetches `GET http://127.0.0.1:8000/api/drafts/<id>`.
+     * Returns `{ ok: true, draft: {...} }`.
+  3. **`{ action: "FETCH_DRAFT_IMAGES", draftId: "<id>" }`**:
+     * Fetches the draft metadata, then fetches each image's `/api/drafts/<id>/images/<img_id>/active` binary endpoint, converts the `ArrayBuffer` to a Base64 Data URL (`data:image/jpeg;base64,...`), and returns:
+       `{ ok: true, images: [{ id, filename: "<id>_<mode>.jpg", mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,..." }] }`.
 
-#### 4.4.3 Smart-Panel & Step-by-Step Auto-Fill (`extension/content.js`)
+#### 4.4.3 Smart-Panel, React Setter & Firefox Xray-Safe File Injector (`extension/content.js`)
 Implement `content.js` so it works both in Firefox and in a Node/JSDOM test environment (export helper functions if `typeof module !== "undefined"`):
+
 1. **React/Next.js Native Value Setter (`setNativeValue(element, value)`):**
-   * Find the native property descriptor (`Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")` or `HTMLTextAreaElement.prototype` / `HTMLSelectElement.prototype`).
+   * Unwrap target element if needed (`const rawEl = element.wrappedJSObject || element;`) and look up the native value setter on `HTMLInputElement.prototype` / `HTMLTextAreaElement.prototype` / `HTMLSelectElement.prototype` (checking both `window.wrappedJSObject` and `window`).
    * Call `setter.call(element, value)`.
    * Dispatch `new Event("input", { bubbles: true })`, `new Event("change", { bubbles: true })`, and `new Event("blur", { bubbles: true })`.
-2. **Image File Injector (`injectFilesIntoInput(fileInput, imagePayloads)`):**
-   * Convert each `{ filename, mimeType, dataUrl }` into a `Uint8Array` $\rightarrow$ `new File([bytes], filename, { type: mimeType })`.
-   * Create `const dt = new DataTransfer()`, call `dt.items.add(file)` for each image, set `fileInput.files = dt.files`, and dispatch `input` and `change` events.
+
+2. **Firefox Xray-Safe Image File Injector (`injectFilesIntoInput(fileInput, imagePayloads)`):**
+   * **Technical Safeguard (Firefox Xray Vision):** In Firefox Content Scripts, creating `new DataTransfer()` or `new File()` in the isolated extension compartment and assigning `fileInput.files = dt.files` can fail across compartment boundaries or be ignored by `react-dropzone`.
+   * Construct `DataTransfer` and `File` using the page compartment (`const pageWin = (typeof window !== "undefined" && window.wrappedJSObject) ? window.wrappedJSObject : window;`) and use `cloneInto` when available in Firefox:
+     ```javascript
+     const pageWin = (typeof window !== "undefined" && window.wrappedJSObject) ? window.wrappedJSObject : window;
+     const DataTransferCtor = pageWin.DataTransfer || DataTransfer;
+     const FileCtor = pageWin.File || File;
+     const dt = new DataTransferCtor();
+     for (const img of imagePayloads) {
+       const bytes = dataUrlToUint8Array(img.dataUrl);
+       const pageBytes = typeof cloneInto === "function" ? cloneInto(bytes, window) : bytes;
+       const opts = typeof cloneInto === "function" ? cloneInto({ type: img.mimeType }, window) : { type: img.mimeType };
+       const file = new FileCtor([pageBytes], img.filename, opts);
+       dt.items.add(file);
+     }
+     const targetInput = fileInput.wrappedJSObject || fileInput;
+     targetInput.files = dt.files;
+     fileInput.dispatchEvent(new Event("input", { bubbles: true }));
+     fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+     ```
+   * Also dispatch a synthetic `drop` event (`new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt })`) on the closest dropzone container if present, ensuring compatibility with `react-dropzone` on both Tutti.ch and Ricardo.ch.
+
 3. **Smart-Panel UI:**
    * Inject a floating widget (`#ai-listing-smart-panel`) at bottom-right of `ricardo.ch` and `tutti.ch` (collapsible into a small pill button).
    * Contains:
      * **Draft Selector Dropdown** (`#ai-ext-draft-select`) + Refresh button.
      * **Wizard Step 1 Button (`#ai-ext-step1-btn`):** *"Schritt 1: Bilder & Titel einfügen"* — injects all active images into `<input type="file">` and fills the Title field (Ricardo 60-char title on `ricardo.ch`, Tutti 80-char title on `tutti.ch`).
-     * **Wizard Step 2 Button (`#ai-ext-step2-btn`):** *"Schritt 2: Beschreibung & Preis einfügen"* — fills the Description textarea/editor, Condition dropdown/radio (if matching selector is visible), and Price inputs (Start price / Buy-Now price on Ricardo; VHB price on Tutti).
-     * **1-Click Copy Fallback Section:** Displays the selected draft's Title, Description, Start Price, and Buy-Now/VHB Price with a `"Kopieren"` button (`navigator.clipboard.writeText(...)`) next to each item so the user is never blocked even if Ricardo/Tutti changes its DOM structure.
+     * **Wizard Step 2 Button (`#ai-ext-step2-btn`):** *"Schritt 2: Beschreibung & Preis einfügen"* — fills the Description `<textarea>`, Condition dropdown/radio (if matching selector is visible), and Price inputs (Start price / Buy-Now price on Ricardo; VHB price on Tutti).
+     * **1-Click Copy Fallback Section:** Displays the selected draft's Title, Description, Start Price, and Buy-Now/VHB Price with a `"Kopieren"` button (`navigator.clipboard.writeText(...)`) next to each item.
 
 #### 4.4.4 Phase 4 Automated Acceptance Criteria (`tests/test_phase4_extension.py`)
 Write automated `pytest` tests verifying:
 1. **`test_manifest_v3_validity`**: Parse `extension/manifest.json`, assert `manifest_version == 3`, verify `background.scripts` contains `background.js`, verify `host_permissions` includes `127.0.0.1:8000`, `ricardo.ch`, and `tutti.ch`, and verify all referenced files (`background.js`, `content.js`, `panel.css`) exist.
-2. **`test_extension_js_syntax_and_no_direct_localhost_fetch_in_content_script`**:
+2. **`test_extension_js_syntax_and_xray_and_cors_safeguards`**:
+   * Run `node --check extension/background.js` and `node --check extension/content.js` (if `node` is installed) to assert zero JS syntax errors.
    * Assert `content.js` does NOT contain `fetch("http://127.0.0.1` or `fetch("http://localhost` (enforcing that all backend communication uses `runtime.sendMessage` to `background.js`).
    * Assert `background.js` handles `LIST_DRAFTS`, `GET_DRAFT`, and `FETCH_DRAFT_IMAGES`.
-   * Assert `content.js` implements `setNativeValue`, `DataTransfer` file injection, `#ai-ext-step1-btn`, `#ai-ext-step2-btn`, and clipboard copy fallbacks.
+   * Assert `content.js` implements `wrappedJSObject` Xray unwrap support, `setNativeValue`, `DataTransfer` file injection, `#ai-ext-step1-btn`, `#ai-ext-step2-btn`, and clipboard copy fallbacks.
 
 ---
 
@@ -465,11 +539,11 @@ Write automated `pytest` tests verifying:
 After completing all 4 phases, the implementing LLM must run:
 
 ```bash
-pytest -v
+.venv/bin/pytest -v
 ```
 
 ### Definition of Done (All checks must pass):
-- [ ] `pytest -v` passes 100% of tests across all 4 test files (`test_phase1_image_and_storage.py`, `test_phase2_pricing_and_ai.py`, `test_phase3_api_and_ui.py`, `test_phase4_extension.py`) with 0 failures and 0 errors.
-- [ ] Starting the server via `uvicorn backend.main:app --host 127.0.0.1 --port 8000` serves the dashboard at `http://127.0.0.1:8000/` and OpenAPI docs at `http://127.0.0.1:8000/docs`.
+- [ ] `.venv/bin/pytest -v` passes 100% of tests across all 4 test files (`test_phase1_image_and_storage.py`, `test_phase2_pricing_and_ai.py`, `test_phase3_api_and_ui.py`, `test_phase4_extension.py`) with 0 failures and 0 errors.
+- [ ] Starting the server via `.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000` serves the dashboard at `http://127.0.0.1:8000/` and OpenAPI docs at `http://127.0.0.1:8000/docs`.
 - [ ] All EXIF/GPS metadata is stripped from uploaded images and AI-bound images are capped at `1024x1024` pixels.
 - [ ] Ricardo titles never exceed 60 characters and both platforms include the Swiss private sale warranty disclaimer.
