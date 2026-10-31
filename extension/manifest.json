@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Tutti & Ricardo AI Listing Assistant",
+  "version": "1.0.0",
+  "description": "Smart-Panel und Schritt-für-Schritt Auto-Fill für Tutti.ch und Ricardo.ch",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "*://*.ricardo.ch/*",
+    "*://*.tutti.ch/*"
+  ],
+  "action": {
+    "default_title": "Tutti & Ricardo AI Assistant (Berechtigungen prüfen)"
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.ricardo.ch/*", "*://*.tutti.ch/*"],
+      "js": ["content.js"],
+      "css": ["panel.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "listing-assistant@local.dev",
+      "strict_min_version": "109.0"
+    }
+  }
+}
