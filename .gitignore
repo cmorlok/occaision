@@ -16,6 +16,7 @@ ENV/
 
 # Local data & uploads
 data/
+dist/
 uploads/
 processed/
 temp/
@@ -24,5 +25,7 @@ temp/
 # OS & Editor
 .DS_Store
 Thumbs.db
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .idea/

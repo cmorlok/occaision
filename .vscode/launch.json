@@ -1,0 +1,40 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "FastAPI: Backend Server starten",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "backend.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--reload"
+      ],
+      "jinja": true,
+      "justMyCode": true,
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "Extension bauen & Server starten",
+      "type": "debugpy",
+      "request": "launch",
+      "preLaunchTask": "Build Firefox Extension",
+      "module": "uvicorn",
+      "args": [
+        "backend.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--reload"
+      ],
+      "jinja": true,
+      "justMyCode": true,
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ]
+}

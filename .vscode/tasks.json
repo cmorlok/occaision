@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Firefox Extension",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/build_extension.sh",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared",
+        "showReuseMessage": false,
+        "clear": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Start Server (FastAPI / Uvicorn)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload",
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^.*$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^INFO:.*Started server process.*",
+          "endsPattern": "^INFO:.*Application startup complete.*"
+        }
+      }
+    },
+    {
+      "label": "Run All Tests (pytest)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/pytest -v",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": true,
+        "panel": "shared"
+      },
+      "problemMatcher": []
+    }
+  ]
+}

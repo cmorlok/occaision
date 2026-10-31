@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -e
+
+WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIST_DIR="${WORKSPACE_DIR}/dist"
+EXTENSION_DIR="${WORKSPACE_DIR}/extension"
+ZIP_FILE="${DIST_DIR}/tutti-ricardo-assistant.zip"
+
+mkdir -p "${DIST_DIR}"
+rm -f "${ZIP_FILE}"
+
+echo "🔨 Baue Firefox WebExtension..."
+cd "${EXTENSION_DIR}"
+zip -q -r "${ZIP_FILE}" manifest.json background.js content.js panel.css
+
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+echo -e "\n${GREEN}================================================================================${NC}"
+echo -e "${GREEN}🎉 Firefox Extension erfolgreich gebaut: ${BOLD}dist/tutti-ricardo-assistant.zip${NC}"
+echo -e "${GREEN}================================================================================${NC}\n"
+
+echo -e "${BOLD}📦 INSTALLATION & AKTUALISIERUNG IN FIREFOX:${NC}"
+echo -e "--------------------------------------------------------------------------------"
+echo -e "1. Öffne Firefox und gib folgende Adresse in die Adressleiste ein:"
+echo -e "   ${BLUE}about:debugging#/runtime/this-firefox${NC}\n"
+
+echo -e "2. Klicke auf den Button:"
+echo -e "   ${BOLD}\"Temporäres Add-on laden...\"${NC} (engl. \"Load Temporary Add-on...\")\n"
+
+echo -e "3. Datei auswählen:"
+echo -e "   ${YELLOW}• Empfohlen für Entwicklung:${NC} Wähle direkt:"
+echo -e "     ${BOLD}${EXTENSION_DIR}/manifest.json${NC}"
+echo -e "   ${YELLOW}• Als ZIP-Paket:${NC} Wähle:"
+echo -e "     ${BOLD}${ZIP_FILE}${NC}\n"
+
+echo -e "4. ${BOLD}Aktualisieren nach Änderungen:${NC}"
+echo -e "   Auf ${BLUE}about:debugging#/runtime/this-firefox${NC} einfach neben der Extension"
+echo -e "   auf ${BOLD}\"Neu laden\"${NC} (Reload) klicken – Änderungen sind sofort aktiv!\n"
+
+echo -e "5. ${BOLD}Berechtigungen bestätigen (falls erforderlich):${NC}"
+echo -e "   Klicke nach der Installation einmal auf das Puzzle-/Extension-Icon"
+echo -e "   in der Firefox-Toolbar, um den Zugriff auf das lokale Backend (127.0.0.1:8000)"
+echo -e "   und die Verkaufsplattformen (ricardo.ch / tutti.ch) zu bestätigen."
+echo -e "--------------------------------------------------------------------------------\n"
