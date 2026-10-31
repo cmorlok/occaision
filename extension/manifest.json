@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Tutti & Ricardo AI Listing Assistant",
+  "name": "Seller Assistant",
   "version": "1.0.0",
-  "description": "Smart-Panel und Schritt-für-Schritt Auto-Fill für Tutti.ch und Ricardo.ch",
+  "description": "Smart-Panel und Auto-Fill Assistent für Verkaufsplattformen",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "http://127.0.0.1:8000/*",
@@ -11,7 +11,7 @@
     "*://*.tutti.ch/*"
   ],
   "action": {
-    "default_title": "Tutti & Ricardo AI Assistant (Berechtigungen prüfen)"
+    "default_title": "Seller Assistant (Berechtigungen prüfen)"
   },
   "background": {
     "scripts": ["background.js"]

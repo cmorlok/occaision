@@ -1,4 +1,4 @@
-// Background Service Worker for Tutti & Ricardo AI Listing Assistant
+// Background Service Worker for Seller Assistant
 // Bypasses CORS and CSP by executing HTTP calls inside the WebExtension privileged context.
 
 const browserApi = typeof browser !== "undefined" ? browser : chrome;

@@ -4,7 +4,7 @@ set -e
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${WORKSPACE_DIR}/dist"
 EXTENSION_DIR="${WORKSPACE_DIR}/extension"
-ZIP_FILE="${DIST_DIR}/tutti-ricardo-assistant.zip"
+ZIP_FILE="${DIST_DIR}/seller-assistant.zip"
 
 mkdir -p "${DIST_DIR}"
 rm -f "${ZIP_FILE}"
@@ -20,7 +20,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 echo -e "\n${GREEN}================================================================================${NC}"
-echo -e "${GREEN}🎉 Firefox Extension erfolgreich gebaut: ${BOLD}dist/tutti-ricardo-assistant.zip${NC}"
+echo -e "${GREEN}🎉 Firefox Extension erfolgreich gebaut: ${BOLD}dist/seller-assistant.zip${NC}"
 echo -e "${GREEN}================================================================================${NC}\n"
 
 echo -e "${BOLD}📦 INSTALLATION & AKTUALISIERUNG IN FIREFOX:${NC}"
@@ -44,5 +44,5 @@ echo -e "   auf ${BOLD}\"Neu laden\"${NC} (Reload) klicken – Änderungen sind 
 echo -e "5. ${BOLD}Berechtigungen bestätigen (falls erforderlich):${NC}"
 echo -e "   Klicke nach der Installation einmal auf das Puzzle-/Extension-Icon"
 echo -e "   in der Firefox-Toolbar, um den Zugriff auf das lokale Backend (127.0.0.1:8000)"
-echo -e "   und die Verkaufsplattformen (ricardo.ch / tutti.ch) zu bestätigen."
+echo -e "   und die Zielseiten zu bestätigen."
 echo -e "--------------------------------------------------------------------------------\n"

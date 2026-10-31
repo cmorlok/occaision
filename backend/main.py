@@ -50,7 +50,7 @@ def create_app(
     )
 
     app = FastAPI(
-        title="Tutti & Ricardo AI Listing Assistant",
+        title="Seller Assistant",
         version="1.0.0",
     )
 

@@ -1,4 +1,4 @@
-// Content Script for Tutti.ch & Ricardo.ch Smart-Panel
+// Content Script for Seller Assistant Smart-Panel
 // Injected into ricardo.ch and tutti.ch listing creation wizards.
 
 const browserApi = typeof browser !== "undefined" ? browser : chrome;
@@ -109,7 +109,7 @@ function createSmartPanel() {
 
   panelElement.innerHTML = `
     <div class="ai-panel-header">
-      <span class="ai-panel-title">🤖 Tutti & Ricardo AI</span>
+      <span class="ai-panel-title">🤖 Seller Assistant</span>
       <div class="ai-panel-header-buttons">
         <button id="ai-ext-collapse-btn" class="ai-btn-icon" title="Minimieren">_</button>
       </div>
