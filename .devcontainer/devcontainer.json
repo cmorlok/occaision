@@ -11,7 +11,7 @@
   "mounts": [
     {
       "source": "seller-devcontainer-home",
-      "target": "/home/vscode",
+      "target": "/home/developer",
       "type": "volume"
     }
   ],
@@ -29,5 +29,6 @@
       ]
     }
   },
-  "remoteUser": "vscode"
+  "remoteUser": "developer",
+  "containerUser": "developer"
 }

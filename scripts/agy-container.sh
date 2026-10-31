@@ -46,8 +46,8 @@ fi
 
 # 2. If running, execute agy inside it
 if [ -n "$TARGET_CONTAINER" ]; then
-    exec docker exec $DOCKER_FLAGS -u vscode -w /workspaces/$(basename "$WORKSPACE_DIR") "$TARGET_CONTAINER" agy "$@" 2>/dev/null \
-      || exec docker exec $DOCKER_FLAGS -u vscode -w /app "$TARGET_CONTAINER" agy "$@"
+    exec docker exec $DOCKER_FLAGS -u developer -w /workspaces/$(basename "$WORKSPACE_DIR") "$TARGET_CONTAINER" agy "$@" 2>/dev/null \
+      || exec docker exec $DOCKER_FLAGS -u developer -w /app "$TARGET_CONTAINER" agy "$@"
 fi
 
 # 3. If container exists but is stopped, start it
@@ -55,7 +55,7 @@ STOPPED_CONTAINER="$(docker ps -a --filter "name=^/${CONTAINER_NAME}$" --format 
 if [ -n "$STOPPED_CONTAINER" ]; then
     echo "Container '${CONTAINER_NAME}' is stopped. Starting container..."
     docker start "$STOPPED_CONTAINER" >/dev/null
-    exec docker exec $DOCKER_FLAGS -u vscode "$STOPPED_CONTAINER" agy "$@"
+    exec docker exec $DOCKER_FLAGS -u developer "$STOPPED_CONTAINER" agy "$@"
 fi
 
 # 4. If no container was found
@@ -64,5 +64,5 @@ echo "Please start the Dev Container in VS Code ('Dev Containers: Reopen in Cont
 echo ""
 echo "Alternatively, you can build and run a one-off instance with:"
 echo "  docker build -f \"$WORKSPACE_DIR/.devcontainer/Dockerfile\" -t seller-devcontainer \"$WORKSPACE_DIR\""
-echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":/app -v seller-devcontainer-home:/home/vscode -w /app -u vscode seller-devcontainer agy \"$@\""
+echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":/app -v seller-devcontainer-home:/home/developer -w /app -u developer seller-devcontainer agy \"$@\""
 exit 1

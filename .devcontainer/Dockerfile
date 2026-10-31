@@ -25,5 +25,12 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
     && pip install --no-cache-dir -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
 
+# 4. Rename default 'vscode' user and group to 'developer'
+RUN if id -u vscode >/dev/null 2>&1; then \
+        usermod -l developer -d /home/developer -m vscode && \
+        groupmod -n developer vscode && \
+        if [ -f /etc/sudoers.d/vscode ]; then mv /etc/sudoers.d/vscode /etc/sudoers.d/developer && sed -i 's/vscode/developer/g' /etc/sudoers.d/developer; fi; \
+    fi
+
 # Switch back to dialog for any interactive usage
 ENV DEBIAN_FRONTEND=dialog
