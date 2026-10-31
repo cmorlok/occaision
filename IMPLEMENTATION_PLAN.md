@@ -8,8 +8,18 @@
 
 ## 1. Instructions for the Implementing LLM
 
-1. **Follow Phases Strictly in Order:** Implement Phase 1 $\rightarrow$ run Phase 1 tests $\rightarrow$ Phase 2 $\rightarrow$ run Phase 2 tests $\rightarrow$ Phase 3 $\rightarrow$ run Phase 3 tests $\rightarrow$ Phase 4 $\rightarrow$ run Phase 4 tests.
-2. **Do Not Guess Contracts:** Use the exact file paths, Pydantic schemas, REST endpoint routes, and extension message payloads specified in this document.
+> **MANDATORY:** Read and follow all engineering rules in `AGENTS.md` before writing a single line of code.
+
+1. **Strict Incremental TDD Loop (Test First $\rightarrow$ Implement $\rightarrow$ Test $\rightarrow$ Fix $\rightarrow$ Commit):**
+   * **Never** implement multiple phases or the whole codebase before running tests.
+   * For each phase, follow this exact loop:
+     1. **Write Tests First (RED):** Implement `tests/test_phaseX_*.py` based on the phase's Acceptance Criteria.
+     2. **Run `pytest`:** Verify the new tests fail for the expected reason.
+     3. **Implement Production Code:** Write the phase's modules cleanly and modularly.
+     4. **Test & Fix Loop (GREEN):** Run `pytest -v` (running the **entire** test suite to catch regressions). Fix any errors one by one until 100% of tests pass.
+     5. **No Test Cheating:** Never delete, skip, or weaken assertions in a test to make it pass.
+     6. **Git Commit:** Once `pytest -v` is 100% green for the phase, check `git status` and create a clean Conventional Commit (`feat(phaseX): ...`) before starting the next phase.
+2. **Do Not Guess Contracts:** Use the exact file paths, Pydantic schemas, REST endpoint routes, DOM IDs, and extension message payloads specified in this document.
 3. **Offline/Deterministic Testability:** Every external dependency (Google Gemini API, eBay.de HTTP requests, `rembg` neural network inference if slow in unit tests) MUST be injectable or mockable so the entire `pytest` suite runs deterministically in < 10 seconds without requiring live internet or a live API key.
 4. **Hard Constraints to Enforce in Code:**
    - **Privacy:** Never send original full-resolution or EXIF-containing images to the Gemini API. Always strip EXIF/GPS metadata first and downscale to max `1024x1024` px before calling Gemini.
