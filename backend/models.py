@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class DraftStatus(str, Enum):
@@ -83,7 +83,7 @@ class PriceAnalysis(BaseModel):
 
 
 class RicardoListing(BaseModel):
-    title: str = Field(default="", max_length=60)
+    title: str = Field(default="")
     description: str = ""
     condition: ConditionType = ConditionType.GEBRAUCHT
     offer_type: OfferType = OfferType.AUCTION
@@ -91,13 +91,27 @@ class RicardoListing(BaseModel):
     buynow_price_chf: float = 10.0
     shipping_preset_id: str = "b_post_2kg"
 
+    @field_validator("title", mode="before")
+    @classmethod
+    def truncate_title(cls, v: str) -> str:
+        if isinstance(v, str) and len(v) > 60:
+            return v[:60]
+        return v
+
 
 class TuttiListing(BaseModel):
-    title: str = Field(default="", max_length=80)
+    title: str = Field(default="")
     category_suggestion: str = ""
     description: str = ""
     condition: ConditionType = ConditionType.GEBRAUCHT
     price_vhb_chf: float = 10.0
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def truncate_title(cls, v: str) -> str:
+        if isinstance(v, str) and len(v) > 80:
+            return v[:80]
+        return v
 
 
 class Draft(BaseModel):

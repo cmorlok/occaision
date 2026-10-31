@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tutti & Ricardo AI Listing Assistant</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar: Multi-Draft List -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Inserate-Entwürfe</h2>
+        <button id="btn-new-draft" class="btn btn-primary">+ Neues Inserat</button>
+      </div>
+      <div id="draft-list" class="draft-list">
+        <!-- Draft items dynamically rendered here -->
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      <header class="main-header">
+        <h1 id="active-draft-title">Kein Entwurf ausgewählt</h1>
+        <div class="header-actions">
+          <label for="draft-status-select">Status:</label>
+          <select id="draft-status-select">
+            <option value="draft">Entwurf</option>
+            <option value="ready">Bereit</option>
+            <option value="published">Veröffentlicht</option>
+          </select>
+          <button id="btn-save-draft" class="btn btn-secondary">Änderungen speichern</button>
+        </div>
+      </header>
+
+      <!-- Section 1: Inputs & Images -->
+      <section class="card section-input">
+        <h2>1. Fotos & Artikel-Notizen</h2>
+        
+        <div id="dropzone" class="dropzone">
+          <p>📷 Fotos hier ablegen (Drag & Drop) oder klicken zum Auswählen</p>
+          <span class="dropzone-hint">Unterstützt JPG, PNG, WebP und iPhone HEIC-Fotos</span>
+          <input type="file" id="file-input" multiple accept=".jpg,.jpeg,.png,.webp,.heic">
+        </div>
+
+        <div id="image-gallery" class="image-gallery">
+          <!-- Uploaded images dynamically rendered here -->
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-2">
+            <label for="user-notes">Kurzbeschreibung / Stichworte des Artikels:</label>
+            <textarea id="user-notes" rows="3" placeholder="z.B. Sony WH-1000XM4 Kopfhörer, ca. 2 Jahre alt, wenig gebraucht, OVP & Ladekabel dabei, Polster intakt..."></textarea>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="shipping-preset">Versand-Preset (Schweiz):</label>
+            <select id="shipping-preset"></select>
+          </div>
+          <div class="form-group flex-1">
+            <label for="offer-type">Verkaufsart (Ricardo):</label>
+            <select id="offer-type">
+              <option value="auction">Auktion (mit Startpreis & Sofortkauf)</option>
+              <option value="fixed_price">Nur Sofortkauf (Fixpreis)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <button id="btn-analyze" class="btn btn-accent btn-large">⚡ KI-Analyse & Preisrecherche starten</button>
+          <span id="analyze-spinner" class="spinner hidden">Analysiere Bilder & eBay/Marktdaten...</span>
+        </div>
+      </section>
+
+      <!-- Section 2: Quality Check & Hybrid Price Analysis -->
+      <section class="card section-analysis">
+        <h2>2. Marktrecherche & Preisfindung</h2>
+
+        <!-- Missing Photo Hints -->
+        <div id="missing-hints-box" class="alert alert-warning hidden">
+          <strong>⚠️ Hinweis zur Bild-Vollständigkeit:</strong>
+          <ul id="missing-hints-list"></ul>
+          <small>Du kannst oben weitere Fotos ergänzen und die KI-Analyse erneut starten.</small>
+        </div>
+
+        <!-- Price Cards -->
+        <div id="price-summary" class="price-grid">
+          <div class="price-box">
+            <span class="price-label">eBay DE Sold Median</span>
+            <span id="price-ebay-median" class="price-value">-</span>
+            <small id="price-ebay-count">0 Verkäufe</small>
+          </div>
+          <div class="price-box">
+            <span class="price-label">CH Neupreis (Digitec/Toppreise)</span>
+            <span id="price-ch-new" class="price-value">-</span>
+          </div>
+          <div class="price-box highlight">
+            <span class="price-label">Ricardo Startpreis</span>
+            <span id="price-rec-start" class="price-value">-</span>
+          </div>
+          <div class="price-box highlight">
+            <span class="price-label">Ricardo Sofortkauf</span>
+            <span id="price-rec-buynow" class="price-value">-</span>
+          </div>
+          <div class="price-box highlight">
+            <span class="price-label">Tutti Verhandlungsbasis</span>
+            <span id="price-rec-tutti" class="price-value">-</span>
+          </div>
+        </div>
+
+        <div class="price-reasoning">
+          <strong>Begründung der Preis-Strategie:</strong>
+          <p id="price-reasoning-text">Noch keine Analyse durchgeführt.</p>
+        </div>
+
+        <!-- 1-Click Verification Links -->
+        <div class="verification-links-container">
+          <strong>🔍 Marktdaten visuell prüfen:</strong>
+          <div id="verification-links" class="link-buttons">
+            <a id="link-ebay" href="#" target="_blank" class="badge-link">eBay DE (Beendet)</a>
+            <a id="link-ricardo" href="#" target="_blank" class="badge-link">Ricardo.ch Suche</a>
+            <a id="link-toppreise" href="#" target="_blank" class="badge-link">Toppreise.ch Neupreis</a>
+            <a id="link-digitec" href="#" target="_blank" class="badge-link">Digitec/Galaxus Suche</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: Editable Platform Previews (Ricardo & Tutti) -->
+      <section class="card section-platforms">
+        <h2>3. Plattform-Vorschau & Feinschliff</h2>
+        
+        <div class="platform-grid">
+          <!-- Ricardo Column -->
+          <div class="platform-card ricardo-card">
+            <div class="platform-header">
+              <h3>Ricardo.ch</h3>
+              <span class="platform-tag">60-Zeichen Titel</span>
+            </div>
+
+            <div class="form-group">
+              <div class="label-with-counter">
+                <label for="ricardo-title">Titel (max. 60 Zeichen):</label>
+                <span id="ricardo-title-count" class="counter">0/60</span>
+              </div>
+              <input type="text" id="ricardo-title" maxlength="60" placeholder="z.B. Sony WH-1000XM4 ANC Kopfhörer OVP Top">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="ricardo-condition">Zustand:</label>
+                <select id="ricardo-condition">
+                  <option value="neu">Neu</option>
+                  <option value="wie_neu">Wie neu</option>
+                  <option value="gebraucht" selected>Gebraucht</option>
+                  <option value="defekt">Defekt</option>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label for="ricardo-start-price">Startpreis (CHF):</label>
+                <input type="number" id="ricardo-start-price" step="0.5" min="1.0">
+              </div>
+              <div class="form-group flex-1">
+                <label for="ricardo-buynow-price">Sofortkauf (CHF):</label>
+                <input type="number" id="ricardo-buynow-price" step="0.5" min="1.0">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="ricardo-description">Beschreibung:</label>
+              <textarea id="ricardo-description" rows="12"></textarea>
+            </div>
+          </div>
+
+          <!-- Tutti Column -->
+          <div class="platform-card tutti-card">
+            <div class="platform-header">
+              <h3>Tutti.ch</h3>
+              <span class="platform-tag">80-Zeichen Titel</span>
+            </div>
+
+            <div class="form-group">
+              <div class="label-with-counter">
+                <label for="tutti-title">Titel (max. 80 Zeichen):</label>
+                <span id="tutti-title-count" class="counter">0/80</span>
+              </div>
+              <input type="text" id="tutti-title" maxlength="80" placeholder="z.B. Sony WH-1000XM4 Bluetooth Over-Ear Kopfhörer schwarz">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="tutti-category">Kategorie-Vorschlag:</label>
+                <input type="text" id="tutti-category" placeholder="z.B. Audio & TV > Kopfhörer">
+              </div>
+              <div class="form-group flex-1">
+                <label for="tutti-condition">Zustand:</label>
+                <select id="tutti-condition">
+                  <option value="neu">Neu</option>
+                  <option value="wie_neu">Wie neu</option>
+                  <option value="gebraucht" selected>Gebraucht</option>
+                  <option value="defekt">Defekt</option>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label for="tutti-price">Preis VHB (CHF):</label>
+                <input type="number" id="tutti-price" step="1.0" min="1.0">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="tutti-description">Beschreibung:</label>
+              <textarea id="tutti-description" rows="12"></textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
