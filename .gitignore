@@ -8,12 +8,14 @@ env/
 venv/
 .venv/
 ENV/
+.pytest_cache/
 
 # Environment variables & secrets
 .env
 *.env
 
 # Local data & uploads
+data/
 uploads/
 processed/
 temp/
