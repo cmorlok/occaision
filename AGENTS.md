@@ -1,6 +1,6 @@
 # Agent Engineering Guidelines & Development Workflow (`AGENTS.md`)
 
-You are an autonomous software engineering agent implementing the **Tutti & Ricardo AI Listing Assistant**.  
+You are an autonomous software engineering agent implementing the **Seller Assistant**.  
 Before writing any code, read `REQUIREMENTS.md` and `IMPLEMENTATION_PLAN.md` completely.
 
 Follow these mandatory engineering rules at all times.
@@ -81,3 +81,16 @@ If a test fails more than twice in a row:
 2. Inspect the exact failure output with `pytest -vv -s -k <test_name>`.
 3. Check types, file paths, and mock signatures first.
 4. Change **one hypothesis at a time** and re-run the test immediately.
+
+---
+
+## 6. Mandatory Neutral Project & Extension Naming (STRICT RULE)
+
+* **NEVER** use third-party platform names (such as "Tutti", "Ricardo", or "eBay") in:
+  - Project names
+  - Extension titles or action names (e.g., in `manifest.json`)
+  - Web dashboard titles or UI headers
+  - ZIP archives or build artifacts (always use `dist/seller-assistant.zip`)
+  - Repository / package names
+* **The canonical, mandatory project and extension name is:** **`Seller Assistant`** (slug: `seller-assistant`).
+* Third-party platform names are strictly confined to internal integration code where platform-specific logic, selectors, or API URLs inherently require them (e.g. `isRicardo()`, domain host permissions, `ricardo_title`). All visible user-facing titles, build outputs, and extension metadata must remain strictly neutral.
