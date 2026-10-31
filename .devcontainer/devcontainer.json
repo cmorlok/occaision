@@ -10,10 +10,9 @@
   ],
   "mounts": [
     {
-      "source": "${localEnv:HOME}",
+      "source": "seller-devcontainer-home",
       "target": "/home/vscode",
-      "type": "bind",
-      "consistency": "cached"
+      "type": "volume"
     }
   ],
   "forwardPorts": [8000],

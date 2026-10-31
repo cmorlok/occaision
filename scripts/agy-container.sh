@@ -64,5 +64,5 @@ echo "Please start the Dev Container in VS Code ('Dev Containers: Reopen in Cont
 echo ""
 echo "Alternatively, you can build and run a one-off instance with:"
 echo "  docker build -f \"$WORKSPACE_DIR/.devcontainer/Dockerfile\" -t seller-devcontainer \"$WORKSPACE_DIR\""
-echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":/app -v \"${HOME:-$USERPROFILE}\":/home/vscode -w /app -u vscode seller-devcontainer agy \"$@\""
+echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":/app -v seller-devcontainer-home:/home/vscode -w /app -u vscode seller-devcontainer agy \"$@\""
 exit 1
