@@ -5,8 +5,8 @@
 
 set -e
 
-CONTAINER_NAME="tutti-ricardo-devcontainer"
-LABEL_FILTER="devcontainer.app=tutti-ricardo"
+CONTAINER_NAME="seller-devcontainer"
+LABEL_FILTER="devcontainer.app=seller"
 
 # Determine workspace directory (root of the repo)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -63,6 +63,6 @@ echo "Dev Container '${CONTAINER_NAME}' is not running."
 echo "Please start the Dev Container in VS Code ('Dev Containers: Reopen in Container')."
 echo ""
 echo "Alternatively, you can build and run a one-off instance with:"
-echo "  docker build -f \"$WORKSPACE_DIR/.devcontainer/Dockerfile\" -t tutti-ricardo-devcontainer \"$WORKSPACE_DIR\""
-echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":/app -v \"${HOME:-$USERPROFILE}\":/home/vscode -w /app -u vscode tutti-ricardo-devcontainer agy \"$@\""
+echo "  docker build -f \"$WORKSPACE_DIR/.devcontainer/Dockerfile\" -t seller-devcontainer \"$WORKSPACE_DIR\""
+echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":/app -v \"${HOME:-$USERPROFILE}\":/home/vscode -w /app -u vscode seller-devcontainer agy \"$@\""
 exit 1

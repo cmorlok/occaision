@@ -1,12 +1,12 @@
 {
-  "name": "Tutti & Ricardo AI Listing Assistant",
+  "name": "Seller AI Listing Assistant",
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."
   },
   "runArgs": [
-    "--name", "tutti-ricardo-devcontainer",
-    "--label", "devcontainer.app=tutti-ricardo"
+    "--name", "seller-devcontainer",
+    "--label", "devcontainer.app=seller"
   ],
   "mounts": [
     {
