@@ -138,7 +138,9 @@ body {
 /* Main Content */
 .main-content {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 24px;
   display: flex;
   flex-direction: column;
@@ -174,6 +176,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .card h2 {
@@ -285,16 +289,25 @@ body {
 .form-row {
   display: flex;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
-.flex-1 { flex: 1; }
-.flex-2 { flex: 2; }
+.flex-1 {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.flex-2 {
+  flex: 2 1 240px;
+  min-width: 0;
+}
 
 label {
   font-size: 0.88rem;
@@ -317,12 +330,16 @@ input[type="text"],
 input[type="number"],
 select,
 textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font-size: 0.95rem;
   outline: none;
   transition: border-color 0.2s;
+  box-sizing: border-box;
 }
 
 input:focus,
@@ -442,8 +459,15 @@ textarea:focus {
 /* Platform previews */
 .platform-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
+  min-width: 0;
+}
+
+@media (max-width: 1100px) {
+  .platform-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .platform-card {
@@ -453,6 +477,9 @@ textarea:focus {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  min-width: 0;
+  background: #ffffff;
+  overflow: hidden;
 }
 
 .platform-header {
