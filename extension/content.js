@@ -87,12 +87,136 @@ function injectFilesIntoInput(fileInput, imagePayloads) {
 }
 
 // Platform detection
-function isRicardo() {
-  return typeof location !== "undefined" && location.hostname.includes("ricardo.ch");
+function isRicardo(hostname) {
+  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
+  return h.includes("ricardo.ch");
 }
 
-function isTutti() {
-  return typeof location !== "undefined" && location.hostname.includes("tutti.ch");
+function isTutti(hostname) {
+  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
+  return h.includes("tutti.ch");
+}
+
+function isEbayDE(hostname) {
+  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
+  return h.includes("ebay.de");
+}
+
+function isKleinanzeigen(hostname) {
+  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
+  return h.includes("kleinanzeigen.de");
+}
+
+function detectPlatform(hostname) {
+  if (isRicardo(hostname)) return "ricardo";
+  if (isTutti(hostname)) return "tutti";
+  if (isEbayDE(hostname)) return "ebay_de";
+  if (isKleinanzeigen(hostname)) return "kleinanzeigen";
+  return "unknown";
+}
+
+function getPlatformData(draft, platform) {
+  if (!draft) return {};
+  const p = platform || detectPlatform();
+  if (p === "ricardo") {
+    return {
+      title: draft.ricardo ? draft.ricardo.title : "",
+      description: draft.ricardo ? draft.ricardo.description : "",
+      condition: draft.ricardo ? draft.ricardo.condition : "",
+      startPrice: draft.ricardo ? draft.ricardo.start_price_chf : 1.0,
+      buyNowPrice: draft.ricardo ? draft.ricardo.buynow_price_chf : 10.0,
+      currency: "CHF",
+      priceType: "auction"
+    };
+  } else if (p === "tutti") {
+    return {
+      title: draft.tutti ? draft.tutti.title : "",
+      description: draft.tutti ? draft.tutti.description : "",
+      condition: draft.tutti ? draft.tutti.condition : "",
+      startPrice: null,
+      buyNowPrice: draft.tutti ? draft.tutti.price_vhb_chf : 10.0,
+      currency: "CHF",
+      priceType: "vb"
+    };
+  } else if (p === "ebay_de") {
+    return {
+      title: draft.ebay_de ? draft.ebay_de.title : "",
+      description: draft.ebay_de ? draft.ebay_de.description : "",
+      condition: draft.ebay_de ? draft.ebay_de.condition : "",
+      startPrice: draft.ebay_de ? draft.ebay_de.start_price_eur : 1.0,
+      buyNowPrice: draft.ebay_de ? draft.ebay_de.buynow_price_eur : 10.0,
+      currency: "EUR",
+      priceType: draft.ebay_de ? draft.ebay_de.offer_type : "auction"
+    };
+  } else if (p === "kleinanzeigen") {
+    return {
+      title: draft.kleinanzeigen ? draft.kleinanzeigen.title : "",
+      description: draft.kleinanzeigen ? draft.kleinanzeigen.description : "",
+      condition: draft.kleinanzeigen ? draft.kleinanzeigen.condition : "",
+      startPrice: null,
+      buyNowPrice: draft.kleinanzeigen ? draft.kleinanzeigen.price_eur : 10.0,
+      currency: "EUR",
+      priceType: draft.kleinanzeigen ? draft.kleinanzeigen.price_type : "vb"
+    };
+  }
+  return {
+    title: "",
+    description: "",
+    condition: "",
+    startPrice: 1.0,
+    buyNowPrice: 10.0,
+    currency: "CHF",
+    priceType: "auction"
+  };
+}
+
+function setDescriptionValue(value, rootDoc) {
+  if (typeof value !== "string") value = value || "";
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return false;
+
+  // 1. Textarea search
+  const textarea = doc.querySelector(
+    '#pstad-descrptn, #pstad-descr, textarea[name*="description" i], textarea[name="body"], textarea[id*="description" i], textarea[placeholder*="beschreibung" i], textarea[data-testid*="description" i]'
+  );
+  if (textarea) {
+    setNativeValue(textarea, value);
+    return true;
+  }
+
+  // 2. Same-origin iframe search (e.g. eBay.de)
+  const iframes = doc.querySelectorAll(
+    'iframe.ux-action-menu__iframe, iframe[id*="desc" i], iframe[title*="Beschreibung" i], iframe[title*="description" i]'
+  );
+  for (const iframe of iframes) {
+    try {
+      const iframeDoc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
+      if (iframeDoc) {
+        const editable = iframeDoc.querySelector('.editable-text-area, [contenteditable="true"], body');
+        if (editable) {
+          const htmlVal = value.replace(/\n/g, "<br>");
+          editable.innerHTML = htmlVal;
+          editable.dispatchEvent(new Event("input", { bubbles: true }));
+          editable.dispatchEvent(new Event("change", { bubbles: true }));
+          editable.dispatchEvent(new Event("blur", { bubbles: true }));
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not access description iframe", e);
+    }
+  }
+
+  // 3. Direct contenteditable editor in document
+  const contentEditable = doc.querySelector('[contenteditable="true"]');
+  if (contentEditable) {
+    contentEditable.textContent = value;
+    contentEditable.dispatchEvent(new Event("input", { bubbles: true }));
+    contentEditable.dispatchEvent(new Event("blur", { bubbles: true }));
+    return true;
+  }
+
+  return false;
 }
 
 // Smart-Panel UI Creation & State
@@ -206,26 +330,26 @@ function bindPanelEvents() {
   // 1-Click Copy fallbacks (navigator.clipboard)
   document.getElementById("ai-copy-title-btn").onclick = () => {
     if (!activeDraft) return;
-    const title = isRicardo() ? activeDraft.ricardo.title : activeDraft.tutti.title;
-    navigator.clipboard.writeText(title || "");
+    const data = getPlatformData(activeDraft);
+    navigator.clipboard.writeText(data.title || "");
   };
 
   document.getElementById("ai-copy-desc-btn").onclick = () => {
     if (!activeDraft) return;
-    const desc = isRicardo() ? activeDraft.ricardo.description : activeDraft.tutti.description;
-    navigator.clipboard.writeText(desc || "");
+    const data = getPlatformData(activeDraft);
+    navigator.clipboard.writeText(data.description || "");
   };
 
   document.getElementById("ai-copy-start-btn").onclick = () => {
     if (!activeDraft) return;
-    const price = isRicardo() ? activeDraft.ricardo.start_price_chf : activeDraft.tutti.price_vhb_chf;
-    navigator.clipboard.writeText(String(price || 1));
+    const data = getPlatformData(activeDraft);
+    navigator.clipboard.writeText(String(data.startPrice || 1));
   };
 
   document.getElementById("ai-copy-buynow-btn").onclick = () => {
     if (!activeDraft) return;
-    const price = isRicardo() ? activeDraft.ricardo.buynow_price_chf : activeDraft.tutti.price_vhb_chf;
-    navigator.clipboard.writeText(String(price || 10));
+    const data = getPlatformData(activeDraft);
+    navigator.clipboard.writeText(String(data.buyNowPrice || 10));
   };
 }
 
@@ -269,47 +393,59 @@ async function executeStep1(draft) {
   }
 
   // 2. Inject Title
-  const titleVal = isRicardo() ? draft.ricardo.title : draft.tutti.title;
+  const data = getPlatformData(draft);
   const titleInput = document.querySelector(
-    'input[name*="title" i], input[id*="title" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
+    '#postad-title, #pstad-title, input[name="title"], input[name="pstad-title"], input[name="subject"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
   );
-  if (titleInput) {
-    setNativeValue(titleInput, titleVal);
+  if (titleInput && data.title) {
+    setNativeValue(titleInput, data.title);
   }
 }
 
 function executeStep2(draft) {
-  const descVal = isRicardo() ? draft.ricardo.description : draft.tutti.description;
-  const descEl = document.querySelector(
-    'textarea[name*="description" i], textarea[id*="description" i], textarea[placeholder*="beschreibung" i], textarea[data-testid*="description" i]'
-  );
-  if (descEl) {
-    setNativeValue(descEl, descVal);
+  const data = getPlatformData(draft);
+  const platform = detectPlatform();
+
+  // Description
+  if (data.description) {
+    setDescriptionValue(data.description);
   }
 
-  // Set condition if visible
-  const condVal = isRicardo() ? draft.ricardo.condition : draft.tutti.condition;
+  // Condition
   const condEl = document.querySelector(
     'select[name*="condition" i], select[id*="condition" i], select[data-testid*="condition" i], input[name*="condition" i]'
   );
-  if (condEl && condVal) {
-    setNativeValue(condEl, condVal);
+  if (condEl && data.condition) {
+    setNativeValue(condEl, data.condition);
   }
 
-  // Set prices
-  if (isRicardo()) {
-    const startPriceInput = document.querySelector('input[name*="startPrice" i], input[id*="start-price" i], input[data-testid*="start-price" i]');
-    if (startPriceInput) {
-      setNativeValue(startPriceInput, draft.ricardo.start_price_chf);
+  // Prices
+  if (platform === "ricardo" || platform === "ebay_de") {
+    const startPriceInput = document.querySelector(
+      'input[name*="startPrice" i], input[id*="start-price" i], input[aria-label*="Startpreis" i], input[data-testid*="start-price" i]'
+    );
+    if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined) {
+      setNativeValue(startPriceInput, data.startPrice);
     }
-    const buynowPriceInput = document.querySelector('input[name*="buyNowPrice" i], input[id*="buy-now-price" i], input[data-testid*="buy-now-price" i]');
-    if (buynowPriceInput) {
-      setNativeValue(buynowPriceInput, draft.ricardo.buynow_price_chf);
+    const buynowPriceInput = document.querySelector(
+      'input[name*="buyNowPrice" i], input[name*="buyItNowPrice" i], input[id*="buy-now-price" i], input[aria-label*="Sofort-Kaufen" i], input[data-testid*="buy-now-price" i], input[name="price"]'
+    );
+    if (buynowPriceInput && data.buyNowPrice !== null && data.buyNowPrice !== undefined) {
+      setNativeValue(buynowPriceInput, data.buyNowPrice);
     }
   } else {
-    const priceInput = document.querySelector('input[name*="price" i], input[id*="price" i], input[data-testid*="price" i]');
-    if (priceInput) {
-      setNativeValue(priceInput, draft.tutti.price_vhb_chf);
+    // tutti or kleinanzeigen
+    const priceInput = document.querySelector(
+      '#pstad-price, input[name="price"], input[name*="price" i], input[id*="price" i], input[data-testid*="price" i]'
+    );
+    if (priceInput && data.buyNowPrice !== null && data.buyNowPrice !== undefined) {
+      setNativeValue(priceInput, data.buyNowPrice);
+    }
+    if (platform === "kleinanzeigen") {
+      const priceTypeEl = document.querySelector('select[name="priceType"], input[name="priceType"], select[id*="price-type" i]');
+      if (priceTypeEl && data.priceType) {
+        setNativeValue(priceTypeEl, data.priceType);
+      }
     }
   }
 }
@@ -327,10 +463,15 @@ if (typeof document !== "undefined") {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     setNativeValue,
+    setDescriptionValue,
     injectFilesIntoInput,
     dataUrlToUint8Array,
     createSmartPanel,
     isRicardo,
     isTutti,
+    isEbayDE,
+    isKleinanzeigen,
+    detectPlatform,
+    getPlatformData,
   };
 }

@@ -12,6 +12,7 @@ def test_manifest_v3_validity():
         manifest = json.load(f)
         
     assert manifest.get("manifest_version") == 3
+    assert manifest.get("name") == "Seller Assistant"
     assert "background" in manifest
     assert "scripts" in manifest["background"]
     assert "background.js" in manifest["background"]["scripts"]
@@ -20,6 +21,14 @@ def test_manifest_v3_validity():
     assert any("127.0.0.1:8000" in p for p in host_perms)
     assert any("ricardo.ch" in p for p in host_perms)
     assert any("tutti.ch" in p for p in host_perms)
+    assert any("ebay.de" in p for p in host_perms)
+    assert any("kleinanzeigen.de" in p for p in host_perms)
+
+    matches = manifest["content_scripts"][0].get("matches", [])
+    assert any("ricardo.ch" in m for m in matches)
+    assert any("tutti.ch" in m for m in matches)
+    assert any("ebay.de" in m for m in matches)
+    assert any("kleinanzeigen.de" in m for m in matches)
     
     # Assert all referenced files exist
     assert (Path("extension") / "background.js").exists()
@@ -64,3 +73,9 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "ai-ext-draft-select" in content_js_code
     assert "clipboard" in content_js_code.lower()
     assert "condition" in content_js_code.lower()
+
+    # 5. DE marketplace functions & iframe description support
+    assert "detectPlatform" in content_js_code
+    assert "isEbayDE" in content_js_code
+    assert "isKleinanzeigen" in content_js_code
+    assert "setDescriptionValue" in content_js_code

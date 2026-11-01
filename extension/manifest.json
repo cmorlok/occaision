@@ -8,7 +8,9 @@
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*",
     "*://*.ricardo.ch/*",
-    "*://*.tutti.ch/*"
+    "*://*.tutti.ch/*",
+    "*://*.ebay.de/*",
+    "*://*.kleinanzeigen.de/*"
   ],
   "action": {
     "default_title": "Seller Assistant (Berechtigungen prüfen)"
@@ -18,7 +20,12 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.ricardo.ch/*", "*://*.tutti.ch/*"],
+      "matches": [
+        "*://*.ricardo.ch/*",
+        "*://*.tutti.ch/*",
+        "*://*.ebay.de/*",
+        "*://*.kleinanzeigen.de/*"
+      ],
       "js": ["content.js"],
       "css": ["panel.css"],
       "run_at": "document_idle"

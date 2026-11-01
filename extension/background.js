@@ -14,7 +14,9 @@ if (browserApi.action && browserApi.action.onClicked) {
             "http://127.0.0.1:8000/*",
             "http://localhost:8000/*",
             "*://*.ricardo.ch/*",
-            "*://*.tutti.ch/*"
+            "*://*.tutti.ch/*",
+            "*://*.ebay.de/*",
+            "*://*.kleinanzeigen.de/*"
           ]
         });
       }
