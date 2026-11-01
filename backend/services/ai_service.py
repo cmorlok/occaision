@@ -306,12 +306,21 @@ class AIService:
         ]
 
         if ebay_stats and ebay_stats.sample_count > 0:
+            logger.debug(
+                f"[AIService] Übernehme eBay-Statistik in den Prompt: "
+                f"{ebay_stats.sample_count} Treffer, Median {ebay_stats.median_eur} EUR ({ebay_stats.median_chf} CHF)"
+            )
             user_prompt_parts.append(
                 f"eBay DE verkaufte Artikel (Transaktionspreise): "
                 f"Stichprobe={ebay_stats.sample_count}, "
                 f"Median EUR={ebay_stats.median_eur} €, "
                 f"Median CHF={ebay_stats.median_chf} CHF (Wechselkurs {ebay_stats.exchange_rate}), "
                 f"Spanne EUR={ebay_stats.min_eur} € - {ebay_stats.max_eur} €.\n"
+            )
+        else:
+            logger.debug(
+                f"[AIService] Keine eBay-Statistik im Prompt enthalten "
+                f"(ebay_stats={ebay_stats.model_dump() if ebay_stats else None})."
             )
 
         user_prompt_parts.append(

@@ -51,7 +51,7 @@ def configure_logging(level_name: Optional[str] = None):
 
     level = getattr(logging, effective_name, logging.INFO)
 
-    for name in ["seller", "seller.api", "seller.image", "seller.ai"]:
+    for name in ["seller", "seller.api", "seller.image", "seller.ai", "seller.ebay"]:
         l = logging.getLogger(name)
         l.setLevel(level)
 
@@ -403,7 +403,17 @@ def create_app(
         search_query = (draft.user_notes or draft.identified_product or "").strip()
         ebay_stats = None
         if search_query:
+            logger.debug(f"[API] Starte Vorab-eBay-Abfrage mit Suchbegriff: '{search_query}'")
             ebay_stats = await ebay_svc.fetch_sold_stats(search_query)
+            logger.debug(
+                f"[API] Vorab-eBay-Abfrage Ergebnis: sample_count={ebay_stats.sample_count}, "
+                f"median_eur={ebay_stats.median_eur}, median_chf={ebay_stats.median_chf}"
+            )
+        else:
+            logger.debug(
+                "[API] Kein Suchbegriff vor KI-Analyse vorhanden (user_notes/identified_product leer). "
+                "eBay-Abfrage erfolgt nach der KI-Produktidentifikation."
+            )
 
         # 2. Gather AI input images
         img_dir = cfg.data_dir / "images" / draft_id
@@ -442,6 +452,9 @@ def create_app(
 
         # 4. If user provided no initial text notes, fetch eBay stats using AI-identified product
         if ebay_stats is None and analyzed_draft.identified_product:
+            logger.debug(
+                f"[API] Starte nachträgliche eBay-Abfrage mit KI-identifiziertem Produkt: '{analyzed_draft.identified_product}'"
+            )
             analyzed_draft.price_analysis.ebay_stats = await ebay_svc.fetch_sold_stats(
                 analyzed_draft.identified_product
             )

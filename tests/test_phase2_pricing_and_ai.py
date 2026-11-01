@@ -318,3 +318,29 @@ async def test_ai_prompt_debug_logging(temp_data_dir: Path, caplog):
     assert any("SYSTEM INSTRUCTION" in rec.message for rec in caplog.records)
     assert any("USER PROMPT" in rec.message for rec in caplog.records)
     assert any("GEMINI AI RAW RESPONSE DEBUG START" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_ebay_service_debug_logging(caplog):
+    from backend.main import configure_logging
+
+    configure_logging("DEBUG")
+    ebay_logger = logging.getLogger("seller.ebay")
+    assert ebay_logger.level == logging.DEBUG
+
+    ebay_service = EbayService()
+
+    with caplog.at_level(logging.DEBUG, logger="seller.ebay"):
+        stats = ebay_service.parse_sold_html(MOCK_EBAY_HTML, query="Sony WH-1000XM4", eur_to_chf=0.94)
+        assert stats.sample_count == 4
+
+        challenge_stats = ebay_service.parse_sold_html(
+            MOCK_EBAY_CHALLENGE_HTML, query="HP Color LaserJet Pro MFP 4302fdw"
+        )
+        assert challenge_stats.sample_count == 0
+
+    messages = [rec.message for rec in caplog.records]
+    assert any("EBAY SOLD PARSER DEBUG" in m for m in messages)
+    assert any("Sony WH-1000XM4" in m for m in messages)
+    assert any("Anti-Bot" in m or "challenge" in m.lower() for m in messages)
+
