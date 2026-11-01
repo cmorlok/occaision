@@ -1,22 +1,29 @@
 # Anforderungsdokument (Requirements Document)
 ## KI-gestützter Inserate-Generator (Seller Assistant)
 
-* **Projekt:** Seller Assistant
+* **Projekt:** Seller Assistant (`seller-assistant`)
 * **Einsatzbereich:** Persönlicher Gebrauch (Single-User, lokaler Desktop-Betrieb, kein externes Deployment nötig)
-* **Status:** Geschärft & Freigegeben
-* **Datum:** 2026-10-31
+* **Unterstützte Marktplätze:**
+  * **Schweiz (CH):** Ricardo (`ricardo.ch`) & Tutti (`tutti.ch`)
+  * **Deutschland (DE):** eBay Deutschland (`ebay.de`) & Kleinanzeigen (`kleinanzeigen.de`)
+* **Status:** Geschärft & Freigegeben (Erweitert um DE-Plattformen)
+* **Datum:** 2026-11-01
 
 ---
 
 ## 1. Zielsetzung & Problemstellung
 
-Beim regelmässigen Einstellen von Gebrauchtartikeln auf Schweizer Plattformen (**Tutti.ch** und **Ricardo.ch**) entstehen erhebliche Reibungspunkte:
-* Unterschiedliche Plattformanforderungen (Ricardo mit striktem 60-Zeichen-Titel, Auktion vs. Sofortkauf, mehrstufiger Formular-Wizard; Tutti als klassische Kleinanzeige).
-* Mühsames manuelles Copy-Pasten von Texten, Preisen und Auswählen von Dropdowns.
+Beim regelmässigen Einstellen von Gebrauchtartikeln auf Schweizer (**Ricardo.ch**, **Tutti.ch**) und deutschen Plattformen (**eBay.de**, **Kleinanzeigen.de**) entstehen erhebliche Reibungspunkte:
+* **Unterschiedliche Plattformanforderungen:**
+  * **Ricardo.ch:** Striktes 60-Zeichen-Titellimit, Auktion vs. Sofortkauf, mehrstufiger Formular-Wizard, Schweizer Rechtschreibung (`ss` statt `ß`), Preise in CHF.
+  * **Tutti.ch:** Klassische Schweizer Kleinanzeige (bis 80 Zeichen Titel, VHB-Preis in CHF, TWINT/Abholung/Post-Versand).
+  * **eBay.de:** Maximal 80 Zeichen Titel (suchbegriffsoptimiert), Auktion vs. Sofort-Kaufen, Preise in EUR, deutsche Standard-Rechtschreibung (inkl. `ß`), EU-/deutsches Privatverkaufsrecht (Ausschluss der Sachmängelhaftung).
+  * **Kleinanzeigen.de:** Klassische deutsche Kleinanzeige (Titel bis 65–80 Zeichen, Festpreis oder Verhandlungsbasis/VB in EUR, „Direkt kaufen" / PayPal / Überweisung / Abholung, DHL/Hermes/Post-Versand).
+* Mühsames manuelles Copy-Pasten von Texten, Preisen und Auswählen von Dropdowns über mehrere Länder- und Plattform-Wizards hinweg.
 * Suboptimale Smartphone-Fotos (schlechte Ausleuchtung, unruhige Hintergründe, inkompatible Formate wie HEIC, verräterische EXIF/GPS-Metadaten).
-* Schwierige Preisfindung: Wunschpreise auf Tutti/Ricardo reflektieren oft nicht den tatsächlichen Marktwert, und ein blinder Aufschlag auf deutsche Gebrauchtpreise ignoriert das oft tiefere Schweizer Neupreis-Niveau (z.B. bei Elektronik).
+* Schwierige länderübergreifende Preisfindung: Wunschpreise auf Kleinanzeigen/Tutti reflektieren oft nicht den tatsächlichen Marktwert, und zwischen dem deutschen Markt (EUR, 19 % MwSt.) und dem Schweizer Markt (CHF, 8.1 % MwSt., oft tieferes Neupreis-Niveau bei Elektronik) bestehen signifikante Preisunterschiede.
 
-**Lösung:** Eine lokale Hybrid-Lösung aus einem **FastAPI/Python-Backend mit Web-Dashboard** (für Desktop-Upload, persistente Entwurfs-Verwaltung, Bildoptimierung, hybride Preisfindung und Textgenerierung) und einer **Firefox-Browsererweiterung (Manifest V3)** mit Smart-Panel zum schrittweisen Befüllen der Inserate-Formulare (inkl. Bild-Upload und 1-Klick-Copy-Fallbacks).
+**Lösung:** Eine lokale Hybrid-Lösung (**Seller Assistant**) aus einem **FastAPI/Python-Backend mit Web-Dashboard** (für Desktop-Upload, persistente Entwurfs-Verwaltung, Bildoptimierung, hybride CH/DE-Preisfindung und plattformspezifische Textgenerierung) und einer **Firefox-Browsererweiterung (Manifest V3)** mit Smart-Panel zum schrittweisen Befüllen der Inserate-Formulare auf allen vier Zielplattformen (inkl. Bild-Upload und 1-Klick-Copy-Fallbacks).
 
 ---
 
@@ -24,23 +31,23 @@ Beim regelmässigen Einstellen von Gebrauchtartikeln auf Schweizer Plattformen (
 
 ```mermaid
 flowchart TD
-    User["Benutzer (Desktop)"] -->|Bilder & Notizen| Dashboard["Lokales Web-Dashboard (FastAPI + HTML/JS)"]
+    User["Benutzer (Desktop)"] -->|Bilder & Notizen| Dashboard["Lokales Web-Dashboard (Seller Assistant - FastAPI + HTML/JS)"]
     
     subgraph Local_Backend ["Lokales Backend (127.0.0.1:8000)"]
         Dashboard --> ImgProc["Bild-Pipeline (Pillow/HEIF, EXIF-Strip, Auto-Enhance, opt. rembg/Blur)"]
         Dashboard --> DraftStore["Persistente Entwurfs-Verwaltung (Lokale JSON/SQLite + Bild-Ordner)"]
-        Dashboard --> PriceEngine["Hybride Preis-Engine"]
+        Dashboard --> PriceEngine["Hybride CH/DE Preis-Engine"]
         PriceEngine --> EbayParser["Direkter eBay-DE Sold-Parser (LH_Sold=1&LH_Complete=1)"]
         PriceEngine --> AI_Engine["Gemini API (konfigurierbar via .env, z.B. gemini-2.5-flash / 2.0-flash)"]
-        AI_Engine --> Grounding["Google Search Grounding (CH-Neupreis via Digitec/Toppreise & Marktdaten)"]
+        AI_Engine --> Grounding["Google Search Grounding (CH-Neupreis via Digitec/Toppreise & DE-Neupreis via Idealo/Geizhals)"]
     end
 
     subgraph Browser ["Firefox Browser"]
         BgScript["Extension Background Worker (umgeht CORS/CSP)"]
-        ContentScript["Smart-Panel Content Script (tutti.ch / ricardo.ch)"]
+        ContentScript["Smart-Panel Content Script (ricardo.ch / tutti.ch / ebay.de / kleinanzeigen.de)"]
         BgScript <-->|REST API (Entwürfe & Bilder)| DraftStore
         ContentScript <-->|browser.runtime.sendMessage| BgScript
-        ContentScript -->|Schrittweise DOM-Injektion & File-Upload| PlatformForms["Tutti.ch / Ricardo.ch Wizards"]
+        ContentScript -->|Schrittweise DOM-Injektion & File-Upload| PlatformForms["Plattform-Wizards (CH & DE)"]
     end
 ```
 
@@ -53,15 +60,16 @@ flowchart TD
 * **Persistente Entwurfs-Liste (Multi-Draft):**
   * Lokale Speicherung mehrerer Artikel-Entwürfe auf Vorrat (inkl. Status: *Entwurf*, *Bereit*, *Veröffentlicht*).
   * Jederzeitiges Nachbearbeiten: Weitere Fotos oder Notizen können nachträglich zu einem bestehenden Entwurf hinzugefügt und die KI-Analyse gezielt neu angestossen werden.
-  * Alle generierten Felder (Titel, Beschreibung, Preise, Kategorien) sind im Dashboard vor der Übergabe an den Browser manuell editierbar.
+  * Alle generierten Felder (Titel, Beschreibung, Preise, Kategorien für CH- und DE-Plattformen) sind im Dashboard vor der Übergabe an den Browser manuell editierbar.
 * **Kurzbeschreibung / Stichworte:** Freitextfeld für grobe Angaben (z.B. *"Sony WH-1000XM4, ca. 2 Jahre alt, wenig gebraucht, OVP & Ladekabel dabei, Polster intakt"*).
-* **Konfigurierbare Voreinstellungen (Presets):**
-  * Bevorzugte Verkaufsart bei Ricardo (Auktion vs. Sofortkauf).
-  * Konfigurierbare Schweizer Versand-Presets nach aktuellen Post-Tarifen (z.B. B-Post Paket bis 2 kg, B-Post bis 10 kg, Brief/Grossbrief, Abholung vor Ort).
+* **Konfigurierbare Voreinstellungen (Presets für CH & DE):**
+  * Bevorzugte Verkaufsart bei Auktionsplattformen (Auktion vs. Sofortkauf für Ricardo.ch und eBay.de) bzw. Preistyp bei Kleinanzeigen (Verhandlungsbasis/VB vs. Festpreis).
+  * **Schweizer Versand-Presets (CHF):** Nach aktuellen Schweizer Post-Tarifen (z.B. B-Post Paket bis 2 kg, B-Post bis 10 kg, Grossbrief, Abholung vor Ort).
+  * **Deutsche Versand-Presets (EUR):** Nach aktuellen Tarifen in Deutschland (z.B. DHL Paket bis 2 kg versichert, DHL Paket bis 5 kg, Hermes Päckchen/Paket, Deutsche Post Bücher-/Warensendung, Nur Abholung vor Ort).
 
 ### 3.2 Bildanalyse & Optimierung
 * **Standard-Bildoptimierung (Default für authentischen Privatverkauf-Look):**
-  * Das **Originalbild bleibt standardmässig erhalten**, um auf Ricardo/Tutti nicht wie ein unzulässiges Stock-/Katalogfoto oder Scam zu wirken.
+  * Das **Originalbild bleibt standardmässig erhalten**, um auf den Plattformen nicht wie ein unzulässiges Stock-/Katalogfoto oder Scam zu wirken.
   * Automatische Basis-Optimierung für jedes Bild: **EXIF/GPS-Metadaten-Entfernung**, automatische Belichtungs-/Kontrastkorrektur und HEIC-zu-JPG-Konvertierung.
 * **Optionale Hintergrund-Bearbeitung (Pro Bild umschaltbar):**
   * Toggle pro Bild im Dashboard zwischen:
@@ -73,47 +81,75 @@ flowchart TD
   * Gezielte Hinweise im Dashboard: *"Bitte fotografiere noch das Typenschild / die Seriennummer für bessere Verkaufschancen"*.
   * Der Nutzer kann daraufhin fehlende Fotos im Entwurf ergänzen und die Analyse aktualisieren.
 * **Rechtlicher Hinweis (Compliance):**
-  * Keine Verwendung fremder Urheberrechts-Bilder aus dem Web als Inseratefoto (Vermeidung von Sperrungen gemäss Ricardo/Tutti AGB). Web-Referenzen dienen ausschliesslich der Modellidentifikation und Spezifikationsabfrage.
+  * Keine Verwendung fremder Urheberrechts-Bilder aus dem Web als Inseratefoto (Vermeidung von Sperrungen/Abmahnungen gemäss Plattform-AGB und Urheberrecht). Web-Referenzen dienen ausschliesslich der Modellidentifikation und Spezifikationsabfrage.
 
-### 3.3 Hybride Marktrecherche & Preisermittlung
-Da Google Search Grounding allein beendete Auktionen auf Ricardo oder verkaufte eBay-Artikel (`LH_Sold=1`) im Suchindex oft nicht zuverlässig sieht, arbeitet das System **hybrid**:
+### 3.3 Hybride Marktrecherche & Preisermittlung (CH & DE)
+Da Google Search Grounding allein beendete Auktionen oder verkaufte eBay-Artikel (`LH_Sold=1`) im Suchindex oft nicht zuverlässig sieht, arbeitet das System **hybrid**:
 * **1. Echte eBay-DE Transaktionsdaten (Backend-Parser):**
-  * Direkter Abruf/Parsing tatsächlich verkaufter Artikel auf eBay Deutschland (`LH_Sold=1&LH_Complete=1`) im Backend zur Ermittlung realer Gebraucht-Transaktionspreise (Median / Preisspanne), inkl. automatischer Umrechnung EUR $\rightarrow$ CHF.
-* **2. Schweizer Neupreis-Anker (Gemini Search Grounding):**
-  * Abfrage des aktuellen Schweizer Strassen-/Neupreises (z.B. Digitec/Galaxus, Toppreise.ch) sowie sichtbarer CH-Marktangebote via Google Search Grounding.
-  * **Keine pauschale +10–20 % Aufschlagsregel:** Stattdessen intelligente Abwägung zwischen eBay-DE-Verkaufspreis und Schweizer Neupreis-Niveau (da Elektronik in der Schweiz wegen 8.1 % MwSt. neu oft günstiger ist als in DE).
+  * Direkter Abruf/Parsing tatsächlich verkaufter Artikel auf eBay Deutschland (`LH_Sold=1&LH_Complete=1`) im Backend zur Ermittlung realer Gebraucht-Transaktionspreise (Median / Preisspanne in EUR), inkl. automatischer Umrechnung EUR $\rightarrow$ CHF.
+* **2. Länderübergreifende Neupreis-Anker (Gemini Search Grounding):**
+  * **Schweiz (CHF):** Abfrage des aktuellen Schweizer Strassen-/Neupreises (z.B. Digitec/Galaxus, Toppreise.ch) sowie sichtbarer CH-Marktangebote.
+  * **Deutschland (EUR):** Abfrage des aktuellen deutschen Strassen-/Neupreises (z.B. Idealo.de, Geizhals.de) sowie aktueller Vergleichsangebote auf eBay.de und Kleinanzeigen.de.
+  * **Intelligente Markt-Abwägung:** Separate Preisempfehlungen in **CHF** (unter Berücksichtigung des oft tieferen CH-Neupreises wegen 8.1 % MwSt. und Ricardo-Gebühren) sowie in **EUR** (passend zum deutschen Gebrauchtmarkt auf eBay.de und Kleinanzeigen.de).
 * **Preis-Strategie-Ausgabe & Prüflinks:**
-  * Empfohlener Startpreis für Ricardo-Auktionen (attraktiv für Gebote, kein Ramsch).
-  * Empfohlener Sofortkaufen-Preis (realistischer Marktwert unter Berücksichtigung der Ricardo-Erfolgsprovision).
-  * Empfohlene Tutti-Verhandlungsbasis (VHB).
-  * Direkte **1-Klick-Prüflinks** im Dashboard zu beendeten eBay-DE-Angeboten, Ricardo-Suche und Toppreise/Digitec zur schnellen visuellen Plausibilisierung.
+  * **CH-Preise (in CHF):**
+    * Empfohlener Startpreis für Ricardo-Auktionen (`ricardo_start_chf`).
+    * Empfohlener Sofortkaufen-Preis für Ricardo (`ricardo_buynow_chf`).
+    * Empfohlene Tutti-Verhandlungsbasis (`tutti_vhb_chf`).
+  * **DE-Preise (in EUR):**
+    * Empfohlener Startpreis für eBay.de-Auktionen (`ebay_start_eur`).
+    * Empfohlener Sofort-Kaufen-Preis für eBay.de (`ebay_buynow_eur`).
+    * Empfohlener Preis für Kleinanzeigen.de (`kleinanzeigen_vb_eur`).
+  * **Direkte 1-Klick-Prüflinks** im Dashboard zu:
+    * eBay.de Verkaufte Artikel (`LH_Sold=1&LH_Complete=1`)
+    * Kleinanzeigen.de Suche
+    * Idealo.de (DE-Neupreisvergleich)
+    * Ricardo.ch Suche
+    * Toppreise.ch & Digitec.ch (CH-Neupreisvergleich)
 
-### 3.4 Textgenerierung & Plattform-Spezifika
+### 3.4 Textgenerierung & Plattform-Spezifika (Plattformabhängige Sprache & Rechtsklauseln)
 
-#### Ricardo.ch Anforderungen (angepasst an aktuelles Plattform-UI):
-* **Titel:** Strikt maximal **60 Zeichen**, suchbegriffsoptimiert (Marke, Modell, Zustand), keine unzulässigen Füllwörter (kein separates Untertitel-Feld mehr, da von Ricardo abgeschafft).
-* **Beschreibung:** Strukturierter Text (Zustand, Lieferumfang, technische Kerndaten, Garantiehinweis gemäss Schweizer Recht *"Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme"*).
-* **Universelle Pflichtfelder:** Fokus auf Zustand-Mapping, Preis (Startpreis / Sofortkauf) und Übergabe/Versand-Presets.
+#### A) Schweizer Plattformen (CHF, Schweizer Hochdeutsch mit `ss` statt `ß`, CH-Recht)
+* **Ricardo.ch Anforderungen:**
+  * **Titel:** Strikt maximal **60 Zeichen**, suchbegriffsoptimiert (Marke, Modell, Zustand), keine unzulässigen Füllwörter.
+  * **Beschreibung:** Strukturierter Text in Schweizer Rechtschreibung (`ss` statt `ß`: Zustand, Lieferumfang, technische Kerndaten, Versand & Abholung) sowie Schweizer Gewährleistungsausschluss: *"Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."*
+  * **Pflichtfelder:** Zustand-Mapping, Angebotsart (Auktion / Sofortkauf), Preise in CHF, CH-Versand-Preset.
+* **Tutti.ch Anforderungen:**
+  * **Titel:** Ansprechend und klar verständlich (maximal **80 Zeichen**, `ss` statt `ß`).
+  * **Kategorie-Empfehlung:** Vorschlag der am besten passenden Tutti-Kategorie.
+  * **Beschreibung:** Fliessender, seriöser Verkaufstext in Schweizer Rechtschreibung inklusive Übergabe-/Zahlungshinweisen (Abholung / Post-Versand / TWINT) und Schweizer Gewährleistungsausschluss (*"Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."*).
+  * **Zustand & Preis:** Automatische Klassifizierung (Neu, Wie neu, Gebraucht, Defekt) und VHB-Preis in CHF.
 
-#### Tutti.ch Anforderungen:
-* **Titel:** Ansprechend und klar verständlich (bis 80 Zeichen).
-* **Kategorie-Empfehlung:** Vorschlag der am besten passenden Tutti-Kategorie.
-* **Beschreibung:** Fliessender, seriöser Verkaufstext inklusive aller relevanten Details und Übergabe-/Zahlungshinweisen (z.B. Abholung / Versand / TWINT möglich).
-* **Zustand:** Automatische Klassifizierung passend zu Tutti (Neu, Wie neu, Gebraucht, Defekt).
+#### B) Deutsche Plattformen (EUR, Standard-Deutsch inkl. `ß`, DE/EU-Privatverkaufsrecht)
+* **eBay.de Anforderungen:**
+  * **Titel:** Strikt maximal **80 Zeichen**, SEO-/suchbegriffsoptimiert für die eBay-Kassensuche (Marke, Modell, wichtige Artikelmerkmale, Zustand).
+  * **Kategorie-Empfehlung:** Passender eBay.de Kategorievorschlag.
+  * **Beschreibung:** Strukturierter Verkaufstext in deutscher Standard-Rechtschreibung (inkl. `ß`: Zustand, Lieferumfang, Technische Daten, Versand via DHL/Hermes/Post & Zahlung) sowie rechtssicherer deutscher Privatverkaufs-Disclaimer nach BGB/EU-Recht: *"Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. Keine Garantie oder Rücknahme, da Privatverkauf."*
+  * **Pflichtfelder:** Zustand-Mapping, Angebotsformat (Auktion vs. Sofort-Kaufen), Startpreis & Sofort-Kaufen-Preis in EUR, DE-Versand-Preset.
+* **Kleinanzeigen.de Anforderungen:**
+  * **Titel:** Prägnant und suchfreundlich, maximal **65 Zeichen** (Kleinanzeigen.de begrenzt Titel im Web-Formular strikt auf 65 Zeichen).
+  * **Kategorie-Empfehlung:** Vorschlag der passenden Kleinanzeigen.de-Kategorie (z.B. *"Audio & Hifi > Kopfhörer"*).
+  * **Beschreibung:** Freundlicher, vertrauenserweckender Anzeigentext in deutscher Standard-Rechtschreibung (inkl. `ß`), Hinweis auf Abholung oder versicherten Versand (DHL/Hermes) sowie Bezahloptionen (Barzahlung bei Abholung, „Direkt kaufen", PayPal / Überweisung) und deutschem Sachmängelhaftungsausschluss: *"Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. Keine Garantie oder Rücknahme, da Privatverkauf."*
+  * **Zustand & Preis:** Zustand-Mapping, Preis in EUR sowie Preistyp (Verhandlungsbasis `VB` vs. Festpreis).
 
-### 3.5 Firefox-Erweiterung (Smart-Panel & Auto-Fill Integration)
+### 3.5 Firefox-Erweiterung (Smart-Panel & Auto-Fill Integration für CH & DE)
+* **Neutrale Benennung:**
+  * Die Erweiterung und das Dashboard tragen den plattformneutralen Namen **`Seller Assistant`** (Paket-/Build-Slug `seller-assistant`).
 * **Architektur & CORS/CSP-Schutz:**
   * Firefox WebExtension (Manifest V3).
-  * Sämtliche Requests an `http://127.0.0.1:8000/api/...` laufen zwingend über das **Background-Script (Service Worker)** der Erweiterung und werden per Message-Passing (`browser.runtime.sendMessage`) an das Content Script übergeben, um CORS-, Mixed-Content- und CSP-Blockaden von `ricardo.ch` und `tutti.ch` zu umgehen.
+  * Sämtliche Requests an `http://127.0.0.1:8000/api/...` laufen zwingend über das **Background-Script (Service Worker)** der Erweiterung und werden per Message-Passing (`browser.runtime.sendMessage`) an das Content Script übergeben, um CORS-, Mixed-Content- und CSP-Blockaden von `ricardo.ch`, `tutti.ch`, `ebay.de` und `kleinanzeigen.de` zu umgehen.
 * **Smart-Panel UI im Browser:**
-  * Einklappbares Floating-Panel auf den Inserate-Erstellungsseiten von `tutti.ch` und `ricardo.ch`.
+  * Einklappbares Floating-Panel auf den Inserate-Erstellungsseiten von `ricardo.ch`, `tutti.ch`, `ebay.de` und `kleinanzeigen.de`.
+  * **Automatische Plattform-Erkennung:** Erkennt anhand der aktuellen Domain (`ricardo.ch`, `tutti.ch`, `ebay.de`, `kleinanzeigen.de`), welche plattformspezifischen Texte, Preise (CHF vs. EUR) und Formular-Selektoren verwendet werden müssen.
   * **Entwurfs-Dropdown:** Auswahl des gewünschten Artikels direkt aus der lokalen Entwurfs-Liste.
   * **Schritt-für-Schritt Auto-Fill (Wizard-kompatibel):**
-    * Unterstützt die mehrstufigen React/Next.js-Formulare (z.B. *Schritt 1: Bilder & Titel injizieren* $\rightarrow$ Plattform schlägt Kategorie vor $\rightarrow$ *Schritt 2: Beschreibung, Zustand & Preise injizieren*).
-  * **1-Klick-Copy-Buttons (Fallback):** Neben jedem Feld im Smart-Panel (Titel, Beschreibung, Startpreis, Sofortkaufpreis) gibt es einen direkten Kopier-Button, falls die Plattform ihre DOM-Selektoren kurzfristig ändert.
+    * Unterstützt sowohl mehrstufige Formulare (Ricardo.ch, eBay.de) als auch einseitige Inserate-Formulare (Tutti.ch, Kleinanzeigen.de):
+      * *Schritt 1: Bilder & Titel einfügen* (injiziert die optimierten Bilder in den Datei-Upload/Dropzone und trägt den plattformspezifischen Titel ein).
+      * *Schritt 2: Beschreibung, Zustand & Preis einfügen* (befüllt das Beschreibungsfeld, inkl. allfälligem Rich-Text/`contenteditable`-Editor oder `iframe` bei eBay.de, wählt nach Möglichkeit den Zustand und trägt Start-/Sofortkauf-/VB-Preis in der jeweiligen Landeswährung ein).
+  * **1-Klick-Copy-Buttons (Fallback):** Neben jedem Feld im Smart-Panel (Titel, Beschreibung, Preise, Kategorie) gibt es einen direkten Kopier-Button für die gerade aktive Plattform, falls eine Plattform ihre DOM-Selektoren kurzfristig ändert.
 * **Technische Feld-Befüllung:**
-  * Text- & Nummernfelder über native Value-Setter (`HTMLInputElement.prototype.value`) inkl. Dispatch von `input`-, `change`- und `blur`-Events für React-State-Synchronisation.
-  * **Automatischer Bild-Upload:** Abruf der optimierten Bilder über das Background-Script als `Blob`/`File`, Bündelung in einem `DataTransfer`-Objekt und Übergabe an das `<input type="file">`-Element bzw. Dropzone-Event der Plattform.
+  * Text- & Nummernfelder über native Value-Setter (`HTMLInputElement.prototype.value` / `HTMLTextAreaElement.prototype.value`) inkl. Dispatch von `input`-, `change`- und `blur`-Events für React/Marko/Next.js-State-Synchronisation (sowie Unterstützung für `contenteditable`-Editoren auf `ebay.de`).
+  * **Automatischer Bild-Upload:** Abruf der optimierten Bilder über das Background-Script, Bündelung in einem Firefox-Xray-kompatiblen `DataTransfer`-Objekt und Übergabe an das `<input type="file">`-Element bzw. Dropzone-Event der jeweiligen Plattform.
 
 ---
 
@@ -129,7 +165,7 @@ Da Google Search Grounding allein beendete Auktionen auf Ricardo oder verkaufte 
 * **Leistung & Geschwindigkeit:**
   * Standard-Bildoptimierung (HEIC-Konvertierung, Resize, EXIF-Strip, Auto-Kontrast) < 1 Sekunde pro Bild.
   * Optionale Bildfreistellung via `rembg` < 3 Sekunden pro Bild auf gängiger Hardware.
-  * Komplette Inseratsgenerierung (inkl. eBay-DE-Abfrage & Gemini Search Grounding) < 10–15 Sekunden (durch vorheriges Downscaling der API-Bilder auf max. 1024px beschleunigt).
+  * Komplette Inseratsgenerierung für alle vier Plattformen (inkl. eBay-DE-Abfrage & Gemini Search Grounding) < 10–15 Sekunden (durch einen kombinierten KI-Aufruf mit auf max. 1024px skalierten Bildern).
 
 ---
 
@@ -137,8 +173,8 @@ Da Google Search Grounding allein beendete Auktionen auf Ricardo oder verkaufte 
 
 | Phase | Modul / Schritt | Ergebnis |
 | :--- | :--- | :--- |
-| **Phase 1** | **Backend, Persistenz & Bild-Pipeline** | FastAPI Backend, Multi-Draft-Speicher (SQLite/JSON) & Bildverarbeitung (HEIC, EXIF-Strip, Auto-Enhance, opt. `rembg` & Blur) |
-| **Phase 2** | **Hybride Preis-Engine & KI-Logik** | eBay-DE Sold-Parser + Gemini Service (konfigurierbares Modell, 1024px-Upload, CH-Neupreis Grounding, Ricardo/Tutti-Prompts) |
-| **Phase 3** | **Web-Dashboard UI** | Lokale Weboberfläche für Entwurfs-Liste, Upload, Bild-Toggles, iterative Nachbearbeitung & Prüflinks |
-| **Phase 4** | **Firefox WebExtension (Smart-Panel)** | Add-on mit Background-Worker (CORS-frei), Entwurfs-Auswahl, Wizard-Auto-Fill & 1-Klick-Copy-Fallbacks |
-| **Phase 5** | **Testing & Feinschliff** | End-to-End-Tests der Pipeline, API-Endpunkte und Extension-Injektion |
+| **Phase 1** | **Backend, Persistenz & Bild-Pipeline** | FastAPI Backend, Multi-Draft-Speicher (CH & DE Datenmodelle, Versand-Presets) & Bildverarbeitung (HEIC, EXIF-Strip, Auto-Enhance, opt. `rembg` & Blur) |
+| **Phase 2** | **Hybride Preis-Engine & KI-Logik** | eBay-DE Sold-Parser + Gemini Service (konfigurierbares Modell, 1024px-Upload, CH- & DE-Neupreis Grounding, Prompts & Validierung für Ricardo, Tutti, eBay.de & Kleinanzeigen.de) |
+| **Phase 3** | **Web-Dashboard UI** | Neutrale lokale Weboberfläche (`Seller Assistant`) für Entwurfs-Liste, Upload, Bild-Toggles, CH/DE-Plattform-Vorschaukarten & Prüflinks |
+| **Phase 4** | **Firefox WebExtension (Smart-Panel)** | Neutral benanntes Add-on (`Seller Assistant`) mit Background-Worker (CORS-frei), Plattform-Erkennung (`ricardo.ch`, `tutti.ch`, `ebay.de`, `kleinanzeigen.de`), Wizard-Auto-Fill & 1-Klick-Copy-Fallbacks |
+| **Phase 5** | **Testing & Feinschliff** | End-to-End-Tests der Pipeline, API-Endpunkte, sprach-/rechtsspezifischen Safeguards und Extension-Injektion |

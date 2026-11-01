@@ -86,7 +86,7 @@ If a test fails more than twice in a row:
 
 ## 6. Mandatory Neutral Project & Extension Naming (STRICT RULE)
 
-* **NEVER** use third-party platform names (such as "Tutti", "Ricardo", or "eBay") in:
+* **NEVER** use third-party platform names (such as "Tutti", "Ricardo", "eBay", or "Kleinanzeigen") in:
   - Project names
   - Extension titles or action names (e.g., in `manifest.json`)
   - Web dashboard titles or UI headers
