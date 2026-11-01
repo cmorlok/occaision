@@ -120,7 +120,10 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     # Verify default settings
     settings = storage.get_settings()
     assert settings.default_offer_type == OfferType.AUCTION
-    assert len(settings.shipping_presets) >= 4
+    assert settings.default_de_shipping_preset_id == "dhl_2kg"
+    assert len(settings.shipping_presets) >= 9
+    assert any(p.country.value == "CH" for p in settings.shipping_presets)
+    assert any(p.country.value == "DE" for p in settings.shipping_presets)
     
     # Create 3 drafts
     d1 = storage.create_draft(user_notes="Sony headphones")
@@ -131,15 +134,22 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     assert d1.status == DraftStatus.DRAFT
     assert d1.ricardo.offer_type == settings.default_offer_type
     assert d1.ricardo.shipping_preset_id == settings.default_shipping_preset_id
+    assert d1.ebay_de.offer_type == settings.default_offer_type
+    assert d1.ebay_de.shipping_preset_id == settings.default_de_shipping_preset_id
+    assert d1.kleinanzeigen.shipping_preset_id == settings.default_de_shipping_preset_id
     
     # Update d2
     d2.status = DraftStatus.READY
     # Test title safeguard: longer than 60 chars must be truncated <= 60
     d2.ricardo.title = "A" * 75
     d2.tutti.title = "B" * 90
+    d2.ebay_de.title = "C" * 95
+    d2.kleinanzeigen.title = "D" * 80
     saved_d2 = storage.update_draft(d2)
     assert len(saved_d2.ricardo.title) <= 60
     assert len(saved_d2.tutti.title) <= 80
+    assert len(saved_d2.ebay_de.title) <= 80
+    assert len(saved_d2.kleinanzeigen.title) <= 65
     
     # Create fake image folder for d1 to verify deletion cleanup
     img_dir_d1 = temp_data_dir / "images" / d1.id

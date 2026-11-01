@@ -86,6 +86,9 @@ class StorageService:
         )
         draft.ricardo.offer_type = settings.default_offer_type
         draft.ricardo.shipping_preset_id = settings.default_shipping_preset_id
+        draft.ebay_de.offer_type = settings.default_offer_type
+        draft.ebay_de.shipping_preset_id = settings.default_de_shipping_preset_id
+        draft.kleinanzeigen.shipping_preset_id = settings.default_de_shipping_preset_id
 
         with self._lock:
             raw_list = self._load_drafts_raw()
@@ -99,6 +102,10 @@ class StorageService:
             draft.ricardo.title = draft.ricardo.title[:60].rstrip()
         if len(draft.tutti.title) > 80:
             draft.tutti.title = draft.tutti.title[:80].rstrip()
+        if len(draft.ebay_de.title) > 80:
+            draft.ebay_de.title = draft.ebay_de.title[:80].rstrip()
+        if len(draft.kleinanzeigen.title) > 65:
+            draft.kleinanzeigen.title = draft.kleinanzeigen.title[:65].rstrip()
 
         draft.updated_at = datetime.now(timezone.utc).isoformat()
         

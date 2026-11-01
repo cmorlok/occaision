@@ -27,21 +27,42 @@ class OfferType(str, Enum):
     FIXED_PRICE = "fixed_price"
 
 
+class PriceTypeDE(str, Enum):
+    VB = "vb"                 # Verhandlungsbasis
+    FESTPREIS = "festpreis"   # Festpreis
+
+
+class MarketCountry(str, Enum):
+    CH = "CH"
+    DE = "DE"
+
+
 class ShippingPreset(BaseModel):
     id: str
-    label: str                # e.g., "B-Post Paket bis 2 kg (8.50 CHF)"
-    cost_chf: float           # e.g., 8.50
+    country: MarketCountry = MarketCountry.CH
+    label: str                # e.g., "B-Post Paket bis 2 kg (8.50 CHF)" or "DHL Paket bis 2 kg (5.49 EUR)"
+    cost_chf: float = 0.0     # Kept for backwards compatibility
+    cost: float = 0.0         # Cost in local currency (CHF for CH, EUR for DE)
+    currency: str = "CHF"     # "CHF" or "EUR"
     pickup_allowed: bool = True
 
 
 class PresetSettings(BaseModel):
     default_offer_type: OfferType = OfferType.AUCTION
     default_shipping_preset_id: str = "b_post_2kg"
+    default_de_shipping_preset_id: str = "dhl_2kg"
     shipping_presets: List[ShippingPreset] = Field(default_factory=lambda: [
-        ShippingPreset(id="b_post_2kg", label="Paket B-Post bis 2 kg (8.50 CHF)", cost_chf=8.50, pickup_allowed=True),
-        ShippingPreset(id="b_post_10kg", label="Paket B-Post bis 10 kg (11.50 CHF)", cost_chf=11.50, pickup_allowed=True),
-        ShippingPreset(id="grossbrief", label="Grossbrief B-Post (2.00 CHF)", cost_chf=2.00, pickup_allowed=True),
-        ShippingPreset(id="pickup_only", label="Nur Abholung vor Ort (0.00 CHF)", cost_chf=0.00, pickup_allowed=True),
+        # Swiss Presets (CHF)
+        ShippingPreset(id="b_post_2kg", country=MarketCountry.CH, label="Paket B-Post bis 2 kg (8.50 CHF)", cost_chf=8.50, cost=8.50, currency="CHF", pickup_allowed=True),
+        ShippingPreset(id="b_post_10kg", country=MarketCountry.CH, label="Paket B-Post bis 10 kg (11.50 CHF)", cost_chf=11.50, cost=11.50, currency="CHF", pickup_allowed=True),
+        ShippingPreset(id="grossbrief", country=MarketCountry.CH, label="Grossbrief B-Post (2.00 CHF)", cost_chf=2.00, cost=2.00, currency="CHF", pickup_allowed=True),
+        ShippingPreset(id="pickup_only", country=MarketCountry.CH, label="Nur Abholung vor Ort (0.00 CHF)", cost_chf=0.00, cost=0.00, currency="CHF", pickup_allowed=True),
+        # German Presets (EUR)
+        ShippingPreset(id="dhl_2kg", country=MarketCountry.DE, label="DHL Paket bis 2 kg versichert (5.49 EUR)", cost_chf=0.0, cost=5.49, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_5kg", country=MarketCountry.DE, label="DHL Paket bis 5 kg versichert (6.99 EUR)", cost_chf=0.0, cost=6.99, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="hermes_s", country=MarketCountry.DE, label="Hermes S-Paket versichert (4.95 EUR)", cost_chf=0.0, cost=4.95, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="warensendung_de", country=MarketCountry.DE, label="Deutsche Post Bücher-/Warensendung (2.55 EUR)", cost_chf=0.0, cost=2.55, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="pickup_only_de", country=MarketCountry.DE, label="Nur Abholung vor Ort DE (0.00 EUR)", cost_chf=0.0, cost=0.00, currency="EUR", pickup_allowed=True),
     ])
 
 
@@ -67,6 +88,8 @@ class EbaySoldStats(BaseModel):
 
 class VerificationLinks(BaseModel):
     ebay_sold_url: str
+    kleinanzeigen_search_url: str = ""
+    idealo_url: str = ""
     ricardo_search_url: str
     toppreise_url: str
     digitec_url: str
@@ -75,9 +98,13 @@ class VerificationLinks(BaseModel):
 class PriceAnalysis(BaseModel):
     ebay_stats: Optional[EbaySoldStats] = None
     ch_new_price_chf: Optional[float] = None
+    de_new_price_eur: Optional[float] = None
     ricardo_start_chf: float = 1.0
     ricardo_buynow_chf: float = 10.0
     tutti_vhb_chf: float = 10.0
+    ebay_start_eur: float = 1.0
+    ebay_buynow_eur: float = 10.0
+    kleinanzeigen_vb_eur: float = 10.0
     reasoning: str = ""
     verification_links: Optional[VerificationLinks] = None
 
@@ -114,6 +141,41 @@ class TuttiListing(BaseModel):
         return v
 
 
+class EbayDEListing(BaseModel):
+    title: str = Field(default="")
+    category_suggestion: str = ""
+    description: str = ""
+    condition: ConditionType = ConditionType.GEBRAUCHT
+    offer_type: OfferType = OfferType.AUCTION
+    start_price_eur: float = 1.0
+    buynow_price_eur: float = 10.0
+    shipping_preset_id: str = "dhl_2kg"
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def truncate_title(cls, v: str) -> str:
+        if isinstance(v, str) and len(v) > 80:
+            return v[:80]
+        return v
+
+
+class KleinanzeigenListing(BaseModel):
+    title: str = Field(default="")
+    category_suggestion: str = ""
+    description: str = ""
+    condition: ConditionType = ConditionType.GEBRAUCHT
+    price_eur: float = 10.0
+    price_type: PriceTypeDE = PriceTypeDE.VB
+    shipping_preset_id: str = "dhl_2kg"
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def truncate_title(cls, v: str) -> str:
+        if isinstance(v, str) and len(v) > 65:
+            return v[:65]
+        return v
+
+
 class Draft(BaseModel):
     id: str
     created_at: str
@@ -126,3 +188,5 @@ class Draft(BaseModel):
     price_analysis: PriceAnalysis = Field(default_factory=PriceAnalysis)
     ricardo: RicardoListing = Field(default_factory=RicardoListing)
     tutti: TuttiListing = Field(default_factory=TuttiListing)
+    ebay_de: EbayDEListing = Field(default_factory=EbayDEListing)
+    kleinanzeigen: KleinanzeigenListing = Field(default_factory=KleinanzeigenListing)
