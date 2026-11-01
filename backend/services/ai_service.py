@@ -22,6 +22,10 @@ from backend.services.ebay_service import EbayService
 logger = logging.getLogger(__name__)
 
 SWISS_LEGAL_DISCLAIMER = "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
+GERMAN_LEGAL_DISCLAIMER = (
+    "Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. "
+    "Keine Garantie oder Rücknahme, da Privatverkauf."
+)
 
 
 def extract_and_parse_json(raw_text: str) -> Dict[str, Any]:
@@ -40,32 +44,43 @@ def extract_and_parse_json(raw_text: str) -> Dict[str, Any]:
     return json.loads(text)
 
 
+def _truncate_title(title: str, max_len: int) -> str:
+    if len(title) > max_len:
+        truncated = title[:max_len]
+        last_space = truncated.rfind(" ")
+        if last_space > int(max_len * 0.6):
+            truncated = truncated[:last_space]
+        return truncated.strip()
+    return title.strip()
+
+
 def post_process_ai_output(payload: Dict[str, Any]) -> Dict[str, Any]:
     res = dict(payload)
 
-    # 1. Swiss German orthography: replace 'ß' with 'ss' in all string values and string lists
+    # 1. Swiss German orthography: replace 'ß' with 'ss' in CH- and general fields only
+    # Do NOT apply to ebay_de_* or kleinanzeigen_* (standard German retains 'ß')
     for k, v in res.items():
-        if isinstance(v, str):
-            res[k] = v.replace("ß", "ss")
-        elif isinstance(v, list):
-            res[k] = [item.replace("ß", "ss") if isinstance(item, str) else item for item in v]
+        if not (k.startswith("ebay_de_") or k.startswith("kleinanzeigen_")):
+            if isinstance(v, str):
+                res[k] = v.replace("ß", "ss")
+            elif isinstance(v, list):
+                res[k] = [item.replace("ß", "ss") if isinstance(item, str) else item for item in v]
 
-    # 2. Hard limit on Ricardo title (<= 60 chars)
-    ricardo_title = res.get("ricardo_title", "")
-    if len(ricardo_title) > 60:
-        truncated = ricardo_title[:60]
-        # Try to break at word boundary if possible
-        last_space = truncated.rfind(" ")
-        if last_space > 40:
-            truncated = truncated[:last_space]
-        res["ricardo_title"] = truncated.strip()
+    # 2. Hard limits on titles
+    if "ricardo_title" in res and isinstance(res["ricardo_title"], str):
+        res["ricardo_title"] = _truncate_title(res["ricardo_title"], 60)
 
-    # 3. Hard limit on Tutti title (<= 80 chars)
-    tutti_title = res.get("tutti_title", "")
-    if len(tutti_title) > 80:
-        res["tutti_title"] = tutti_title[:80].strip()
+    if "tutti_title" in res and isinstance(res["tutti_title"], str):
+        if len(res["tutti_title"]) > 80:
+            res["tutti_title"] = res["tutti_title"][:80].strip()
 
-    # 4. Mandatory Swiss warranty disclaimer in descriptions
+    if "ebay_de_title" in res and isinstance(res["ebay_de_title"], str):
+        res["ebay_de_title"] = _truncate_title(res["ebay_de_title"], 80)
+
+    if "kleinanzeigen_title" in res and isinstance(res["kleinanzeigen_title"], str):
+        res["kleinanzeigen_title"] = _truncate_title(res["kleinanzeigen_title"], 65)
+
+    # 3. Mandatory Swiss warranty disclaimer in descriptions
     ricardo_desc = res.get("ricardo_description", "")
     if "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme" not in ricardo_desc:
         res["ricardo_description"] = f"{ricardo_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
@@ -74,34 +89,58 @@ def post_process_ai_output(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme" not in tutti_desc:
         res["tutti_description"] = f"{tutti_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
 
+    # 4. Mandatory German warranty disclaimer in descriptions
+    if "ebay_de_description" in res:
+        ebay_desc = res.get("ebay_de_description", "")
+        if "Ausschluss jeglicher Sachmängelhaftung" not in ebay_desc:
+            res["ebay_de_description"] = f"{ebay_desc.rstrip()}\n\n{GERMAN_LEGAL_DISCLAIMER}".strip()
+    elif "ebay_de_title" in res:
+        res["ebay_de_description"] = GERMAN_LEGAL_DISCLAIMER
+
+    if "kleinanzeigen_description" in res:
+        klein_desc = res.get("kleinanzeigen_description", "")
+        if "Ausschluss jeglicher Sachmängelhaftung" not in klein_desc:
+            res["kleinanzeigen_description"] = f"{klein_desc.rstrip()}\n\n{GERMAN_LEGAL_DISCLAIMER}".strip()
+    elif "kleinanzeigen_title" in res:
+        res["kleinanzeigen_description"] = GERMAN_LEGAL_DISCLAIMER
+
     return res
 
 
 SYSTEM_INSTRUCTION = """
-Du bist ein professioneller Verkaufs- und Preisfindungs-Assistent für Schweizer Kleinanzeigen (Ricardo.ch und Tutti.ch).
+Du bist ein professioneller Verkaufs- und Preisfindungs-Assistent für Schweizer (Ricardo.ch, Tutti.ch) und deutsche Plattformen (eBay.de, Kleinanzeigen.de).
 Deine Aufgabe:
 1. Identifiziere den exakten Artikel (Marke, Modell, Spezifikationen) aus den Fotos und Benutzernotizen.
 2. Führe einen visuellen Qualitätscheck durch: Falls für Käufer essenzielle Fotos fehlen (z.B. Typenschild/Modellnummer, Nahaufnahme sichtbarer Mängel, erwähntes Zubehör), gib diese als 'missing_photo_hints' auf Deutsch aus.
 3. Marktrecherche & Preisfindung:
-   - Nutze die Suchergebnisse für den aktuellen Schweizer Neupreis (Digitec/Galaxus/Toppreise.ch) und die übergebenen eBay-DE Sold Statistiken.
-   - Beachte: In der Schweiz ist Elektronik neu wegen 8.1% MwSt. oft günstiger als in DE. Gib einen realistischen Neupreis 'ch_new_price_chf' an.
-   - Empfehle einen attraktiven Ricardo Startpreis 'ricardo_start_chf' (ca. 65-75% des realistischen Gebrauchtmarktwerts).
-   - Empfehle einen realistischen Sofortkaufen-Preis 'ricardo_buynow_chf' (beachte ca. 10-12% Ricardo-Provision; nie über 80% des Schweizer Neupreises bei Gebrauchtware).
-   - Empfehle eine Tutti Verhandlungsbasis 'tutti_vhb_chf' (mit ca. 5-10% Verhandlungsspielraum).
-4. Erstelle suchbegriffsoptimierte Inserate:
-   - Ricardo: Titel STRIKT maximal 60 Zeichen (Marke Modell Kern-Specs Zustand). Strukturierte Beschreibung (Zustand, Lieferumfang, Technische Daten, Versand/Abholung).
-   - Tutti: Titel bis 80 Zeichen. Passende Tutti-Kategorie. Freundlicher Kleinanzeigentext inkl. Abholung/Versand und TWINT-Hinweis.
-   - WICHTIG: Schweizer Hochdeutsch verwenden (IMMER 'ss', NIEMALS 'ß'!).
-   - Pflichtklausel in beiden Beschreibungen: "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
+   - Nutze die Suchergebnisse für den aktuellen Schweizer Neupreis (Digitec/Galaxus/Toppreise.ch) und deutschen Neupreis (Idealo/Geizhals) sowie die übergebenen eBay-DE Sold Statistiken.
+   - Beachte: In der Schweiz ist Elektronik neu wegen 8.1% MwSt. oft günstiger als in DE. Gib realistische Neupreise 'ch_new_price_chf' und 'de_new_price_eur' an.
+   - CH-Preise:
+     * Empfehle einen attraktiven Ricardo Startpreis 'ricardo_start_chf' (ca. 65-75% des realistischen Gebrauchtmarktwerts).
+     * Empfehle einen realistischen Sofortkaufen-Preis 'ricardo_buynow_chf' (beachte ca. 10-12% Ricardo-Provision; nie über 80% des Schweizer Neupreises bei Gebrauchtware).
+     * Empfehle eine Tutti Verhandlungsbasis 'tutti_vhb_chf' (mit ca. 5-10% Verhandlungsspielraum).
+   - DE-Preise (in EUR):
+     * Empfehle einen Startpreis für eBay.de Auktionen 'ebay_start_eur'.
+     * Empfehle einen Sofort-Kaufen-Preis für eBay.de 'ebay_buynow_eur'.
+     * Empfehle eine Kleinanzeigen Verhandlungsbasis 'kleinanzeigen_vb_eur'.
+4. Erstelle suchbegriffsoptimierte Inserate für alle 4 Plattformen:
+   - Ricardo: Titel STRIKT maximal 60 Zeichen (Marke Modell Kern-Specs Zustand). Strukturierte Beschreibung (Zustand, Lieferumfang, Technische Daten, Versand/Abholung). Schweizer Hochdeutsch (IMMER 'ss', NIEMALS 'ß'!). Pflichtklausel: "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
+   - Tutti: Titel bis 80 Zeichen. Passende Tutti-Kategorie. Freundlicher Kleinanzeigentext inkl. Abholung/Versand und TWINT. Schweizer Hochdeutsch (IMMER 'ss', NIEMALS 'ß'!). Pflichtklausel: "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
+   - eBay.de: Titel STRIKT maximal 80 Zeichen (suchbegriffsoptimiert). Passende eBay-Kategorie. Strukturierter Text in Standard-Deutsch (inkl. 'ß'). Pflichtklausel: "Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. Keine Garantie oder Rücknahme, da Privatverkauf."
+   - Kleinanzeigen.de: Titel STRIKT maximal 65 Zeichen. Passende Kleinanzeigen-Kategorie. Freundlicher Text in Standard-Deutsch (inkl. 'ß') mit Hinweis auf Abholung/DHL/Direkt kaufen. Pflichtklausel: "Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. Keine Garantie oder Rücknahme, da Privatverkauf."
 
 Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt mit folgender Struktur:
 {
   "identified_product": "string",
   "missing_photo_hints": ["string"],
   "ch_new_price_chf": float,
+  "de_new_price_eur": float,
   "ricardo_start_chf": float,
   "ricardo_buynow_chf": float,
   "tutti_vhb_chf": float,
+  "ebay_start_eur": float,
+  "ebay_buynow_eur": float,
+  "kleinanzeigen_vb_eur": float,
   "reasoning": "string",
   "ricardo_title": "string (max 60 Zeichen)",
   "ricardo_description": "string",
@@ -109,7 +148,15 @@ Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt mit folgender Struktur:
   "tutti_title": "string (max 80 Zeichen)",
   "tutti_category": "string",
   "tutti_description": "string",
-  "tutti_condition": "neu" | "wie_neu" | "gebraucht" | "defekt"
+  "tutti_condition": "neu" | "wie_neu" | "gebraucht" | "defekt",
+  "ebay_de_title": "string (max 80 Zeichen, Standard-Deutsch)",
+  "ebay_de_category": "string",
+  "ebay_de_description": "string",
+  "ebay_de_condition": "neu" | "wie_neu" | "gebraucht" | "defekt",
+  "kleinanzeigen_title": "string (max 65 Zeichen, Standard-Deutsch)",
+  "kleinanzeigen_category": "string",
+  "kleinanzeigen_description": "string",
+  "kleinanzeigen_condition": "neu" | "wie_neu" | "gebraucht" | "defekt"
 }
 """
 
@@ -210,9 +257,13 @@ class AIService:
         draft.price_analysis = PriceAnalysis(
             ebay_stats=ebay_stats,
             ch_new_price_chf=payload.get("ch_new_price_chf"),
+            de_new_price_eur=payload.get("de_new_price_eur"),
             ricardo_start_chf=float(payload.get("ricardo_start_chf", 1.0)),
             ricardo_buynow_chf=float(payload.get("ricardo_buynow_chf", 10.0)),
             tutti_vhb_chf=float(payload.get("tutti_vhb_chf", 10.0)),
+            ebay_start_eur=float(payload.get("ebay_start_eur", 1.0)),
+            ebay_buynow_eur=float(payload.get("ebay_buynow_eur", 10.0)),
+            kleinanzeigen_vb_eur=float(payload.get("kleinanzeigen_vb_eur", 10.0)),
             reasoning=payload.get("reasoning", ""),
             verification_links=v_links,
         )
@@ -235,6 +286,19 @@ class AIService:
         draft.tutti.description = payload.get("tutti_description", draft.tutti.description)
         draft.tutti.condition = map_cond(payload.get("tutti_condition"))
         draft.tutti.price_vhb_chf = float(payload.get("tutti_vhb_chf", draft.tutti.price_vhb_chf))
+
+        draft.ebay_de.title = payload.get("ebay_de_title", draft.ebay_de.title)
+        draft.ebay_de.category_suggestion = payload.get("ebay_de_category", draft.ebay_de.category_suggestion)
+        draft.ebay_de.description = payload.get("ebay_de_description", draft.ebay_de.description)
+        draft.ebay_de.condition = map_cond(payload.get("ebay_de_condition"))
+        draft.ebay_de.start_price_eur = float(payload.get("ebay_start_eur", draft.ebay_de.start_price_eur))
+        draft.ebay_de.buynow_price_eur = float(payload.get("ebay_buynow_eur", draft.ebay_de.buynow_price_eur))
+
+        draft.kleinanzeigen.title = payload.get("kleinanzeigen_title", draft.kleinanzeigen.title)
+        draft.kleinanzeigen.category_suggestion = payload.get("kleinanzeigen_category", draft.kleinanzeigen.category_suggestion)
+        draft.kleinanzeigen.description = payload.get("kleinanzeigen_description", draft.kleinanzeigen.description)
+        draft.kleinanzeigen.condition = map_cond(payload.get("kleinanzeigen_condition"))
+        draft.kleinanzeigen.price_eur = float(payload.get("kleinanzeigen_vb_eur", draft.kleinanzeigen.price_eur))
 
         draft.status = DraftStatus.READY
         return draft

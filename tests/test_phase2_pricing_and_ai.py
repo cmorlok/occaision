@@ -95,6 +95,12 @@ def test_verification_links_generation():
     assert "LH_Complete=1" in links.ebay_sold_url
     assert "Sony" in links.ebay_sold_url
     
+    assert "kleinanzeigen.de" in links.kleinanzeigen_search_url
+    assert "Sony" in links.kleinanzeigen_search_url
+    
+    assert "idealo.de" in links.idealo_url
+    assert "Sony" in links.idealo_url
+    
     assert "https://www.ricardo.ch/de/s/" in links.ricardo_search_url
     assert "Sony" in links.ricardo_search_url
     
@@ -165,7 +171,11 @@ def test_ai_post_processing_safeguards():
         "tutti_title": "Großartiger Lautsprecher weiß guter Zustand",
         "tutti_category": "Audio & TV",
         "tutti_description": "Schöner weißer Lautsprecher zu verkaufen.",
-        "tutti_condition": "gebraucht"
+        "tutti_condition": "gebraucht",
+        "ebay_de_title": "Großartiger Lautsprecher mit fantastischem Sound in perfekter Größe und Zustand für Musikliebhaber",
+        "ebay_de_description": "Hier verkaufe ich einen tollen Lautsprecher in Top Zustand.",
+        "kleinanzeigen_title": "Großartiger Lautsprecher in weiß mit tollem Sound und extra Kabel",
+        "kleinanzeigen_description": "Verkaufe schönen Lautsprecher in weiß.",
     }
     
     processed = post_process_ai_output(raw_payload)
@@ -184,6 +194,14 @@ def test_ai_post_processing_safeguards():
     # 3. Mandatory Swiss warranty disclaimer
     assert "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme." in processed["ricardo_description"]
     assert "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme." in processed["tutti_description"]
+
+    # 4. DE platform safeguards
+    assert len(processed["ebay_de_title"]) <= 80
+    assert len(processed["kleinanzeigen_title"]) <= 65
+    assert "ß" in processed["ebay_de_title"]  # "Größe" preserves 'ß'
+    assert "ß" in processed["kleinanzeigen_title"]  # "weiß" preserves 'ß'
+    assert "Ausschluss jeglicher Sachmängelhaftung" in processed["ebay_de_description"]
+    assert "Ausschluss jeglicher Sachmängelhaftung" in processed["kleinanzeigen_description"]
 
 
 @pytest.mark.asyncio
