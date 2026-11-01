@@ -100,14 +100,39 @@ async function loadSettings() {
   }
 }
 
+async function ensureDraft() {
+  if (currentDraft) return currentDraft;
+  try {
+    const res = await fetch("/api/drafts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_notes: "" })
+    });
+    if (res.ok) {
+      currentDraft = await res.json();
+      drafts = [currentDraft, ...drafts.filter(d => d.id !== currentDraft.id)];
+      renderDraftList();
+      populateForm();
+      return currentDraft;
+    }
+  } catch (err) {
+    console.error("Failed to auto-create draft", err);
+  }
+  return null;
+}
+
 async function loadDrafts() {
   try {
     const res = await fetch("/api/drafts");
     if (res.ok) {
       drafts = await res.json();
       renderDraftList();
-      if (drafts.length > 0 && !currentDraft) {
-        selectDraft(drafts[0].id);
+      if (drafts.length > 0) {
+        if (!currentDraft || !drafts.some(d => d.id === currentDraft.id)) {
+          await selectDraft(drafts[0].id);
+        }
+      } else if (!currentDraft) {
+        await ensureDraft();
       }
     }
   } catch (err) {
@@ -323,7 +348,22 @@ function updateCharCounter(inputEl, counterEl, max) {
 }
 
 async function uploadFiles(files) {
-  if (!currentDraft || !files || !files.length) return;
+  if (!files || !files.length) return;
+
+  if (!currentDraft) {
+    await ensureDraft();
+  }
+  if (!currentDraft) {
+    alert("Konnte keinen Entwurf für den Foto-Upload erstellen.");
+    return;
+  }
+
+  const dropzoneP = dropzoneEl.querySelector("p");
+  const originalText = dropzoneP ? dropzoneP.textContent : "";
+  if (dropzoneP) dropzoneP.textContent = "⏳ Fotos werden hochgeladen & verarbeitet...";
+  dropzoneEl.style.opacity = "0.7";
+  dropzoneEl.style.pointerEvents = "none";
+
   const formData = new FormData();
   for (const f of files) {
     formData.append("files", f);
@@ -336,9 +376,18 @@ async function uploadFiles(files) {
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
+      await loadDrafts();
+    } else {
+      const errData = await res.json().catch(() => ({}));
+      alert(`Upload fehlgeschlagen: ${errData.detail || res.statusText || "Serverfehler"}`);
     }
   } catch (err) {
     console.error("Upload error", err);
+    alert(`Fehler beim Upload: ${err.message}`);
+  } finally {
+    if (dropzoneP) dropzoneP.textContent = originalText;
+    dropzoneEl.style.opacity = "1";
+    dropzoneEl.style.pointerEvents = "auto";
   }
 }
 
@@ -352,6 +401,7 @@ function setupEventListeners() {
       });
       if (res.ok) {
         const newD = await res.json();
+        currentDraft = newD;
         await loadDrafts();
         selectDraft(newD.id);
       }
@@ -360,27 +410,41 @@ function setupEventListeners() {
     }
   };
 
+  dropzoneEl.onclick = (e) => {
+    if (e.target !== fileInputEl) {
+      fileInputEl.click();
+    }
+  };
+
   fileInputEl.onchange = async () => {
-    if (!currentDraft || !fileInputEl.files.length) return;
-    await uploadFiles(fileInputEl.files);
+    if (!fileInputEl.files || !fileInputEl.files.length) return;
+    const files = Array.from(fileInputEl.files);
     fileInputEl.value = "";
+    await uploadFiles(files);
   };
 
   dropzoneEl.addEventListener("dragover", e => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
     dropzoneEl.style.borderColor = "var(--primary)";
+    dropzoneEl.style.background = "#eff6ff";
   });
 
   dropzoneEl.addEventListener("dragleave", () => {
     dropzoneEl.style.borderColor = "";
+    dropzoneEl.style.background = "";
   });
 
   dropzoneEl.addEventListener("drop", async e => {
     e.preventDefault();
     dropzoneEl.style.borderColor = "";
-    if (!currentDraft || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    dropzoneEl.style.background = "";
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
     await uploadFiles(e.dataTransfer.files);
   });
+
+  window.addEventListener("dragover", e => e.preventDefault());
+  window.addEventListener("drop", e => e.preventDefault());
 
   ricardoTitle.oninput = () => updateCharCounter(ricardoTitle, ricardoTitleCount, 60);
   tuttiTitle.oninput = () => updateCharCounter(tuttiTitle, tuttiTitleCount, 80);
@@ -392,6 +456,9 @@ function setupEventListeners() {
   }
 
   btnSaveDraft.onclick = async () => {
+    if (!currentDraft) {
+      await ensureDraft();
+    }
     if (!currentDraft) return;
     syncDraftFromForm();
     try {
@@ -412,6 +479,9 @@ function setupEventListeners() {
   };
 
   btnAnalyze.onclick = async () => {
+    if (!currentDraft) {
+      await ensureDraft();
+    }
     if (!currentDraft) return;
     syncDraftFromForm();
     // Save draft first
@@ -496,7 +566,7 @@ async function deleteDraft(draftId) {
       if (!currentDraft && drafts.length > 0) {
         selectDraft(drafts[0].id);
       } else if (drafts.length === 0) {
-        window.location.reload();
+        await ensureDraft();
       }
     }
   } catch (err) {
