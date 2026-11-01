@@ -81,6 +81,7 @@ const modalBackdrop = document.getElementById("modal-backdrop");
 const cfgGeminiKey = document.getElementById("cfg-gemini-key");
 const btnToggleKey = document.getElementById("btn-toggle-key");
 const cfgGeminiModel = document.getElementById("cfg-gemini-model");
+const cfgSearchGrounding = document.getElementById("cfg-search-grounding");
 const cfgKeyStatus = document.getElementById("cfg-key-status");
 
 let systemConfig = null;
@@ -111,6 +112,9 @@ async function loadSystemConfig() {
       
       if (cfgGeminiModel) {
         cfgGeminiModel.value = systemConfig.gemini_model || "gemini-3.8-flash";
+      }
+      if (cfgSearchGrounding) {
+        cfgSearchGrounding.checked = systemConfig.enable_search_grounding !== false;
       }
       updateKeyStatusUI();
     }
@@ -146,7 +150,10 @@ async function saveSystemConfig() {
   const newKey = cfgGeminiKey.value.trim();
   const newModel = cfgGeminiModel.value;
 
-  const payload = { gemini_model: newModel };
+  const payload = {
+    gemini_model: newModel,
+    enable_search_grounding: cfgSearchGrounding ? cfgSearchGrounding.checked : true,
+  };
   if (newKey) {
     payload.gemini_api_key = newKey;
   }

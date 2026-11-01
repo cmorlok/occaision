@@ -70,6 +70,7 @@ class PatchImageModeRequest(BaseModel):
 class UpdateSystemConfigRequest(BaseModel):
     gemini_api_key: Optional[str] = None
     gemini_model: Optional[str] = None
+    enable_search_grounding: Optional[bool] = None
 
 
 def create_app(
@@ -168,6 +169,7 @@ def create_app(
         return {
             "gemini_api_key_configured": has_key,
             "gemini_model": cfg.gemini_model,
+            "enable_search_grounding": cfg.enable_search_grounding,
             "masked_key": masked,
             "eur_to_chf_rate": cfg.eur_to_chf_rate,
             "available_models": available_models,
@@ -183,6 +185,10 @@ def create_app(
             cfg.gemini_model = body.gemini_model
             ai_svc.model_name = body.gemini_model
 
+        if body.enable_search_grounding is not None:
+            cfg.enable_search_grounding = body.enable_search_grounding
+            ai_svc.enable_search_grounding = body.enable_search_grounding
+
         if body.gemini_api_key is not None and body.gemini_api_key.strip():
             new_key = body.gemini_api_key.strip()
             cfg.gemini_api_key = new_key
@@ -195,6 +201,8 @@ def create_app(
                     updated = []
                     found_key = False
                     found_model = False
+                    found_grounding = False
+                    grounding_val = "true" if cfg.enable_search_grounding else "false"
                     for l in lines:
                         if l.startswith("GEMINI_API_KEY="):
                             updated.append(f"GEMINI_API_KEY={new_key}")
@@ -202,32 +210,44 @@ def create_app(
                         elif l.startswith("GEMINI_MODEL="):
                             updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
                             found_model = True
+                        elif l.startswith("ENABLE_SEARCH_GROUNDING="):
+                            updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
+                            found_grounding = True
                         else:
                             updated.append(l)
                     if not found_key:
                         updated.append(f"GEMINI_API_KEY={new_key}")
                     if not found_model:
                         updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
+                    if not found_grounding:
+                        updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
                     env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
-                    logger.info("[Config] GEMINI_API_KEY und GEMINI_MODEL in .env gespeichert.")
+                    logger.info("[Config] GEMINI_API_KEY, GEMINI_MODEL und ENABLE_SEARCH_GROUNDING in .env gespeichert.")
                 except Exception as e:
                     logger.warning(f"Fehler beim Speichern in .env: {e}")
-        elif body.gemini_model:
-            # Model-only update in .env (do not overwrite during test runs)
+        elif body.gemini_model or body.enable_search_grounding is not None:
+            # Model or grounding update in .env (do not overwrite during test runs)
             env_path = Path(".env")
             if env_path.exists() and "pytest" not in sys.modules:
                 try:
                     lines = env_path.read_text(encoding="utf-8").splitlines()
                     updated = []
                     found_model = False
+                    found_grounding = False
+                    grounding_val = "true" if cfg.enable_search_grounding else "false"
                     for l in lines:
                         if l.startswith("GEMINI_MODEL="):
                             updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
                             found_model = True
+                        elif l.startswith("ENABLE_SEARCH_GROUNDING="):
+                            updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
+                            found_grounding = True
                         else:
                             updated.append(l)
                     if not found_model:
                         updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
+                    if not found_grounding:
+                        updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
                     env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
                 except Exception as e:
                     logger.warning(f"Fehler beim Speichern in .env: {e}")
@@ -399,6 +419,17 @@ def create_app(
         except Exception as e:
             logger.error(f"[API] KI-Analyse fehlgeschlagen: {e}")
             err_str = str(e)
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=(
+                        "Google Gemini Quota-Limit erreicht (429 RESOURCE_EXHAUSTED).\n\n"
+                        "Mögliche Ursachen & Lösungen:\n"
+                        "1. Kurzzeitiges Limit: Warte ca. 1 Minute und klicke erneut auf Analyse (Rate-Limit pro Minute im Free Tier).\n"
+                        "2. Web-Suche deaktivieren: Schalte in den Einstellungen (⚙️) 'Google Search Grounding (Websuche)' aus, da die Live-Suche im Free Tier oft strenger limitiert ist.\n"
+                        "3. Wichtig zum Google One / AI Pro Abo: Ein Google One AI Premium Abo gilt nur für den Consumer-Chat (gemini.google.com), nicht für die Entwickler-API (Google AI Studio). Für unbegrenztes API-Volumen kann auf https://aistudio.google.com ein Pay-As-You-Go Billing-Account hinterlegt werden (für Flash-Modelle fallen meist weniger als 0.001 CHF pro Inserat an)."
+                    ),
+                )
             if "API_KEY_INVALID" in err_str or "API key not valid" in err_str or "API key" in err_str:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

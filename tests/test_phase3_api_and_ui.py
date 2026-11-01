@@ -185,6 +185,7 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     cfg_data = res_cfg.json()
     assert "gemini_api_key_configured" in cfg_data
     assert "gemini_model" in cfg_data
+    assert "enable_search_grounding" in cfg_data
     assert "available_models" in cfg_data
     assert len(cfg_data["available_models"]) > 0
     assert any("3.8-flash" in m["id"] for m in cfg_data["available_models"])
@@ -194,11 +195,18 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     models_data = res_models.json()
     assert len(models_data) > 0
     
-    # 2. POST /api/config with a new key
-    res_update = client.post("/api/config", json={"gemini_api_key": "AIzaSyTestValidLengthKey12345"})
+    # 2. POST /api/config with a new key and disable search grounding
+    res_update = client.post(
+        "/api/config",
+        json={
+            "gemini_api_key": "AIzaSyTestValidLengthKey12345",
+            "enable_search_grounding": False,
+        },
+    )
     assert res_update.status_code == 200
     updated_cfg = res_update.json()
     assert updated_cfg["gemini_api_key_configured"] is True
+    assert updated_cfg["enable_search_grounding"] is False
     assert "AIza" in updated_cfg["masked_key"]
     
     # 3. Create a draft and test defensive handling when Gemini raises an invalid key error
@@ -209,3 +217,10 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
         res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
         assert res_analyze.status_code == 400
         assert "API-Key" in res_analyze.json()["detail"]
+
+    # 4. Test defensive handling when Gemini raises 429 RESOURCE_EXHAUSTED
+    with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=Exception("429 RESOURCE_EXHAUSTED: You exceeded your current quota")):
+        res_429 = client.post(f"/api/drafts/{draft_id}/analyze")
+        assert res_429.status_code == 429
+        assert "Quota-Limit" in res_429.json()["detail"]
+        assert "Search Grounding" in res_429.json()["detail"]
