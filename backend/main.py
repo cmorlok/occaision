@@ -1,4 +1,6 @@
+import logging
 from pathlib import Path
+import sys
 from typing import List, Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +20,14 @@ from backend.services.ai_service import AIService
 from backend.services.ebay_service import EbayService
 from backend.services.image_service import ImageService
 from backend.storage import StorageService
+
+logger = logging.getLogger("seller.api")
+if not logger.handlers:
+    _api_handler = logging.StreamHandler(sys.stdout)
+    _api_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(_api_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 class CreateDraftRequest(BaseModel):
@@ -125,6 +135,7 @@ def create_app(
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found")
 
+        logger.info(f"[API] Empfange {len(files)} Bild(er) für Draft {draft_id}...")
         for f in files:
             content = await f.read()
             draft_image = img_svc.process_upload(
@@ -133,6 +144,7 @@ def create_app(
                 original_filename=f.filename or "upload.jpg",
             )
             draft.images.append(draft_image)
+            logger.info(f"[API] Bild {draft_image.id} ({f.filename}) zu Draft hinzugefügt.")
 
         return storage.update_draft(draft)
 
@@ -147,6 +159,7 @@ def create_app(
         if len(draft.images) == initial_len:
             raise HTTPException(status_code=404, detail="Image not found")
 
+        logger.info(f"[API] Lösche Bild {image_id} aus Draft {draft_id}...")
         img_svc.delete_image(draft_id=draft_id, image_id=image_id)
         return storage.update_draft(draft)
 
@@ -166,6 +179,7 @@ def create_app(
             raise HTTPException(status_code=404, detail="Image not found")
 
         mode = body.active_mode
+        logger.info(f"[API] Moduswechsel für Bild {image_id} auf '{mode.value}' angefordert (Draft: {draft_id})...")
         # Pre-generate variant if needed
         if mode == ImageVariantMode.CUTOUT:
             img_svc.get_or_create_cutout(draft_id=draft_id, image_id=image_id)
@@ -179,7 +193,9 @@ def create_app(
             )
 
         target_img.active_mode = mode
-        return storage.update_draft(draft)
+        updated = storage.update_draft(draft)
+        logger.info(f"[API] Bild {image_id} Modus erfolgreich auf '{mode.value}' gesetzt.")
+        return updated
 
     @app.get("/api/drafts/{draft_id}/images/{image_id}/{variant}")
     def get_image_file(draft_id: str, image_id: str, variant: str):
@@ -219,6 +235,7 @@ def create_app(
     # 5. Analysis
     @app.post("/api/drafts/{draft_id}/analyze", response_model=Draft)
     async def analyze_draft(draft_id: str):
+        logger.info(f"[API] Starte KI- und Preisanalyse für Draft {draft_id}...")
         draft = storage.get_draft(draft_id)
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found")

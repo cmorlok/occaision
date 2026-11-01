@@ -1,5 +1,8 @@
 import io
+import logging
 from pathlib import Path
+import sys
+import time
 from typing import Callable, Optional
 import uuid
 from PIL import Image, ImageFilter, ImageOps
@@ -8,6 +11,14 @@ import pillow_heif
 from backend.models import DraftImage, ImageVariantMode
 
 pillow_heif.register_heif_opener()
+
+logger = logging.getLogger("seller.image")
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
+logger.propagate = False
 
 
 class ImageService:
@@ -55,9 +66,16 @@ class ImageService:
 
         import rembg
         if self._rembg_session is None:
+            logger.info(f"[ImageService] Initialisiere rembg KI-Modell '{self._rembg_model}'...")
+            t_sess = time.time()
             self._rembg_session = rembg.new_session(self._rembg_model)
+            logger.info(f"[ImageService] rembg KI-Modell initialisiert in {time.time() - t_sess:.2f}s.")
 
-        return rembg.remove(img, session=self._rembg_session)
+        logger.info(f"[ImageService] Berechne KI-Maske (rembg) für Bild ({img.width}x{img.height}px)...")
+        t_rem = time.time()
+        rgba = rembg.remove(img, session=self._rembg_session)
+        logger.info(f"[ImageService] KI-Maske erfolgreich berechnet in {time.time() - t_rem:.2f}s.")
+        return rgba
 
     def _get_draft_image_dir(self, draft_id: str) -> Path:
         dir_path = self.images_dir / draft_id
@@ -67,6 +85,8 @@ class ImageService:
     def process_upload(
         self, draft_id: str, raw_bytes: bytes, original_filename: str
     ) -> DraftImage:
+        logger.info(f"[ImageService] Verarbeite Bild-Upload '{original_filename}' für Draft {draft_id}...")
+        t0 = time.time()
         draft_img_dir = self._get_draft_image_dir(draft_id)
         image_id = f"img_{uuid.uuid4().hex[:12]}"
 
@@ -84,7 +104,7 @@ class ImageService:
             ImageVariantMode.OPTIMIZED: f"/api/drafts/{draft_id}/images/{image_id}/optimized"
         }
 
-        return DraftImage(
+        draft_img = DraftImage(
             id=image_id,
             original_filename=original_filename,
             active_mode=ImageVariantMode.OPTIMIZED,
@@ -93,43 +113,58 @@ class ImageService:
             height=opt_img.height,
             exif_stripped=True,
         )
+        logger.info(
+            f"[ImageService] Upload '{original_filename}' erfolgreich gespeichert ({opt_img.width}x{opt_img.height}px, EXIF entfernt) in {time.time() - t0:.2f}s -> {image_id}"
+        )
+        return draft_img
 
     def get_or_create_cutout(self, draft_id: str, image_id: str) -> Path:
         draft_img_dir = self._get_draft_image_dir(draft_id)
         cutout_path = draft_img_dir / f"{image_id}_cutout.jpg"
         if cutout_path.exists():
+            logger.info(f"[ImageService] Freigestelltes Bild existiert bereits im Cache: {cutout_path.name}")
             return cutout_path
 
         opt_path = draft_img_dir / f"{image_id}_optimized.jpg"
         if not opt_path.exists():
             raise FileNotFoundError(f"Optimized image not found: {opt_path}")
 
+        logger.info(f"[ImageService] Starte Hintergrundentfernung für Bild {image_id} (Draft: {draft_id})...")
+        t0 = time.time()
         with Image.open(opt_path) as opt_img:
             rgba = self.extract_foreground(opt_img)
             # Composite foreground onto clean neutral light-gray/white (#F8F9FA) canvas
             bg = Image.new("RGB", rgba.size, (248, 249, 250))
             bg.paste(rgba, mask=rgba.split()[3])
             bg.save(cutout_path, format="JPEG", quality=90, optimize=True)
+            elapsed = time.time() - t0
+            logger.info(f"[ImageService] Hintergrund erfolgreich entfernt in {elapsed:.2f}s -> {cutout_path.name}")
             return cutout_path
 
     def get_or_create_blurred(self, draft_id: str, image_id: str) -> Path:
         draft_img_dir = self._get_draft_image_dir(draft_id)
         blurred_path = draft_img_dir / f"{image_id}_blurred.jpg"
         if blurred_path.exists():
+            logger.info(f"[ImageService] Weichgezeichnetes Bild existiert bereits im Cache: {blurred_path.name}")
             return blurred_path
 
         opt_path = draft_img_dir / f"{image_id}_optimized.jpg"
         if not opt_path.exists():
             raise FileNotFoundError(f"Optimized image not found: {opt_path}")
 
+        logger.info(f"[ImageService] Starte Weichzeichnen (Blur) für Bild {image_id} (Draft: {draft_id})...")
+        t0 = time.time()
         with Image.open(opt_path) as opt_img:
             rgba = self.extract_foreground(opt_img)
             blurred_bg = opt_img.filter(ImageFilter.GaussianBlur(radius=18))
             composited = Image.composite(opt_img, blurred_bg, rgba.split()[3])
             composited.save(blurred_path, format="JPEG", quality=90, optimize=True)
+            elapsed = time.time() - t0
+            logger.info(f"[ImageService] Hintergrund erfolgreich weichgezeichnet in {elapsed:.2f}s -> {blurred_path.name}")
             return blurred_path
 
     def delete_image(self, draft_id: str, image_id: str) -> bool:
+        logger.info(f"[ImageService] Lösche Bilddateien für {image_id} (Draft: {draft_id})...")
         draft_img_dir = self._get_draft_image_dir(draft_id)
         deleted_any = False
         for p in draft_img_dir.glob(f"{image_id}_*"):

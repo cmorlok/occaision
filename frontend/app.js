@@ -287,6 +287,7 @@ function renderGallery() {
   currentDraft.images.forEach(img => {
     const card = document.createElement("div");
     card.className = "image-card";
+    card.id = `image-card-${img.id}`;
     const cacheBuster = `?t=${Date.now()}`;
     const previewUrl = `/api/drafts/${currentDraft.id}/images/${img.id}/active${cacheBuster}`;
 
@@ -295,8 +296,8 @@ function renderGallery() {
       <div class="image-card-controls">
         <div class="mode-selectors">
           <button class="btn-mode ${img.active_mode === 'optimized' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'optimized')">Original</button>
-          <button class="btn-mode ${img.active_mode === 'blurred' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'blurred')">Blur</button>
-          <button class="btn-mode ${img.active_mode === 'cutout' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'cutout')">rembg</button>
+          <button class="btn-mode ${img.active_mode === 'blurred' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'blurred')">Weichzeichnen</button>
+          <button class="btn-mode ${img.active_mode === 'cutout' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'cutout')">Hintergrund entfernen</button>
         </div>
         <button class="btn-del-img" onclick="deleteImage('${img.id}')">Bild löschen 🗑️</button>
       </div>
@@ -307,6 +308,35 @@ function renderGallery() {
 
 async function changeImageMode(imageId, mode) {
   if (!currentDraft) return;
+  const currentImg = (currentDraft.images || []).find(i => i.id === imageId);
+  if (currentImg && currentImg.active_mode === mode) return;
+
+  const card = document.getElementById(`image-card-${imageId}`);
+  let overlay = null;
+  if (card) {
+    overlay = document.createElement("div");
+    overlay.className = "image-loading-overlay";
+    let text = "Wird verarbeitet...";
+    let subtext = "Bitte kurz warten...";
+    if (mode === "cutout") {
+      text = "Hintergrund entfernen...";
+      subtext = "KI-Segmentierung läuft...";
+    } else if (mode === "blurred") {
+      text = "Hintergrund weichzeichnen...";
+      subtext = "Berechne Tiefenschärfe...";
+    } else if (mode === "optimized") {
+      text = "Original laden...";
+      subtext = "Bereite Ansicht vor...";
+    }
+    overlay.innerHTML = `
+      <div class="spinner"></div>
+      <div class="overlay-text">${text}</div>
+      <div class="overlay-subtext">${subtext}</div>
+    `;
+    card.appendChild(overlay);
+    card.querySelectorAll("button").forEach(b => b.disabled = true);
+  }
+
   try {
     const res = await fetch(`/api/drafts/${currentDraft.id}/images/${imageId}`, {
       method: "PATCH",
@@ -316,14 +346,28 @@ async function changeImageMode(imageId, mode) {
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(`Fehler bei der Bildbearbeitung: ${err.detail || res.statusText || "Serverfehler"}`);
+      if (overlay) overlay.remove();
+      if (card) card.querySelectorAll("button").forEach(b => b.disabled = false);
     }
   } catch (err) {
     console.error("Failed to change mode", err);
+    alert(`Fehler bei der Bildbearbeitung: ${err.message}`);
+    if (overlay) overlay.remove();
+    if (card) card.querySelectorAll("button").forEach(b => b.disabled = false);
   }
 }
 
 async function deleteImage(imageId) {
   if (!currentDraft) return;
+  if (!confirm("Foto wirklich löschen?")) return;
+  const card = document.getElementById(`image-card-${imageId}`);
+  if (card) {
+    card.querySelectorAll("button").forEach(b => b.disabled = true);
+    card.style.opacity = "0.5";
+  }
   try {
     const res = await fetch(`/api/drafts/${currentDraft.id}/images/${imageId}`, {
       method: "DELETE"
@@ -331,9 +375,19 @@ async function deleteImage(imageId) {
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
+    } else {
+      alert("Fehler beim Löschen des Fotos.");
+      if (card) {
+        card.style.opacity = "1";
+        card.querySelectorAll("button").forEach(b => b.disabled = false);
+      }
     }
   } catch (err) {
     console.error("Failed to delete image", err);
+    if (card) {
+      card.style.opacity = "1";
+      card.querySelectorAll("button").forEach(b => b.disabled = false);
+    }
   }
 }
 
