@@ -102,6 +102,21 @@ def create_app(
 
     @app.get("/api/config")
     def get_system_config():
+        # If key is missing or default placeholder, re-read directly from .env
+        if not cfg.gemini_api_key or cfg.gemini_api_key == "your_google_ai_studio_api_key_here":
+            env_file = Path(".env")
+            if env_file.exists():
+                try:
+                    for line in env_file.read_text(encoding="utf-8").splitlines():
+                        if line.startswith("GEMINI_API_KEY="):
+                            val = line.split("=", 1)[1].strip()
+                            if val and val != "your_google_ai_studio_api_key_here":
+                                cfg.gemini_api_key = val
+                                ai_svc.set_api_key(val, model_name=cfg.gemini_model)
+                                break
+                except Exception:
+                    pass
+
         key = cfg.gemini_api_key or ""
         has_key = bool(
             key
@@ -112,22 +127,39 @@ def create_app(
         if has_key:
             clean_key = key.strip()
             masked = f"{clean_key[:4]}...{clean_key[-4:]}"
+
+        # Auto-upgrade deprecated gemini-2.5-flash / gemini-2.0-flash to gemini-3.8-flash
+        if cfg.gemini_model in ["gemini-2.5-flash", "gemini-2.0-flash"]:
+            cfg.gemini_model = "gemini-3.8-flash"
+            ai_svc.model_name = "gemini-3.8-flash"
+
+        available_models = ai_svc.get_available_models()
+
         return {
             "gemini_api_key_configured": has_key,
             "gemini_model": cfg.gemini_model,
             "masked_key": masked,
             "eur_to_chf_rate": cfg.eur_to_chf_rate,
+            "available_models": available_models,
         }
+
+    @app.get("/api/models")
+    def get_models():
+        return ai_svc.get_available_models()
 
     @app.post("/api/config")
     def update_system_config(body: UpdateSystemConfigRequest):
-        if body.gemini_api_key is not None:
+        if body.gemini_model:
+            cfg.gemini_model = body.gemini_model
+            ai_svc.model_name = body.gemini_model
+
+        if body.gemini_api_key is not None and body.gemini_api_key.strip():
             new_key = body.gemini_api_key.strip()
             cfg.gemini_api_key = new_key
-            ai_svc.set_api_key(new_key, model_name=body.gemini_model)
-            # Update .env
+            ai_svc.set_api_key(new_key, model_name=cfg.gemini_model)
+            # Update .env (do not overwrite during test runs)
             env_path = Path(".env")
-            if env_path.exists():
+            if env_path.exists() and "pytest" not in sys.modules:
                 try:
                     lines = env_path.read_text(encoding="utf-8").splitlines()
                     updated = []
@@ -137,22 +169,38 @@ def create_app(
                         if l.startswith("GEMINI_API_KEY="):
                             updated.append(f"GEMINI_API_KEY={new_key}")
                             found_key = True
-                        elif body.gemini_model and l.startswith("GEMINI_MODEL="):
-                            updated.append(f"GEMINI_MODEL={body.gemini_model}")
+                        elif l.startswith("GEMINI_MODEL="):
+                            updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
                             found_model = True
                         else:
                             updated.append(l)
                     if not found_key:
                         updated.append(f"GEMINI_API_KEY={new_key}")
-                    if body.gemini_model and not found_model:
-                        updated.append(f"GEMINI_MODEL={body.gemini_model}")
+                    if not found_model:
+                        updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
                     env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
-                    logger.info("[Config] GEMINI_API_KEY in .env gespeichert.")
+                    logger.info("[Config] GEMINI_API_KEY und GEMINI_MODEL in .env gespeichert.")
                 except Exception as e:
                     logger.warning(f"Fehler beim Speichern in .env: {e}")
         elif body.gemini_model:
-            cfg.gemini_model = body.gemini_model
-            ai_svc.model_name = body.gemini_model
+            # Model-only update in .env (do not overwrite during test runs)
+            env_path = Path(".env")
+            if env_path.exists() and "pytest" not in sys.modules:
+                try:
+                    lines = env_path.read_text(encoding="utf-8").splitlines()
+                    updated = []
+                    found_model = False
+                    for l in lines:
+                        if l.startswith("GEMINI_MODEL="):
+                            updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
+                            found_model = True
+                        else:
+                            updated.append(l)
+                    if not found_model:
+                        updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
+                    env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+                except Exception as e:
+                    logger.warning(f"Fehler beim Speichern in .env: {e}")
 
         return get_system_config()
 

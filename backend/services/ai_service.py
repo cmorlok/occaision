@@ -165,7 +165,7 @@ class AIService:
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-2.5-flash",
+        model_name: str = "gemini-3.8-flash",
         enable_search_grounding: bool = True,
         eur_to_chf: float = 0.94,
     ):
@@ -188,6 +188,82 @@ class AIService:
         if model_name:
             self.model_name = model_name
         self._client = genai.Client(api_key=self.api_key)
+
+    def get_available_models(self) -> List[Dict[str, str]]:
+        """Query Gemini API for available models or fallback to recommended list."""
+        if self.api_key and self.api_key != "your_google_ai_studio_api_key_here":
+            try:
+                results = []
+                for m in self.client.models.list():
+                    actions = (
+                        getattr(m, "supported_actions", None)
+                        or getattr(m, "supported_generation_methods", [])
+                        or []
+                    )
+                    if "generateContent" not in actions:
+                        continue
+                    name = m.name or ""
+                    if name.startswith("models/"):
+                        name = name[7:]
+                    lower = name.lower()
+                    if any(
+                        skip in lower
+                        for skip in [
+                            "tts", "live", "transcribe", "robotics", "embedding",
+                            "lyria", "computer-use", "aqa", "banana", "nano",
+                            "preview", "gemma", "argon", "omni", "deep-research",
+                            "antigravity", "customtools", "gemini-2.5-flash",
+                            "gemini-2.0-flash", "gemini-1.5", "image"
+                        ]
+                    ):
+                        continue
+                    disp = getattr(m, "display_name", "") or name
+                    label = f"{disp} (Empfohlen)" if "3.8-flash" in name else disp
+                    results.append({"id": name, "label": label})
+
+                def sort_key(item):
+                    nid = item["id"]
+                    priority = 99
+                    if "3.8-flash" in nid:
+                        priority = 1
+                    elif "3.7-flash" in nid:
+                        priority = 2
+                    elif "3.6-flash" in nid:
+                        priority = 3
+                    elif "3.5-flash" in nid:
+                        priority = 4
+                    elif "flash-latest" in nid:
+                        priority = 5
+                    elif "3.1-flash-lite" in nid:
+                        priority = 6
+                    elif "3.5-flash-lite" in nid:
+                        priority = 7
+                    elif "flash-lite-latest" in nid:
+                        priority = 8
+                    elif "pro-latest" in nid:
+                        priority = 9
+                    elif "2.5-pro" in nid:
+                        priority = 10
+                    return (priority, nid)
+
+                results.sort(key=sort_key)
+                if results:
+                    return results
+            except Exception as e:
+                logger.warning(f"Konnte Modelle nicht von Gemini abrufen: {e}")
+
+        # Fallback list of current production models
+        return [
+            {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash (Empfohlen)"},
+            {"id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash"},
+            {"id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash"},
+            {"id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash"},
+            {"id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash Lite"},
+            {"id": "gemini-flash-latest", "label": "Gemini Flash Latest"},
+            {"id": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash Lite"},
+            {"id": "gemini-pro-latest", "label": "Gemini Pro Latest"},
+            {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+        ]
 
     def get_generate_config(self) -> types.GenerateContentConfig:
         if self.enable_search_grounding:

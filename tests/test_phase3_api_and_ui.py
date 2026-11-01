@@ -179,12 +179,20 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
 def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     client = TestClient(test_app)
     
-    # 1. GET /api/config
+    # 1. GET /api/config & GET /api/models
     res_cfg = client.get("/api/config")
     assert res_cfg.status_code == 200
     cfg_data = res_cfg.json()
     assert "gemini_api_key_configured" in cfg_data
     assert "gemini_model" in cfg_data
+    assert "available_models" in cfg_data
+    assert len(cfg_data["available_models"]) > 0
+    assert any("3.8-flash" in m["id"] for m in cfg_data["available_models"])
+
+    res_models = client.get("/api/models")
+    assert res_models.status_code == 200
+    models_data = res_models.json()
+    assert len(models_data) > 0
     
     # 2. POST /api/config with a new key
     res_update = client.post("/api/config", json={"gemini_api_key": "AIzaSyTestValidLengthKey12345"})

@@ -97,7 +97,21 @@ async function loadSystemConfig() {
     const res = await fetch("/api/config");
     if (res.ok) {
       systemConfig = await res.json();
-      if (cfgGeminiModel) cfgGeminiModel.value = systemConfig.gemini_model || "gemini-2.5-flash";
+      
+      // Dynamically populate available models from server
+      if (cfgGeminiModel && systemConfig.available_models && systemConfig.available_models.length > 0) {
+        cfgGeminiModel.innerHTML = "";
+        systemConfig.available_models.forEach(m => {
+          const opt = document.createElement("option");
+          opt.value = m.id;
+          opt.textContent = m.label;
+          cfgGeminiModel.appendChild(opt);
+        });
+      }
+      
+      if (cfgGeminiModel) {
+        cfgGeminiModel.value = systemConfig.gemini_model || "gemini-3.8-flash";
+      }
       updateKeyStatusUI();
     }
   } catch (err) {
