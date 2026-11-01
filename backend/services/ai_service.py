@@ -3,6 +3,7 @@ import json
 import logging
 from pathlib import Path
 import re
+import sys
 from typing import Any, Dict, List, Optional
 from PIL import Image
 from google import genai
@@ -19,7 +20,12 @@ from backend.models import (
 )
 from backend.services.ebay_service import EbayService
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("seller.ai")
+if not logger.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+    logger.addHandler(_handler)
+logger.propagate = False
 
 SWISS_LEGAL_DISCLAIMER = "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
 GERMAN_LEGAL_DISCLAIMER = (
@@ -312,8 +318,10 @@ class AIService:
             "Bitte analysiere die bereitgestellten Fotos und Informationen und liefere das JSON-Objekt."
         )
 
-        contents: list = ["\n".join(user_prompt_parts)]
+        user_prompt_text = "\n".join(user_prompt_parts)
+        contents: list = [user_prompt_text]
 
+        valid_images = []
         # Attach image files
         for p in image_paths:
             if p.exists():
@@ -321,11 +329,34 @@ class AIService:
                     img_bytes = p.read_bytes()
                     part = types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg")
                     contents.append(part)
+                    valid_images.append(f"{p.name} ({len(img_bytes) / 1024:.1f} KB)")
                 except Exception as e:
                     logger.warning(f"Failed to read image {p}: {e}")
 
         config = self.get_generate_config()
+
+        logger.info(
+            f"[AIService] Sende Anfrage an Gemini (Modell: {self.model_name}, Bilder: {len(valid_images)}, Search Grounding: {self.enable_search_grounding})..."
+        )
+
+        logger.debug("=" * 70)
+        logger.debug("--- [GEMINI AI PROMPT DEBUG START] ---")
+        logger.debug(f"Modell: {self.model_name}")
+        logger.debug(f"Search Grounding aktiv: {self.enable_search_grounding}")
+        logger.debug(f"Bilder ({len(valid_images)}): {', '.join(valid_images) if valid_images else 'keine'}")
+        logger.debug(f"\n[SYSTEM INSTRUCTION]:\n{SYSTEM_INSTRUCTION.strip()}")
+        logger.debug(f"\n[USER PROMPT]:\n{user_prompt_text.strip()}")
+        logger.debug("--- [GEMINI AI PROMPT DEBUG END] ---")
+        logger.debug("=" * 70)
+
         raw_text = await self._call_gemini(contents=contents, config=config)
+
+        logger.info(f"[AIService] Antwort von Gemini erhalten ({len(raw_text)} Zeichen).")
+        logger.debug("=" * 70)
+        logger.debug("--- [GEMINI AI RAW RESPONSE DEBUG START] ---")
+        logger.debug(raw_text.strip())
+        logger.debug("--- [GEMINI AI RAW RESPONSE DEBUG END] ---")
+        logger.debug("=" * 70)
         raw_payload = extract_and_parse_json(raw_text)
         payload = post_process_ai_output(raw_payload)
 

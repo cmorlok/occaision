@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 import sys
 from typing import List, Optional
@@ -30,6 +31,34 @@ logger.setLevel(logging.INFO)
 logger.propagate = False
 
 
+def configure_logging(level_name: Optional[str] = None):
+    """Set log level on all seller.* loggers based on CLI args, env var, or config."""
+    cli_level = None
+    for i, arg in enumerate(sys.argv):
+        if arg in ("--log-level", "-l") and i + 1 < len(sys.argv):
+            cli_level = sys.argv[i + 1].upper()
+            break
+        elif arg.startswith("--log-level="):
+            cli_level = arg.split("=", 1)[1].upper()
+            break
+
+    effective_name = (
+        cli_level
+        or os.environ.get("LOG_LEVEL")
+        or level_name
+        or "INFO"
+    ).upper()
+
+    level = getattr(logging, effective_name, logging.INFO)
+
+    for name in ["seller", "seller.api", "seller.image", "seller.ai"]:
+        l = logging.getLogger(name)
+        l.setLevel(level)
+
+    if level == logging.DEBUG:
+        logger.info("[Logging] Debug-Logging ist AKTIV (vollständige Prompts und Antworten werden ausgegeben).")
+
+
 class CreateDraftRequest(BaseModel):
     user_notes: str = ""
 
@@ -51,6 +80,7 @@ def create_app(
     ebay_service: Optional[EbayService] = None,
 ) -> FastAPI:
     cfg = settings or default_settings
+    configure_logging(cfg.log_level)
     storage = storage_service or StorageService(data_dir=cfg.data_dir)
     img_svc = image_service or ImageService(
         data_dir=cfg.data_dir,

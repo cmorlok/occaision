@@ -19,6 +19,28 @@
       "envFile": "${workspaceFolder}/.env"
     },
     {
+      "name": "FastAPI: Backend Server starten (mit Debug-Logs)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "backend.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--reload",
+        "--log-level",
+        "debug"
+      ],
+      "jinja": true,
+      "justMyCode": true,
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "LOG_LEVEL": "DEBUG"
+      }
+    },
+    {
       "name": "Extension bauen & Server starten",
       "type": "debugpy",
       "request": "launch",

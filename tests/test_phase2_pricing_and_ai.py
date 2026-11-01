@@ -1,4 +1,5 @@
 import json
+import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
@@ -288,3 +289,32 @@ async def test_iterative_reanalysis_preserves_draft_id_and_updates_hints(temp_da
         assert updated_draft_2.id == original_id
         assert len(updated_draft_2.missing_photo_hints) == 0
         assert len(updated_draft_2.images) == 2
+
+
+@pytest.mark.asyncio
+async def test_ai_prompt_debug_logging(temp_data_dir: Path, caplog):
+    storage = StorageService(data_dir=temp_data_dir)
+    draft = storage.create_draft(user_notes="Apple iPad Pro 11 M2")
+    ai_service = AIService(
+        api_key="test_key",
+        model_name="gemini-3.8-flash",
+        enable_search_grounding=True,
+    )
+
+    mock_resp = {
+        "identified_product": "Apple iPad Pro 11 M2",
+        "missing_photo_hints": [],
+        "ricardo_start_chf": 100.0,
+        "ricardo_buynow_chf": 500.0,
+        "tutti_vhb_chf": 500.0,
+    }
+
+    with caplog.at_level(logging.DEBUG, logger="seller.ai"):
+        with patch.object(ai_service, "_call_gemini", new_callable=AsyncMock) as mock_call:
+            mock_call.return_value = json.dumps(mock_resp)
+            await ai_service.analyze_draft(draft=draft, image_paths=[])
+
+    assert any("GEMINI AI PROMPT DEBUG START" in rec.message for rec in caplog.records)
+    assert any("SYSTEM INSTRUCTION" in rec.message for rec in caplog.records)
+    assert any("USER PROMPT" in rec.message for rec in caplog.records)
+    assert any("GEMINI AI RAW RESPONSE DEBUG START" in rec.message for rec in caplog.records)

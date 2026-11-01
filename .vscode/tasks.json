@@ -42,6 +42,33 @@
       }
     },
     {
+      "label": "Start Server mit Debug-Logs (FastAPI / Uvicorn)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload --log-level debug",
+      "options": {
+        "env": {
+          "LOG_LEVEL": "DEBUG"
+        }
+      },
+      "isBackground": true,
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^.*$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^INFO:.*Started server process.*",
+          "endsPattern": "^INFO:.*Application startup complete.*"
+        }
+      }
+    },
+    {
       "label": "Run All Tests (pytest)",
       "type": "shell",
       "command": "${workspaceFolder}/.venv/bin/pytest -v",

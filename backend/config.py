@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     enable_search_grounding: bool = True
     eur_to_chf_rate: float = 0.94
     rembg_model: str = "u2netp"
+    log_level: str = "INFO"
     data_dir: Path = Path("./data")
     host: str = "127.0.0.1"
     port: int = 8000
