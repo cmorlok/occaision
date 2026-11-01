@@ -71,10 +71,93 @@ const kleinanzeigenPrice = document.getElementById("kleinanzeigen-price");
 const kleinanzeigenPriceType = document.getElementById("kleinanzeigen-price-type");
 const kleinanzeigenDescription = document.getElementById("kleinanzeigen-description");
 
+// Settings Modal DOM Elements
+const btnSettings = document.getElementById("btn-settings");
+const settingsModal = document.getElementById("settings-modal");
+const btnCloseSettings = document.getElementById("btn-close-settings");
+const btnCancelSettings = document.getElementById("btn-cancel-settings");
+const btnSaveSettings = document.getElementById("btn-save-settings");
+const modalBackdrop = document.getElementById("modal-backdrop");
+const cfgGeminiKey = document.getElementById("cfg-gemini-key");
+const btnToggleKey = document.getElementById("btn-toggle-key");
+const cfgGeminiModel = document.getElementById("cfg-gemini-model");
+const cfgKeyStatus = document.getElementById("cfg-key-status");
+
+let systemConfig = null;
+
 async function init() {
   await loadSettings();
+  await loadSystemConfig();
   await loadDrafts();
   setupEventListeners();
+}
+
+async function loadSystemConfig() {
+  try {
+    const res = await fetch("/api/config");
+    if (res.ok) {
+      systemConfig = await res.json();
+      if (cfgGeminiModel) cfgGeminiModel.value = systemConfig.gemini_model || "gemini-2.5-flash";
+      updateKeyStatusUI();
+    }
+  } catch (err) {
+    console.error("Failed to load system config", err);
+  }
+}
+
+function updateKeyStatusUI() {
+  if (!cfgKeyStatus || !systemConfig) return;
+  if (systemConfig.gemini_api_key_configured) {
+    cfgKeyStatus.textContent = `✓ API-Key aktiv (${systemConfig.masked_key})`;
+    cfgKeyStatus.className = "key-status-indicator ok";
+  } else {
+    cfgKeyStatus.textContent = "⚠️ Kein gültiger API-Key hinterlegt (KI-Analyse benötigt einen Key)";
+    cfgKeyStatus.className = "key-status-indicator warn";
+  }
+}
+
+function openSettingsModal() {
+  if (!settingsModal) return;
+  loadSystemConfig();
+  if (cfgGeminiKey) cfgGeminiKey.value = "";
+  settingsModal.classList.remove("hidden");
+}
+
+function closeSettingsModal() {
+  if (!settingsModal) return;
+  settingsModal.classList.add("hidden");
+}
+
+async function saveSystemConfig() {
+  const newKey = cfgGeminiKey.value.trim();
+  const newModel = cfgGeminiModel.value;
+
+  const payload = { gemini_model: newModel };
+  if (newKey) {
+    payload.gemini_api_key = newKey;
+  }
+
+  try {
+    btnSaveSettings.disabled = true;
+    const res = await fetch("/api/config", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      systemConfig = await res.json();
+      updateKeyStatusUI();
+      closeSettingsModal();
+      alert("Einstellungen erfolgreich gespeichert!");
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(`Fehler beim Speichern: ${err.detail || "Serverfehler"}`);
+    }
+  } catch (err) {
+    alert(`Fehler: ${err.message}`);
+  } finally {
+    btnSaveSettings.disabled = false;
+  }
 }
 
 async function loadSettings() {
@@ -556,8 +639,11 @@ function setupEventListeners() {
         await loadDrafts();
         populateForm();
       } else {
-        const err = await res.json();
+        const err = await res.json().catch(() => ({}));
         alert(`Analyse fehlgeschlagen: ${err.detail || "Serverfehler"}`);
+        if (err.detail && (err.detail.includes("API-Key") || err.detail.includes("Gemini"))) {
+          openSettingsModal();
+        }
       }
     } catch (err) {
       console.error("Analysis error", err);
@@ -567,6 +653,17 @@ function setupEventListeners() {
       analyzeSpinner.classList.add("hidden");
     }
   };
+
+  if (btnSettings) btnSettings.onclick = openSettingsModal;
+  if (btnCloseSettings) btnCloseSettings.onclick = closeSettingsModal;
+  if (btnCancelSettings) btnCancelSettings.onclick = closeSettingsModal;
+  if (modalBackdrop) modalBackdrop.onclick = closeSettingsModal;
+  if (btnSaveSettings) btnSaveSettings.onclick = saveSystemConfig;
+  if (btnToggleKey) {
+    btnToggleKey.onclick = () => {
+      cfgGeminiKey.type = cfgGeminiKey.type === "password" ? "text" : "password";
+    };
+  }
 }
 
 function syncDraftFromForm() {

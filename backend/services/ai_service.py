@@ -182,6 +182,13 @@ class AIService:
             self._client = genai.Client(api_key=self.api_key)
         return self._client
 
+    def set_api_key(self, api_key: str, model_name: Optional[str] = None):
+        """Update API key and optionally model name, resetting the client."""
+        self.api_key = api_key
+        if model_name:
+            self.model_name = model_name
+        self._client = genai.Client(api_key=self.api_key)
+
     def get_generate_config(self) -> types.GenerateContentConfig:
         if self.enable_search_grounding:
             # Note: Do NOT set response_mime_type="application/json" when using google_search tool

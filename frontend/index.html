@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Seller Assistant</title>
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <div class="app-layout">
@@ -31,6 +31,7 @@
             <option value="published">Veröffentlicht</option>
           </select>
           <button id="btn-save-draft" class="btn btn-secondary">Änderungen speichern</button>
+          <button id="btn-settings" class="btn btn-secondary" title="Einstellungen">⚙️ Einstellungen</button>
         </div>
       </header>
 
@@ -348,6 +349,47 @@
     </main>
   </div>
 
-  <script src="app.js?v=6"></script>
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-backdrop" id="modal-backdrop"></div>
+    <div class="modal-content card">
+      <div class="modal-header">
+        <h3>⚙️ Einstellungen & API-Key</h3>
+        <button id="btn-close-settings" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="cfg-gemini-key">Google Gemini API-Key:</label>
+          <div class="input-with-button">
+            <input type="password" id="cfg-gemini-key" placeholder="AIzaSy..." autocomplete="off" />
+            <button type="button" id="btn-toggle-key" class="btn btn-secondary btn-sm" title="Anzeigen/Verbergen">👁️</button>
+          </div>
+          <span class="field-hint">
+            Kostenlos erhältlich bei <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio (aistudio.google.com)</a>.
+          </span>
+          <div id="cfg-key-status" class="key-status-indicator"></div>
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-gemini-model">KI-Modell:</label>
+          <select id="cfg-gemini-model">
+            <option value="gemini-2.5-flash">gemini-2.5-flash (Standard & empfohlen)</option>
+            <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Konfigurationsdatei (.env):</label>
+          <span class="field-hint">Alternativ kannst du den Key direkt in der Datei <code>.env</code> im Projektordner als <code>GEMINI_API_KEY=...</code> eintragen.</span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-cancel-settings" class="btn btn-secondary">Abbrechen</button>
+        <button id="btn-save-settings" class="btn btn-primary">Einstellungen speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=7"></script>
 </body>
 </html>

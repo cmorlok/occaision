@@ -174,3 +174,30 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
     ]
     for element_id in required_ids:
         assert f'id="{element_id}"' in html or f"id='{element_id}'" in html, f"Missing #{element_id} in HTML"
+
+
+def test_system_config_and_invalid_api_key_defensive_handling(test_app):
+    client = TestClient(test_app)
+    
+    # 1. GET /api/config
+    res_cfg = client.get("/api/config")
+    assert res_cfg.status_code == 200
+    cfg_data = res_cfg.json()
+    assert "gemini_api_key_configured" in cfg_data
+    assert "gemini_model" in cfg_data
+    
+    # 2. POST /api/config with a new key
+    res_update = client.post("/api/config", json={"gemini_api_key": "AIzaSyTestValidLengthKey12345"})
+    assert res_update.status_code == 200
+    updated_cfg = res_update.json()
+    assert updated_cfg["gemini_api_key_configured"] is True
+    assert "AIza" in updated_cfg["masked_key"]
+    
+    # 3. Create a draft and test defensive handling when Gemini raises an invalid key error
+    res_create = client.post("/api/drafts", json={"user_notes": "Test Article"})
+    draft_id = res_create.json()["id"]
+    
+    with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=Exception("API_KEY_INVALID: API key not valid")):
+        res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
+        assert res_analyze.status_code == 400
+        assert "API-Key" in res_analyze.json()["detail"]

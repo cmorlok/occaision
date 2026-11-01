@@ -38,6 +38,11 @@ class PatchImageModeRequest(BaseModel):
     active_mode: ImageVariantMode
 
 
+class UpdateSystemConfigRequest(BaseModel):
+    gemini_api_key: Optional[str] = None
+    gemini_model: Optional[str] = None
+
+
 def create_app(
     settings: Optional[Settings] = None,
     storage_service: Optional[StorageService] = None,
@@ -94,6 +99,62 @@ def create_app(
     @app.put("/api/settings", response_model=PresetSettings)
     def update_settings(new_settings: PresetSettings):
         return storage.update_settings(new_settings)
+
+    @app.get("/api/config")
+    def get_system_config():
+        key = cfg.gemini_api_key or ""
+        has_key = bool(
+            key
+            and key != "your_google_ai_studio_api_key_here"
+            and len(key.strip()) > 15
+        )
+        masked = ""
+        if has_key:
+            clean_key = key.strip()
+            masked = f"{clean_key[:4]}...{clean_key[-4:]}"
+        return {
+            "gemini_api_key_configured": has_key,
+            "gemini_model": cfg.gemini_model,
+            "masked_key": masked,
+            "eur_to_chf_rate": cfg.eur_to_chf_rate,
+        }
+
+    @app.post("/api/config")
+    def update_system_config(body: UpdateSystemConfigRequest):
+        if body.gemini_api_key is not None:
+            new_key = body.gemini_api_key.strip()
+            cfg.gemini_api_key = new_key
+            ai_svc.set_api_key(new_key, model_name=body.gemini_model)
+            # Update .env
+            env_path = Path(".env")
+            if env_path.exists():
+                try:
+                    lines = env_path.read_text(encoding="utf-8").splitlines()
+                    updated = []
+                    found_key = False
+                    found_model = False
+                    for l in lines:
+                        if l.startswith("GEMINI_API_KEY="):
+                            updated.append(f"GEMINI_API_KEY={new_key}")
+                            found_key = True
+                        elif body.gemini_model and l.startswith("GEMINI_MODEL="):
+                            updated.append(f"GEMINI_MODEL={body.gemini_model}")
+                            found_model = True
+                        else:
+                            updated.append(l)
+                    if not found_key:
+                        updated.append(f"GEMINI_API_KEY={new_key}")
+                    if body.gemini_model and not found_model:
+                        updated.append(f"GEMINI_MODEL={body.gemini_model}")
+                    env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+                    logger.info("[Config] GEMINI_API_KEY in .env gespeichert.")
+                except Exception as e:
+                    logger.warning(f"Fehler beim Speichern in .env: {e}")
+        elif body.gemini_model:
+            cfg.gemini_model = body.gemini_model
+            ai_svc.model_name = body.gemini_model
+
+        return get_system_config()
 
     # 3. Drafts CRUD
     @app.get("/api/drafts", response_model=List[Draft])
@@ -251,11 +312,24 @@ def create_app(
         ai_image_paths = [img_dir / f"{img.id}_ai.jpg" for img in draft.images]
 
         # 3. Run AI analysis
-        analyzed_draft = await ai_svc.analyze_draft(
-            draft=draft,
-            image_paths=ai_image_paths,
-            ebay_stats=ebay_stats,
-        )
+        try:
+            analyzed_draft = await ai_svc.analyze_draft(
+                draft=draft,
+                image_paths=ai_image_paths,
+                ebay_stats=ebay_stats,
+            )
+        except Exception as e:
+            logger.error(f"[API] KI-Analyse fehlgeschlagen: {e}")
+            err_str = str(e)
+            if "API_KEY_INVALID" in err_str or "API key not valid" in err_str or "API key" in err_str:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Ungültiger oder fehlender Google Gemini API-Key. Bitte trage deinen API-Key in den Einstellungen (⚙️) oder in der .env-Datei ein.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Fehler bei der KI-Analyse: {err_str}",
+            )
 
         # 4. If user provided no initial text notes, fetch eBay stats using AI-identified product
         if ebay_stats is None and analyzed_draft.identified_product:
