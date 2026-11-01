@@ -13,6 +13,7 @@ const fileInputEl = document.getElementById("file-input");
 const imageGalleryEl = document.getElementById("image-gallery");
 const userNotesEl = document.getElementById("user-notes");
 const shippingPresetEl = document.getElementById("shipping-preset");
+const deShippingPresetEl = document.getElementById("de-shipping-preset");
 const offerTypeEl = document.getElementById("offer-type");
 const btnAnalyze = document.getElementById("btn-analyze");
 const analyzeSpinner = document.getElementById("analyze-spinner");
@@ -23,11 +24,17 @@ const missingHintsList = document.getElementById("missing-hints-list");
 const priceEbayMedian = document.getElementById("price-ebay-median");
 const priceEbayCount = document.getElementById("price-ebay-count");
 const priceChNew = document.getElementById("price-ch-new");
+const priceDeNew = document.getElementById("price-de-new");
 const priceRecStart = document.getElementById("price-rec-start");
 const priceRecBuyNow = document.getElementById("price-rec-buynow");
 const priceRecTutti = document.getElementById("price-rec-tutti");
+const priceRecEbayStart = document.getElementById("price-rec-ebay-start");
+const priceRecEbayBuyNow = document.getElementById("price-rec-ebay-buynow");
+const priceRecKleinanzeigen = document.getElementById("price-rec-kleinanzeigen");
 const priceReasoningText = document.getElementById("price-reasoning-text");
 const linkEbay = document.getElementById("link-ebay");
+const linkKleinanzeigen = document.getElementById("link-kleinanzeigen");
+const linkIdealo = document.getElementById("link-idealo");
 const linkRicardo = document.getElementById("link-ricardo");
 const linkToppreise = document.getElementById("link-toppreise");
 const linkDigitec = document.getElementById("link-digitec");
@@ -47,6 +54,23 @@ const tuttiCondition = document.getElementById("tutti-condition");
 const tuttiPrice = document.getElementById("tutti-price");
 const tuttiDescription = document.getElementById("tutti-description");
 
+const ebayDeTitle = document.getElementById("ebay-de-title");
+const ebayDeTitleCount = document.getElementById("ebay-de-title-count");
+const ebayDeCategory = document.getElementById("ebay-de-category");
+const ebayDeCondition = document.getElementById("ebay-de-condition");
+const ebayDeOfferType = document.getElementById("ebay-de-offer-type");
+const ebayDeStartPrice = document.getElementById("ebay-de-start-price");
+const ebayDeBuyNowPrice = document.getElementById("ebay-de-buynow-price");
+const ebayDeDescription = document.getElementById("ebay-de-description");
+
+const kleinanzeigenTitle = document.getElementById("kleinanzeigen-title");
+const kleinanzeigenTitleCount = document.getElementById("kleinanzeigen-title-count");
+const kleinanzeigenCategory = document.getElementById("kleinanzeigen-category");
+const kleinanzeigenCondition = document.getElementById("kleinanzeigen-condition");
+const kleinanzeigenPrice = document.getElementById("kleinanzeigen-price");
+const kleinanzeigenPriceType = document.getElementById("kleinanzeigen-price-type");
+const kleinanzeigenDescription = document.getElementById("kleinanzeigen-description");
+
 async function init() {
   await loadSettings();
   await loadDrafts();
@@ -59,11 +83,16 @@ async function loadSettings() {
     if (res.ok) {
       settings = await res.json();
       shippingPresetEl.innerHTML = "";
+      if (deShippingPresetEl) deShippingPresetEl.innerHTML = "";
       settings.shipping_presets.forEach(p => {
         const opt = document.createElement("option");
         opt.value = p.id;
         opt.textContent = p.label;
-        shippingPresetEl.appendChild(opt);
+        if (p.country === "DE") {
+          if (deShippingPresetEl) deShippingPresetEl.appendChild(opt);
+        } else {
+          shippingPresetEl.appendChild(opt);
+        }
       });
     }
   } catch (err) {
@@ -132,6 +161,9 @@ function populateForm() {
   userNotesEl.value = currentDraft.user_notes || "";
   offerTypeEl.value = currentDraft.ricardo.offer_type || "auction";
   shippingPresetEl.value = currentDraft.ricardo.shipping_preset_id || (settings ? settings.default_shipping_preset_id : "b_post_2kg");
+  if (deShippingPresetEl) {
+    deShippingPresetEl.value = (currentDraft.ebay_de && currentDraft.ebay_de.shipping_preset_id) || (settings ? settings.default_de_shipping_preset_id : "dhl_2kg");
+  }
 
   // Photos
   renderGallery();
@@ -155,15 +187,29 @@ function populateForm() {
   }
 
   priceChNew.textContent = pa.ch_new_price_chf ? `${pa.ch_new_price_chf.toFixed(2)} CHF` : "-";
+  if (priceDeNew) {
+    priceDeNew.textContent = pa.de_new_price_eur ? `${pa.de_new_price_eur.toFixed(2)} €` : "-";
+  }
   priceRecStart.textContent = `${pa.ricardo_start_chf || 1.0} CHF`;
   priceRecBuyNow.textContent = `${pa.ricardo_buynow_chf || 10.0} CHF`;
   priceRecTutti.textContent = `${pa.tutti_vhb_chf || 10.0} CHF`;
+  if (priceRecEbayStart) {
+    priceRecEbayStart.textContent = `${pa.ebay_start_eur || 1.0} €`;
+  }
+  if (priceRecEbayBuyNow) {
+    priceRecEbayBuyNow.textContent = `${pa.ebay_buynow_eur || 10.0} €`;
+  }
+  if (priceRecKleinanzeigen) {
+    priceRecKleinanzeigen.textContent = `${pa.kleinanzeigen_vb_eur || 10.0} €`;
+  }
   priceReasoningText.textContent = pa.reasoning || "Noch keine Analyse.";
 
   // Verification links
   const vl = pa.verification_links;
   if (vl) {
     linkEbay.href = vl.ebay_sold_url || "#";
+    if (linkKleinanzeigen) linkKleinanzeigen.href = vl.kleinanzeigen_search_url || "#";
+    if (linkIdealo) linkIdealo.href = vl.idealo_url || "#";
     linkRicardo.href = vl.ricardo_search_url || "#";
     linkToppreise.href = vl.toppreise_url || "#";
     linkDigitec.href = vl.digitec_url || "#";
@@ -184,6 +230,29 @@ function populateForm() {
   tuttiCondition.value = currentDraft.tutti.condition || "gebraucht";
   tuttiPrice.value = currentDraft.tutti.price_vhb_chf || 10.0;
   tuttiDescription.value = currentDraft.tutti.description || "";
+
+  // eBay.de
+  if (currentDraft.ebay_de && ebayDeTitle) {
+    ebayDeTitle.value = currentDraft.ebay_de.title || "";
+    updateCharCounter(ebayDeTitle, ebayDeTitleCount, 80);
+    ebayDeCategory.value = currentDraft.ebay_de.category_suggestion || "";
+    ebayDeCondition.value = currentDraft.ebay_de.condition || "gebraucht";
+    ebayDeOfferType.value = currentDraft.ebay_de.offer_type || "auction";
+    ebayDeStartPrice.value = currentDraft.ebay_de.start_price_eur || 1.0;
+    ebayDeBuyNowPrice.value = currentDraft.ebay_de.buynow_price_eur || 10.0;
+    ebayDeDescription.value = currentDraft.ebay_de.description || "";
+  }
+
+  // Kleinanzeigen
+  if (currentDraft.kleinanzeigen && kleinanzeigenTitle) {
+    kleinanzeigenTitle.value = currentDraft.kleinanzeigen.title || "";
+    updateCharCounter(kleinanzeigenTitle, kleinanzeigenTitleCount, 65);
+    kleinanzeigenCategory.value = currentDraft.kleinanzeigen.category_suggestion || "";
+    kleinanzeigenCondition.value = currentDraft.kleinanzeigen.condition || "gebraucht";
+    kleinanzeigenPrice.value = currentDraft.kleinanzeigen.price_eur || 10.0;
+    kleinanzeigenPriceType.value = currentDraft.kleinanzeigen.price_type || "vb";
+    kleinanzeigenDescription.value = currentDraft.kleinanzeigen.description || "";
+  }
 }
 
 function renderGallery() {
@@ -315,6 +384,12 @@ function setupEventListeners() {
 
   ricardoTitle.oninput = () => updateCharCounter(ricardoTitle, ricardoTitleCount, 60);
   tuttiTitle.oninput = () => updateCharCounter(tuttiTitle, tuttiTitleCount, 80);
+  if (ebayDeTitle) {
+    ebayDeTitle.oninput = () => updateCharCounter(ebayDeTitle, ebayDeTitleCount, 80);
+  }
+  if (kleinanzeigenTitle) {
+    kleinanzeigenTitle.oninput = () => updateCharCounter(kleinanzeigenTitle, kleinanzeigenTitleCount, 65);
+  }
 
   btnSaveDraft.onclick = async () => {
     if (!currentDraft) return;
@@ -388,6 +463,25 @@ function syncDraftFromForm() {
   currentDraft.tutti.condition = tuttiCondition.value;
   currentDraft.tutti.price_vhb_chf = parseFloat(tuttiPrice.value) || 10.0;
   currentDraft.tutti.description = tuttiDescription.value;
+
+  if (!currentDraft.ebay_de) currentDraft.ebay_de = {};
+  if (ebayDeTitle) currentDraft.ebay_de.title = ebayDeTitle.value;
+  if (ebayDeCategory) currentDraft.ebay_de.category_suggestion = ebayDeCategory.value;
+  if (ebayDeCondition) currentDraft.ebay_de.condition = ebayDeCondition.value;
+  if (ebayDeOfferType) currentDraft.ebay_de.offer_type = ebayDeOfferType.value;
+  if (ebayDeStartPrice) currentDraft.ebay_de.start_price_eur = parseFloat(ebayDeStartPrice.value) || 1.0;
+  if (ebayDeBuyNowPrice) currentDraft.ebay_de.buynow_price_eur = parseFloat(ebayDeBuyNowPrice.value) || 10.0;
+  if (ebayDeDescription) currentDraft.ebay_de.description = ebayDeDescription.value;
+  if (deShippingPresetEl) currentDraft.ebay_de.shipping_preset_id = deShippingPresetEl.value;
+
+  if (!currentDraft.kleinanzeigen) currentDraft.kleinanzeigen = {};
+  if (kleinanzeigenTitle) currentDraft.kleinanzeigen.title = kleinanzeigenTitle.value;
+  if (kleinanzeigenCategory) currentDraft.kleinanzeigen.category_suggestion = kleinanzeigenCategory.value;
+  if (kleinanzeigenCondition) currentDraft.kleinanzeigen.condition = kleinanzeigenCondition.value;
+  if (kleinanzeigenPrice) currentDraft.kleinanzeigen.price_eur = parseFloat(kleinanzeigenPrice.value) || 10.0;
+  if (kleinanzeigenPriceType) currentDraft.kleinanzeigen.price_type = kleinanzeigenPriceType.value;
+  if (kleinanzeigenDescription) currentDraft.kleinanzeigen.description = kleinanzeigenDescription.value;
+  if (deShippingPresetEl) currentDraft.kleinanzeigen.shipping_preset_id = deShippingPresetEl.value;
 }
 
 async function deleteDraft(draftId) {

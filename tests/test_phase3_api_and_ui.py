@@ -133,11 +133,15 @@ def test_full_rest_lifecycle(test_app):
     # 7. PUT /api/drafts/{id} (manual edit with Ricardo title > 60 chars)
     analyzed["ricardo"]["title"] = "X" * 75
     analyzed["tutti"]["title"] = "Y" * 95
+    analyzed["ebay_de"]["title"] = "E" * 95
+    analyzed["kleinanzeigen"]["title"] = "K" * 80
     res_put = client.put(f"/api/drafts/{draft_id}", json=analyzed)
     assert res_put.status_code == 200
     saved = res_put.json()
     assert len(saved["ricardo"]["title"]) <= 60
     assert len(saved["tutti"]["title"]) <= 80
+    assert len(saved["ebay_de"]["title"]) <= 80
+    assert len(saved["kleinanzeigen"]["title"]) <= 65
     
     # 8. DELETE /api/drafts/{id}
     res_del = client.delete(f"/api/drafts/{draft_id}")
@@ -162,6 +166,11 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
         "ricardo-title",
         "tutti-title",
         "verification-links",
+        "ebay-de-title",
+        "kleinanzeigen-title",
+        "ebay-de-description",
+        "kleinanzeigen-description",
+        "de-shipping-preset",
     ]
     for element_id in required_ids:
         assert f'id="{element_id}"' in html or f"id='{element_id}'" in html, f"Missing #{element_id} in HTML"

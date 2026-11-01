@@ -61,6 +61,10 @@
             <select id="shipping-preset"></select>
           </div>
           <div class="form-group flex-1">
+            <label for="de-shipping-preset">Versand-Preset (Deutschland):</label>
+            <select id="de-shipping-preset"></select>
+          </div>
+          <div class="form-group flex-1">
             <label for="offer-type">Verkaufsart (Ricardo):</label>
             <select id="offer-type">
               <option value="auction">Auktion (mit Startpreis & Sofortkauf)</option>
@@ -97,6 +101,10 @@
             <span class="price-label">CH Neupreis (Digitec/Toppreise)</span>
             <span id="price-ch-new" class="price-value">-</span>
           </div>
+          <div class="price-box">
+            <span class="price-label">DE Neupreis (Idealo/Geizhals)</span>
+            <span id="price-de-new" class="price-value">-</span>
+          </div>
           <div class="price-box highlight">
             <span class="price-label">Ricardo Startpreis</span>
             <span id="price-rec-start" class="price-value">-</span>
@@ -108,6 +116,18 @@
           <div class="price-box highlight">
             <span class="price-label">Tutti Verhandlungsbasis</span>
             <span id="price-rec-tutti" class="price-value">-</span>
+          </div>
+          <div class="price-box highlight">
+            <span class="price-label">eBay.de Startpreis</span>
+            <span id="price-rec-ebay-start" class="price-value">-</span>
+          </div>
+          <div class="price-box highlight">
+            <span class="price-label">eBay.de Sofort-Kaufen</span>
+            <span id="price-rec-ebay-buynow" class="price-value">-</span>
+          </div>
+          <div class="price-box highlight">
+            <span class="price-label">Kleinanzeigen VB</span>
+            <span id="price-rec-kleinanzeigen" class="price-value">-</span>
           </div>
         </div>
 
@@ -121,6 +141,8 @@
           <strong>🔍 Marktdaten visuell prüfen:</strong>
           <div id="verification-links" class="link-buttons">
             <a id="link-ebay" href="#" target="_blank" class="badge-link">eBay DE (Beendet)</a>
+            <a id="link-kleinanzeigen" href="#" target="_blank" class="badge-link">Kleinanzeigen.de Suche</a>
+            <a id="link-idealo" href="#" target="_blank" class="badge-link">Idealo.de Neupreis</a>
             <a id="link-ricardo" href="#" target="_blank" class="badge-link">Ricardo.ch Suche</a>
             <a id="link-toppreise" href="#" target="_blank" class="badge-link">Toppreise.ch Neupreis</a>
             <a id="link-digitec" href="#" target="_blank" class="badge-link">Digitec/Galaxus Suche</a>
@@ -213,6 +235,113 @@
               <label for="tutti-description">Beschreibung:</label>
               <textarea id="tutti-description" rows="12"></textarea>
             </div>
+          </div>
+
+          <!-- eBay.de Column -->
+          <div class="platform-card ebay-de-card">
+            <div class="platform-header">
+              <h3>eBay.de</h3>
+              <span class="platform-tag">80-Zeichen Titel (EUR)</span>
+            </div>
+
+            <div class="form-group">
+              <div class="label-with-counter">
+                <label for="ebay-de-title">Titel (max. 80 Zeichen):</label>
+                <span id="ebay-de-title-count" class="counter">0/80</span>
+              </div>
+              <input type="text" id="ebay-de-title" maxlength="80" placeholder="z.B. Sony WH-1000XM4 ANC Kopfhörer OVP Top Zustand Schwarz">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="ebay-de-category">Kategorie-Vorschlag:</label>
+                <input type="text" id="ebay-de-category" placeholder="z.B. TV, Video & Audio > Kopfhörer">
+              </div>
+              <div class="form-group flex-1">
+                <label for="ebay-de-condition">Zustand:</label>
+                <select id="ebay-de-condition">
+                  <option value="neu">Neu</option>
+                  <option value="wie_neu">Wie neu</option>
+                  <option value="gebraucht" selected>Gebraucht</option>
+                  <option value="defekt">Defekt</option>
+                </select>
+              </div>
+              <div class="form-group flex-1">
+                <label for="ebay-de-offer-type">Angebotsformat:</label>
+                <select id="ebay-de-offer-type">
+                  <option value="auction" selected>Auktion (mit Startpreis & Sofort-Kaufen)</option>
+                  <option value="fixed_price">Festpreis (Sofort-Kaufen)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="ebay-de-start-price">Startpreis (EUR):</label>
+                <input type="number" id="ebay-de-start-price" step="0.5" min="1.0">
+              </div>
+              <div class="form-group flex-1">
+                <label for="ebay-de-buynow-price">Sofort-Kaufen (EUR):</label>
+                <input type="number" id="ebay-de-buynow-price" step="0.5" min="1.0">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="ebay-de-description">Beschreibung:</label>
+              <textarea id="ebay-de-description" rows="12"></textarea>
+            </div>
+          </div>
+
+          <!-- Kleinanzeigen.de Column -->
+          <div class="platform-card kleinanzeigen-card">
+            <div class="platform-header">
+              <h3>Kleinanzeigen.de</h3>
+              <span class="platform-tag">65-Zeichen Titel (EUR)</span>
+            </div>
+
+            <div class="form-group">
+              <div class="label-with-counter">
+                <label for="kleinanzeigen-title">Titel (max. 65 Zeichen):</label>
+                <span id="kleinanzeigen-title-count" class="counter">0/65</span>
+              </div>
+              <input type="text" id="kleinanzeigen-title" maxlength="65" placeholder="z.B. Sony WH-1000XM4 Kopfhörer Bluetooth ANC Top">
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="kleinanzeigen-category">Kategorie-Vorschlag:</label>
+                <input type="text" id="kleinanzeigen-category" placeholder="z.B. Audio & Hifi > Kopfhörer">
+              </div>
+              <div class="form-group flex-1">
+                <label for="kleinanzeigen-condition">Zustand:</label>
+                <select id="kleinanzeigen-condition">
+                  <option value="neu">Neu</option>
+                  <option value="wie_neu">Wie neu</option>
+                  <option value="gebraucht" selected>Gebraucht</option>
+                  <option value="defekt">Defekt</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group flex-1">
+                <label for="kleinanzeigen-price">Preis (EUR):</label>
+                <input type="number" id="kleinanzeigen-price" step="1.0" min="1.0">
+              </div>
+              <div class="form-group flex-1">
+                <label for="kleinanzeigen-price-type">Preistyp:</label>
+                <select id="kleinanzeigen-price-type">
+                  <option value="vb">VB (Verhandlungsbasis)</option>
+                  <option value="festpreis">Festpreis</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="kleinanzeigen-description">Beschreibung:</label>
+              <textarea id="kleinanzeigen-description" rows="12"></textarea>
+            </div>
+          </div>
           </div>
         </div>
       </section>
