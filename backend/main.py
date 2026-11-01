@@ -231,6 +231,12 @@ def create_app(
             ebay_stats=ebay_stats,
         )
 
+        # 4. If user provided no initial text notes, fetch eBay stats using AI-identified product
+        if ebay_stats is None and analyzed_draft.identified_product:
+            analyzed_draft.price_analysis.ebay_stats = await ebay_svc.fetch_sold_stats(
+                analyzed_draft.identified_product
+            )
+
         return storage.update_draft(analyzed_draft)
 
     # 6. Static files frontend

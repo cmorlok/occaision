@@ -1,4 +1,4 @@
-# Implementation Plan & Specification: Tutti & Ricardo AI Listing Assistant
+# Implementation Plan & Specification: Seller Assistant
 
 > **Target Audience:** Implementing Software Engineering LLM / Developer  
 > **Reference Requirements:** `REQUIREMENTS.md`  
@@ -543,7 +543,7 @@ After completing all 4 phases, the implementing LLM must run:
 ```
 
 ### Definition of Done (All checks must pass):
-- [ ] `.venv/bin/pytest -v` passes 100% of tests across all 4 test files (`test_phase1_image_and_storage.py`, `test_phase2_pricing_and_ai.py`, `test_phase3_api_and_ui.py`, `test_phase4_extension.py`) with 0 failures and 0 errors.
-- [ ] Starting the server via `.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000` serves the dashboard at `http://127.0.0.1:8000/` and OpenAPI docs at `http://127.0.0.1:8000/docs`.
-- [ ] All EXIF/GPS metadata is stripped from uploaded images and AI-bound images are capped at `1024x1024` pixels.
-- [ ] Ricardo titles never exceed 60 characters and both platforms include the Swiss private sale warranty disclaimer.
+- [x] `.venv/bin/pytest -v` passes 100% of tests across all 4 test files (`test_phase1_image_and_storage.py`, `test_phase2_pricing_and_ai.py`, `test_phase3_api_and_ui.py`, `test_phase4_extension.py`) with 0 failures and 0 errors.
+- [x] Starting the server via `.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000` serves the dashboard at `http://127.0.0.1:8000/` and OpenAPI docs at `http://127.0.0.1:8000/docs`.
+- [x] All EXIF/GPS metadata is stripped from uploaded images and AI-bound images are capped at `1024x1024` pixels.
+- [x] Ricardo titles never exceed 60 characters and both platforms include the Swiss private sale warranty disclaimer.

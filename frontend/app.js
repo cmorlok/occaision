@@ -253,6 +253,26 @@ function updateCharCounter(inputEl, counterEl, max) {
   }
 }
 
+async function uploadFiles(files) {
+  if (!currentDraft || !files || !files.length) return;
+  const formData = new FormData();
+  for (const f of files) {
+    formData.append("files", f);
+  }
+  try {
+    const res = await fetch(`/api/drafts/${currentDraft.id}/images`, {
+      method: "POST",
+      body: formData
+    });
+    if (res.ok) {
+      currentDraft = await res.json();
+      renderGallery();
+    }
+  } catch (err) {
+    console.error("Upload error", err);
+  }
+}
+
 function setupEventListeners() {
   btnNewDraft.onclick = async () => {
     try {
@@ -273,24 +293,25 @@ function setupEventListeners() {
 
   fileInputEl.onchange = async () => {
     if (!currentDraft || !fileInputEl.files.length) return;
-    const formData = new FormData();
-    for (const f of fileInputEl.files) {
-      formData.append("files", f);
-    }
-    try {
-      const res = await fetch(`/api/drafts/${currentDraft.id}/images`, {
-        method: "POST",
-        body: formData
-      });
-      if (res.ok) {
-        currentDraft = await res.json();
-        renderGallery();
-        fileInputEl.value = "";
-      }
-    } catch (err) {
-      console.error("Upload error", err);
-    }
+    await uploadFiles(fileInputEl.files);
+    fileInputEl.value = "";
   };
+
+  dropzoneEl.addEventListener("dragover", e => {
+    e.preventDefault();
+    dropzoneEl.style.borderColor = "var(--primary)";
+  });
+
+  dropzoneEl.addEventListener("dragleave", () => {
+    dropzoneEl.style.borderColor = "";
+  });
+
+  dropzoneEl.addEventListener("drop", async e => {
+    e.preventDefault();
+    dropzoneEl.style.borderColor = "";
+    if (!currentDraft || !e.dataTransfer || !e.dataTransfer.files.length) return;
+    await uploadFiles(e.dataTransfer.files);
+  });
 
   ricardoTitle.oninput = () => updateCharCounter(ricardoTitle, ricardoTitleCount, 60);
   tuttiTitle.oninput = () => updateCharCounter(tuttiTitle, tuttiTitleCount, 80);

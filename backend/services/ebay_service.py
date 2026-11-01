@@ -85,11 +85,11 @@ class EbayService:
         max_eur = max(prices)
         sample_count = len(prices)
 
-        # Apply trimming for median calculation if we have enough samples
+        # Apply trimming for median calculation if >= 4 samples are found
         calc_prices = sorted(prices)
-        if sample_count >= 10:
-            trim_k = int(sample_count * 0.10)
-            if trim_k > 0:
+        if sample_count >= 4:
+            trim_k = max(1, int(sample_count * 0.10))
+            if len(calc_prices) - (2 * trim_k) >= 1:
                 calc_prices = calc_prices[trim_k:-trim_k]
 
         median_eur = round(float(statistics.median(calc_prices)), 2)

@@ -1,7 +1,7 @@
 # Anforderungsdokument (Requirements Document)
-## KI-gestützter Inserate-Generator für Tutti.ch & Ricardo.ch
+## KI-gestützter Inserate-Generator (Seller Assistant)
 
-* **Projekt:** Tutti & Ricardo Listing Assistant
+* **Projekt:** Seller Assistant
 * **Einsatzbereich:** Persönlicher Gebrauch (Single-User, lokaler Desktop-Betrieb, kein externes Deployment nötig)
 * **Status:** Geschärft & Freigegeben
 * **Datum:** 2026-10-31

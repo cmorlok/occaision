@@ -153,7 +153,7 @@ def test_ai_post_processing_safeguards():
     # Ricardo title is 72 chars (> 60), contains 'ß', description missing disclaimer
     raw_payload = {
         "identified_product": "Großartiger Lautsprecher",
-        "missing_photo_hints": [],
+        "missing_photo_hints": ["Bitte großes Typenschild auf der Rückseite fotografieren"],
         "ch_new_price_chf": 199.0,
         "ricardo_start_chf": 50.0,
         "ricardo_buynow_chf": 90.0,
@@ -172,11 +172,13 @@ def test_ai_post_processing_safeguards():
     
     # 1. Ricardo title length limit: <= 60 chars
     assert len(processed["ricardo_title"]) <= 60
-    # 2. Swiss German orthography: no 'ß'
+    # 2. Swiss German orthography: no 'ß' in strings or list of strings
     assert "ß" not in processed["ricardo_title"]
     assert "ß" not in processed["tutti_title"]
     assert "ß" not in processed["ricardo_description"]
     assert "ß" not in processed["tutti_description"]
+    assert "ß" not in processed["missing_photo_hints"][0]
+    assert "grosses" in processed["missing_photo_hints"][0].lower()
     assert "gross" in processed["ricardo_title"].lower()
     
     # 3. Mandatory Swiss warranty disclaimer

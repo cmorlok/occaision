@@ -43,10 +43,12 @@ def extract_and_parse_json(raw_text: str) -> Dict[str, Any]:
 def post_process_ai_output(payload: Dict[str, Any]) -> Dict[str, Any]:
     res = dict(payload)
 
-    # 1. Swiss German orthography: replace 'ß' with 'ss' in all string values
+    # 1. Swiss German orthography: replace 'ß' with 'ss' in all string values and string lists
     for k, v in res.items():
         if isinstance(v, str):
             res[k] = v.replace("ß", "ss")
+        elif isinstance(v, list):
+            res[k] = [item.replace("ß", "ss") if isinstance(item, str) else item for item in v]
 
     # 2. Hard limit on Ricardo title (<= 60 chars)
     ricardo_title = res.get("ricardo_title", "")

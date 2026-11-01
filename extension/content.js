@@ -287,6 +287,15 @@ function executeStep2(draft) {
     setNativeValue(descEl, descVal);
   }
 
+  // Set condition if visible
+  const condVal = isRicardo() ? draft.ricardo.condition : draft.tutti.condition;
+  const condEl = document.querySelector(
+    'select[name*="condition" i], select[id*="condition" i], select[data-testid*="condition" i], input[name*="condition" i]'
+  );
+  if (condEl && condVal) {
+    setNativeValue(condEl, condVal);
+  }
+
   // Set prices
   if (isRicardo()) {
     const startPriceInput = document.querySelector('input[name*="startPrice" i], input[id*="start-price" i], input[data-testid*="start-price" i]');

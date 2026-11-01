@@ -63,3 +63,4 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "ai-ext-step2-btn" in content_js_code
     assert "ai-ext-draft-select" in content_js_code
     assert "clipboard" in content_js_code.lower()
+    assert "condition" in content_js_code.lower()
