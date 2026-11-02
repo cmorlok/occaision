@@ -38,6 +38,7 @@ def test_manifest_v3_validity():
     assert any("tutti.ch" in m for m in matches)
     assert any("ebay.de" in m for m in matches)
     assert any("kleinanzeigen.de" in m for m in matches)
+    assert any("idealo.de" in m for m in matches)
     
     # Assert all referenced files exist
     assert (Path("extension") / "background.js").exists()
@@ -124,6 +125,31 @@ def test_extension_price_parser_and_stats_via_node():
     const kaPrices = bg.extractPricesFromHtml('kleinanzeigen', kaJsonContent);
     if (kaPrices.length !== 25 || kaPrices[0] !== 50) {
       throw new Error('Unexpected extractPricesFromHtml for kleinanzeigen: ' + JSON.stringify(kaPrices));
+    }
+
+    // Test Idealo extraction for .sr-resultList_* .sr-detailedPriceInfo__price_* (first entry only)
+    const idealoHtml = `
+      <div class="sr-resultList_NAJkZ">
+        <div class="sr-resultList__item">
+          <div class="sr-productSummary__title_f5flP productSummary__title--GRID">HP Color LaserJet Pro MFP 4302dw (4RA83F)</div>
+          <span class="sr-detailedPriceInfo__price_sYVmx">499,00 €</span>
+        </div>
+        <div class="sr-resultList__item">
+          <div class="sr-productSummary__title_f5flP">HP Toner Schwarz</div>
+          <span class="sr-detailedPriceInfo__price_sYVmx">65,00 €</span>
+        </div>
+      </div>
+    `;
+    const idealoItems = bg.extractIdealoItems(idealoHtml);
+    if (!idealoItems || idealoItems.length !== 1) {
+      throw new Error('Expected exactly 1 idealo item (top product), got: ' + JSON.stringify(idealoItems));
+    }
+    if (idealoItems[0].price !== 499 || idealoItems[0].title !== 'HP Color LaserJet Pro MFP 4302dw (4RA83F)') {
+      throw new Error('Unexpected idealo item 0: ' + JSON.stringify(idealoItems[0]));
+    }
+    const idealoPrices = bg.extractPricesFromHtml('idealo', idealoHtml);
+    if (idealoPrices.length !== 1 || idealoPrices[0] !== 499) {
+      throw new Error('Expected exactly [499] in idealoPrices: ' + JSON.stringify(idealoPrices));
     }
 
     const ebayHtml = `

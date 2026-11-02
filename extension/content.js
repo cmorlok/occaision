@@ -231,6 +231,7 @@ let currentDrafts = [];
 let activeDraft = null;
 
 function createSmartPanel() {
+  if (!isRicardo() && !isTutti() && !isEbayDE() && !isKleinanzeigen()) return;
   if (document.getElementById("ai-listing-smart-panel")) return;
 
   panelElement = document.createElement("div");
@@ -552,6 +553,26 @@ function setupDashboardBridge() {
               } catch (_) {}
             }
           }
+          if (response && response.sources && response.sources.idealo && response.sources.idealo.items) {
+            const idealoItems = response.sources.idealo.items;
+            console.group(`[Seller Assistant] [Content-Bridge] Idealo Neupreise (${idealoItems.length} Treffer):`);
+            idealoItems.forEach((it, idx) => {
+              console.log(`  [#${idx + 1}] ${it.price} € | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
+            });
+            console.groupEnd();
+            if (typeof console.table === "function") {
+              try {
+                console.table(
+                  idealoItems.map((it, idx) => ({
+                    "#": idx + 1,
+                    "Preis (€)": it.price,
+                    "Zustand": it.condition || "Neu",
+                    "Titel": it.title,
+                  }))
+                );
+              } catch (_) {}
+            }
+          }
           const payload = Object.assign(
             {
               type: "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT",
@@ -572,15 +593,27 @@ if (typeof browserApi !== "undefined" && browserApi.runtime && browserApi.runtim
     if (msg && msg.action === "EXTRACT_PAGE_DATA") {
       const html = document.documentElement ? document.documentElement.outerHTML : (document.body ? document.body.innerText : "");
       const currentUrl = location.href || "";
+
+      const idealoCards = [];
+      const firstPriceEl = document.querySelector('[class*="sr-detailedPriceInfo__price"]');
+      if (firstPriceEl) {
+        const firstTitleEl = document.querySelector('[class*="productSummary__title"], [class*="sr-productSummary__title"]');
+        idealoCards.push({
+          title: firstTitleEl ? firstTitleEl.textContent.trim() : "Idealo Top-Ergebnis",
+          rawPrice: firstPriceEl.textContent.trim(),
+        });
+      }
+
       const priceNodes = Array.from(
         document.querySelectorAll(
-          '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="price" i], [data-testid*="price" i]'
+          '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="sr-detailedPriceInfo__price"], [class*="price" i], [data-testid*="price" i]'
         )
       )
         .slice(0, 40)
         .map(el => (el.textContent || "").trim())
         .filter(Boolean);
-      sendResponse({ html, currentUrl, priceNodes });
+
+      sendResponse({ html, currentUrl, priceNodes, idealoCards });
       return true;
     }
     return false;

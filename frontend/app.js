@@ -414,8 +414,19 @@ function populateForm() {
       const unit = src.currency === "CHF" ? "CHF" : "€";
       const chfHint = src.currency !== "CHF" && src.median_chf ? ` (~${src.median_chf} CHF)` : "";
       medianEl.textContent = `${src.median_price} ${unit}${chfHint}`;
-      const spanHint = src.min_price !== null && src.max_price !== null ? ` (${src.min_price}–${src.max_price} ${unit})` : "";
-      countEl.textContent = `${src.sample_count} Treffer${spanHint}`;
+      if (srcKey === "idealo" && src.items && src.items[0] && src.items[0].title) {
+        const prodTitle = src.items[0].title;
+        countEl.textContent = prodTitle.length > 35 ? prodTitle.slice(0, 32) + "..." : prodTitle;
+        countEl.title = prodTitle;
+        countEl.style.cursor = "help";
+      } else {
+        const spanHint = src.min_price !== null && src.max_price !== null && src.min_price !== src.max_price
+          ? ` (${src.min_price}–${src.max_price} ${unit})`
+          : "";
+        countEl.textContent = `${src.sample_count} Treffer${spanHint}`;
+        countEl.title = "";
+        countEl.style.cursor = "";
+      }
     } else if (fallbackStats && fallbackStats.median_eur) {
       medianEl.textContent = `${fallbackStats.median_eur} € (~${fallbackStats.median_chf} CHF)`;
       countEl.textContent = `${fallbackStats.sample_count} verkaufte Artikel`;
@@ -1019,6 +1030,27 @@ async function scrapePricesViaExtension() {
               "#": idx + 1,
               "Preis (€)": it.price,
               "Zustand": it.condition || "Gebraucht",
+              "Titel": it.title,
+            }))
+          );
+        } catch (_) {}
+      }
+    }
+
+    if (sources.idealo && sources.idealo.items && sources.idealo.items.length > 0) {
+      const idl = sources.idealo;
+      console.group(`[Seller Assistant] [Dashboard] Idealo extrahierte Neupreise (${idl.items.length} Treffer):`);
+      idl.items.forEach((it, idx) => {
+        console.log(`  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
+      });
+      console.groupEnd();
+      if (typeof console.table === "function") {
+        try {
+          console.table(
+            idl.items.map((it, idx) => ({
+              "#": idx + 1,
+              "Preis (€)": it.price,
+              "Zustand": it.condition || "Neu",
               "Titel": it.title,
             }))
           );

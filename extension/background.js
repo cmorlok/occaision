@@ -412,6 +412,135 @@ function logKleinanzeigenExtractedItems(items) {
   }
 }
 
+function findIdealoProductsInNextData(obj) {
+  const items = [];
+  function walk(node, depth = 0) {
+    if (!node || depth > 10 || items.length >= 30) return;
+    if (typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const el of node) walk(el, depth + 1);
+      return;
+    }
+    const title = node.title || node.name || node.productTitle || "";
+    const rawPrice = node.price || node.minPrice || node.lowestPrice || node.bestPrice || (node.priceInfo && node.priceInfo.price);
+    if (title && rawPrice) {
+      const p = typeof rawPrice === "number" ? rawPrice : parsePriceText(String(rawPrice));
+      if (p !== null && p > 0) {
+        items.push({
+          title: String(title).trim(),
+          condition: items.length === 0 ? "Neu (Bestpreis)" : "Neu",
+          price: p,
+          rawPrice: `${p} €`,
+        });
+      }
+    }
+    for (const k of Object.keys(node)) {
+      if (typeof node[k] === "object") {
+        walk(node[k], depth + 1);
+      }
+    }
+  }
+  walk(obj);
+  return items;
+}
+
+function extractIdealoItems(html, priceNodes = [], idealoCards = []) {
+  const items = [];
+
+  // 1. Live DOM-extracted first card from .sr-resultList_*
+  if (Array.isArray(idealoCards) && idealoCards.length > 0) {
+    const first = idealoCards[0];
+    const p = parsePriceText(first.rawPrice);
+    if (p !== null) {
+      items.push({
+        title: first.title || "Idealo Produkt",
+        condition: "Neu (Bestpreis)",
+        price: p,
+        rawPrice: first.rawPrice,
+      });
+      return items;
+    }
+  }
+
+  // 2. HTML regex for .sr-resultList_* and .sr-detailedPriceInfo__price_*
+  if (html && typeof html === "string") {
+    // Extract first product summary title
+    let title = "";
+    const titleMatch = html.match(/class=["'][^"']*(?:productSummary__title|sr-productSummary__title)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|span|h2|h3|a)>/i);
+    if (titleMatch) {
+      title = titleMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    // Extract first price in sr-detailedPriceInfo__price
+    const priceMatch = html.match(/class=["'][^"']*sr-detailedPriceInfo__price[^"']*["'][\s\S]*?(\d{1,5}(?:[.,]\d{2}))\s*€/i);
+    if (priceMatch) {
+      const val = parsePriceText(priceMatch[1]);
+      if (val !== null) {
+        items.push({
+          title: title || "Idealo Produkt",
+          condition: "Neu (Bestpreis)",
+          price: val,
+          rawPrice: `${priceMatch[1]} €`,
+        });
+        return items;
+      }
+    }
+
+    // Check __NEXT_DATA__
+    if (html.includes("__NEXT_DATA__")) {
+      const nextMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+      if (nextMatch) {
+        try {
+          const nextData = JSON.parse(nextMatch[1]);
+          const found = findIdealoProductsInNextData(nextData);
+          if (found.length > 0) {
+            return [found[0]];
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  // 3. Fallback: priceNodes (first price only)
+  if (Array.isArray(priceNodes) && priceNodes.length > 0) {
+    const val = parsePriceText(priceNodes[0]);
+    if (val !== null) {
+      items.push({
+        title: "Idealo Produkt",
+        condition: "Neu (Bestpreis)",
+        price: val,
+        rawPrice: priceNodes[0],
+      });
+      return items;
+    }
+  }
+
+  return [];
+}
+
+function logIdealoExtractedItems(items) {
+  if (!items || items.length === 0) {
+    console.log("[Seller Assistant] [idealo] Kein Idealo-Neupreis extrahiert (0 Treffer).");
+    return;
+  }
+  const top = items[0];
+  console.group(`[Seller Assistant] [idealo] Idealo Neupreis (Bestpreis des ersten Produkts):`);
+  console.log(`  Top-Treffer: ${top.price} € | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
+  console.groupEnd();
+
+  if (typeof console.table === "function") {
+    try {
+      console.table([
+        {
+          "Preis (€)": top.price,
+          "Zustand": top.condition || "Neu",
+          "Produktname": top.title,
+        }
+      ]);
+    } catch (_) {}
+  }
+}
+
 function extractPricesFromHtml(sourceId, html) {
   if (!html || typeof html !== "string") return [];
 
@@ -437,18 +566,16 @@ function extractPricesFromHtml(sourceId, html) {
     return items.map(it => it.price);
   }
 
+  if (sourceId === "idealo") {
+    const items = extractIdealoItems(html);
+    return items.map(it => it.price);
+  }
+
   // Try JSON-LD structured product/offer data first
   const ldPrices = extractJsonLdPrices(html);
   prices.push(...ldPrices);
 
-  if (sourceId === "idealo") {
-    const idealoRegex = /(?:ab\s*)?(\d{1,5}(?:[.,]\d{2}))\s*€/gi;
-    let m;
-    while ((m = idealoRegex.exec(html)) !== null) {
-      const val = parsePriceText(m[1]);
-      if (val !== null) prices.push(val);
-    }
-  } else if (sourceId === "ricardo") {
+  if (sourceId === "ricardo") {
     const ricJsonRegex = /"(?:buyNowPrice|currentPrice|startPrice)"\s*:\s*(\d+(?:\.\d+)?)/gi;
     let m;
     while ((m = ricJsonRegex.exec(html)) !== null) {
@@ -567,8 +694,9 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
       api.tabs.onUpdated.addListener(listener);
     });
 
-    // Wait 1200ms for SPA client-side hydration (Digitec, Ricardo, Idealo, eBay)
-    await new Promise(r => setTimeout(r, 1200));
+    // Wait 1200ms (or 2000ms for Idealo SPA) for client-side hydration
+    const waitTime = sourceId === "idealo" ? 2000 : 1200;
+    await new Promise(r => setTimeout(r, waitTime));
 
     let pageData = null;
     try {
@@ -577,15 +705,26 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
         func: () => {
           const html = document.documentElement ? document.documentElement.outerHTML : (document.body ? document.body.innerText : "");
           const currentUrl = location.href || "";
+
+          const idealoCards = [];
+          const firstPriceEl = document.querySelector('[class*="sr-detailedPriceInfo__price"]');
+          if (firstPriceEl) {
+            const firstTitleEl = document.querySelector('[class*="productSummary__title"], [class*="sr-productSummary__title"]');
+            idealoCards.push({
+              title: firstTitleEl ? firstTitleEl.textContent.trim() : "Idealo Top-Ergebnis",
+              rawPrice: firstPriceEl.textContent.trim(),
+            });
+          }
+
           const priceNodes = Array.from(
             document.querySelectorAll(
-              '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="price" i], [data-testid*="price" i]'
+              '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="sr-detailedPriceInfo__price"], [class*="price" i], [data-testid*="price" i]'
             )
           )
             .slice(0, 40)
             .map(el => (el.textContent || "").trim())
             .filter(Boolean);
-          return { html, currentUrl, priceNodes };
+          return { html, currentUrl, priceNodes, idealoCards };
         },
       });
       if (results && results[0] && results[0].result) {
@@ -616,6 +755,25 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
         if (kaItems.length > 0) {
           return { prices: kaItems.map(it => it.price), kleinanzeigenItems: kaItems, loginRequired: false };
         }
+      }
+      if (sourceId === "idealo") {
+        const idealoItems = extractIdealoItems(html, priceNodes, pageData.idealoCards || []);
+        if (idealoItems.length > 0) {
+          return { prices: [idealoItems[0].price], idealoItems, loginRequired: false };
+        }
+        if (priceNodes && priceNodes.length > 0) {
+          const p = parsePriceText(priceNodes[0]);
+          if (p !== null) {
+            const fallbackItem = [{
+              title: "Idealo Top-Ergebnis",
+              condition: "Neu (Bestpreis)",
+              price: p,
+              rawPrice: priceNodes[0],
+            }];
+            return { prices: [p], idealoItems: fallbackItem, loginRequired: false };
+          }
+        }
+        return { prices: [], idealoItems: [], loginRequired: false };
       }
       const extracted = extractPricesFromHtml(sourceId, html);
       if (extracted.length > 0) {
@@ -656,53 +814,59 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let loginRequired = false;
   let ebayItems = [];
   let kleinanzeigenItems = [];
+  let idealoItems = [];
 
+  const TAB_ONLY_SOURCES = new Set(["idealo"]);
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
-  // Step 1: Fast background fetch() with 5s timeout
-  try {
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+  // Step 1: Fast background fetch() with 5s timeout (skipped for client-rendered SPA sources like Idealo)
+  if (!TAB_ONLY_SOURCES.has(sourceConfig.id)) {
     try {
-      const resp = await fetch(url, {
-        credentials: "include",
-        signal: controller ? controller.signal : undefined,
-        headers: {
-          "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
-        },
-      });
-      if (resp.ok) {
-        const html = await resp.text();
-        if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
-          loginRequired = true;
-          console.warn(
-            `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
-          );
-        } else {
-          if (sourceConfig.id === "ebay_de_sold") {
-            ebayItems = extractEbayItemsFromHtml(html);
-            prices = ebayItems.map(it => it.price);
-          } else if (sourceConfig.id === "kleinanzeigen") {
-            kleinanzeigenItems = extractKleinanzeigenItems(html);
-            prices = kleinanzeigenItems.map(it => it.price);
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+      try {
+        const resp = await fetch(url, {
+          credentials: "include",
+          signal: controller ? controller.signal : undefined,
+          headers: {
+            "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
+          },
+        });
+        if (resp.ok) {
+          const html = await resp.text();
+          if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
+            loginRequired = true;
+            console.warn(
+              `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
+            );
           } else {
-            prices = extractPricesFromHtml(sourceConfig.id, html);
+            if (sourceConfig.id === "ebay_de_sold") {
+              ebayItems = extractEbayItemsFromHtml(html);
+              prices = ebayItems.map(it => it.price);
+            } else if (sourceConfig.id === "kleinanzeigen") {
+              kleinanzeigenItems = extractKleinanzeigenItems(html);
+              prices = kleinanzeigenItems.map(it => it.price);
+            } else {
+              prices = extractPricesFromHtml(sourceConfig.id, html);
+            }
+            console.log(
+              `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
+            );
           }
-          console.log(
-            `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
-          );
+        } else {
+          console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
         }
-      } else {
-        console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-    } finally {
-      if (timer) clearTimeout(timer);
+    } catch (err) {
+      console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
     }
-  } catch (err) {
-    console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
+  } else {
+    console.log(`[Seller Assistant] [${sourceConfig.id}] Überspringe fetch() (Client-SPA / Tab-Only Modus) -> nutze Browser-Tab...`);
   }
 
-  // Step 2: Fallback to inactive background tab if fetch returned 0 prices
+  // Step 2: Fallback to inactive background tab if fetch returned 0 prices (or for tab-only sources)
   if (prices.length === 0) {
     method = "tab";
     console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
@@ -713,6 +877,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     }
     if (tabRes.kleinanzeigenItems && tabRes.kleinanzeigenItems.length > 0) {
       kleinanzeigenItems = tabRes.kleinanzeigenItems;
+    }
+    if (tabRes.idealoItems && tabRes.idealoItems.length > 0) {
+      idealoItems = tabRes.idealoItems;
     }
     if (tabRes.loginRequired) {
       loginRequired = true;
@@ -749,6 +916,13 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     if (kleinanzeigenItems && kleinanzeigenItems.length > 0) {
       extra.items = kleinanzeigenItems;
       logKleinanzeigenExtractedItems(kleinanzeigenItems);
+    }
+  } else if (sourceConfig.id === "idealo") {
+    if (idealoItems && idealoItems.length > 0) {
+      extra.items = idealoItems;
+      logIdealoExtractedItems(idealoItems);
+      // For Idealo: The first card (.sr-resultList_* .sr-detailedPriceInfo__price_*) is the primary product's best new price!
+      prices = [idealoItems[0].price];
     }
   }
 
@@ -924,6 +1098,8 @@ if (typeof module !== "undefined" && module.exports) {
     logEbayExtractedItems,
     extractKleinanzeigenItems,
     logKleinanzeigenExtractedItems,
+    extractIdealoItems,
+    logIdealoExtractedItems,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,
