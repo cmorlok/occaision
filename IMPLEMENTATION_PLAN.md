@@ -357,9 +357,82 @@ def build_verification_links(self, query: str) -> VerificationLinks:
 
 ---
 
-## 4. Abschluss-Verifikation (Definition of Done)
+## 4. Erweiterung: Mehrstufiger Workflow & Preisrecherche über die Firefox-Extension (Step 5 bis Step 8)
 
-Führe nach Abschluss von Step 4 folgende Befehle aus:
+Da Backend-Scraping häufig durch Captchas/Anti-Bot-Systeme blockiert wird und Google Search Grounding im Free Tier strengen Quota-Limits (`429 RESOURCE_EXHAUSTED`) unterliegt, wird die Preisrecherche über **alle 6 Preisquellen** direkt in die **Firefox-Extension** verlagert:
+
+1. **eBay DE (Gebraucht & Beendet):** `LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`
+2. **Kleinanzeigen.de Suche:** Aktive Gebraucht-Angebote (`kleinanzeigen.de`)
+3. **Idealo.de Neupreis:** Deutscher Neupreisvergleich (`idealo.de`)
+4. **Ricardo.ch Suche:** Aktive Schweizer Angebote (`ricardo.ch`)
+5. **Toppreise.ch Neupreis:** Schweizer Neupreisvergleich (`toppreise.ch`)
+6. **Digitec/Galaxus Suche:** Schweizer Neupreis (`digitec.ch`)
+
+### Mehrstufiger Prozess im Dashboard:
+1. **Schritt 1 (Eingabe aufspalten):**
+   * `Produktname / Modell` (`#product-name` $\leftrightarrow$ `draft.identified_product`)
+   * `Kurzbeschreibung / Zustand & Lieferumfang` (`#user-notes` $\leftrightarrow$ `draft.user_notes`)
+2. **Schritt 2 (Optional, manuell ausgelöst): Preisrecherche über Firefox-Extension (`#btn-scrape-extension`):**
+   * Kommuniziert via `window.postMessage` $\leftrightarrow$ `extension/content.js` Bridge $\leftrightarrow$ `extension/background.js`.
+   * **Hybrid-Strategie pro Quelle:** Versucht zuerst einen schnellen `fetch()` im Background-Worker; fällt bei Bot-Blockade oder 0 Treffern (z.B. SPA-Rendering bei Digitec, Ricardo, Idealo, eBay) automatisch auf einen temporären inaktiven Hintergrund-Tab (`browser.tabs.create({ url, active: false })`) mit DOM-Extraktion zurück und schliesst den Tab danach wieder.
+   * Speichert die Statistiken (`MarketSourceStats`: `sample_count`, `min_price`, `max_price`, `median_price`, `median_chf`, `method`) in `draft.price_analysis.market_sources` und setzt `draft.price_analysis.prices_fetched_via_extension = True`.
+3. **Schritt 3: KI-Analyse (`#btn-analyze`):**
+   * **Wenn Preise aus Schritt 2 vorliegen (`prices_fetched_via_extension == True`):**
+     * Überspringt den Backend-eBay-Abruf, **deaktiviert Google Search Grounding automatisch** (`force_disable_grounding=True`) und übergibt alle 6 ermittelten Preisstatistiken strukturiert im Prompt an Gemini zur Berechnung der finalen Plattformpreise und Inseratetexte.
+   * **Wenn Schritt 2 übersprungen wurde (`prices_fetched_via_extension == False`):**
+     * Überlässt die Preisrecherche der KI (mit oder ohne Google Search Grounding gemäss den Einstellungen in `⚙️ Einstellungen`).
+
+---
+
+### STEP 5: Datenmodelle (`backend/models.py`) & Prüflinks (`backend/services/ebay_service.py`)
+* Neues Modell `MarketSourceStats` in `backend/models.py`:
+  ```python
+  class MarketSourceStats(BaseModel):
+      source_id: str
+      label: str
+      currency: str = "EUR"
+      sample_count: int = 0
+      min_price: Optional[float] = None
+      max_price: Optional[float] = None
+      median_price: Optional[float] = None
+      median_chf: Optional[float] = None
+      url: str = ""
+      method: str = "fetch"
+  ```
+* `PriceAnalysis` erweitern um:
+  * `market_sources: Dict[str, MarketSourceStats] = Field(default_factory=dict)`
+  * `prices_fetched_via_extension: bool = False`
+* `EbayService.build_verification_links()` erweitert `ebay_sold_url` um `&LH_ItemCondition=3000` (Gebraucht & Beendet).
+* `StorageService.create_draft(user_notes: str = "", identified_product: str = "")` unterstützt optional die Übergabe von `identified_product`.
+
+### STEP 6: Bedingte KI-Analyse (`backend/services/ai_service.py` & `backend/main.py`)
+* `AIService.get_generate_config(force_disable_grounding: bool = False)` deaktiviert das `google_search`-Tool und aktiviert `response_mime_type="application/json"`, sobald `force_disable_grounding=True` übergeben wird.
+* `AIService.analyze_draft()` prüft, ob `draft.price_analysis.prices_fetched_via_extension` oder gültige `market_sources` vorliegen:
+  * Falls ja: Übergibt alle 6 Preisquellen als strukturierten Kontext im Prompt an Gemini, ruft `get_generate_config(force_disable_grounding=True)` auf und erhält `market_sources` sowie `prices_fetched_via_extension=True` im aktualisierten `PriceAnalysis`-Objekt.
+  * Falls nein: Nutzt das konfigurierte Verhalten (`self.enable_search_grounding`).
+* `POST /api/drafts/{draft_id}/analyze` in `backend/main.py` überspringt `ebay_svc.fetch_sold_stats()`, wenn bereits Extension-Preise im Draft gespeichert sind.
+
+### STEP 7: Firefox-Extension Hybrid-Scraper (`extension/manifest.json`, `background.js`, `content.js`)
+* `extension/manifest.json`:
+  * Ergänzt `"tabs"` und `"scripting"` in `permissions`.
+  * Ergänzt `"*://*.idealo.de/*"`, `"*://*.toppreise.ch/*"`, `"*://*.digitec.ch/*"` in `host_permissions`.
+  * Ergänzt `"http://127.0.0.1:8000/*"` und `"http://localhost:8000/*"` in `content_scripts[0].matches`.
+* `extension/background.js`:
+  * Implementiert `SCRAPE_ALL_PRICE_SOURCES` für alle 6 Quellen (`ebay_de_sold`, `kleinanzeigen`, `idealo`, `ricardo`, `toppreise`, `digitec`) mit `scrapeSourceHybrid()` (`fetch()` $\rightarrow$ Fallback auf inaktiven Tab via `tabs.create({ url, active: false })` + `scripting.executeScript` + `tabs.remove`) und 10%-getrimmter Median-Berechnung.
+* `extension/content.js`:
+  * Erkennt das lokale Dashboard (`isLocalDashboard(hostname)`), rendert dort kein Smart-Panel, sondern stellt eine `window.postMessage`-Bridge (`SELLER_ASSISTANT_PING` / `SELLER_ASSISTANT_SCRAPE_PRICES`) bereit.
+
+### STEP 8: Dashboard UI (`frontend/index.html` & `frontend/app.js`)
+* `frontend/index.html`:
+  * Spaltet die Eingabe in `#product-name` (*Produktname / Modell*) und `#user-notes` (*Kurzbeschreibung / Zustand & Lieferumfang*) auf.
+  * Ergänzt den Button `#btn-scrape-extension` (*🔍 1. Preisrecherche über Extension (Optional)*) vor `#btn-analyze` (*⚡ 2. KI-Analyse starten*).
+  * Zeigt in Section 2 die ermittelten Werte aller 6 Preisquellen (`#price-ebay-median`, `#price-kleinanzeigen-median`, `#price-idealo-median`, `#price-ricardo-median`, `#price-toppreise-median`, `#price-digitec-median`) an.
+
+---
+
+## 5. Abschluss-Verifikation (Definition of Done)
+
+Führe nach Abschluss aller Schritte folgende Befehle aus:
 
 ```bash
 .venv/bin/pytest -v

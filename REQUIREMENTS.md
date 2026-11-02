@@ -31,23 +31,27 @@ Beim regelmässigen Einstellen von Gebrauchtartikeln auf Schweizer (**Ricardo.ch
 
 ```mermaid
 flowchart TD
-    User["Benutzer (Desktop)"] -->|Bilder & Notizen| Dashboard["Lokales Web-Dashboard (Seller Assistant - FastAPI + HTML/JS)"]
+    User["Benutzer (Desktop)"] -->|1. Produktname, Kurzbeschreibung & Fotos| Dashboard["Lokales Web-Dashboard (Seller Assistant - FastAPI + HTML/JS)"]
     
-    subgraph Local_Backend ["Lokales Backend (127.0.0.1:8000)"]
-        Dashboard --> ImgProc["Bild-Pipeline (Pillow/HEIF, EXIF-Strip, Auto-Enhance, opt. rembg/Blur)"]
-        Dashboard --> DraftStore["Persistente Entwurfs-Verwaltung (Lokale JSON/SQLite + Bild-Ordner)"]
-        Dashboard --> PriceEngine["Hybride CH/DE Preis-Engine"]
-        PriceEngine --> EbayParser["Direkter eBay-DE Sold-Parser (LH_Sold=1&LH_Complete=1)"]
-        PriceEngine --> AI_Engine["Gemini API (konfigurierbar via .env, z.B. gemini-2.5-flash / 2.0-flash)"]
-        AI_Engine --> Grounding["Google Search Grounding (CH-Neupreis via Digitec/Toppreise & DE-Neupreis via Idealo/Geizhals)"]
-    end
-
-    subgraph Browser ["Firefox Browser"]
-        BgScript["Extension Background Worker (umgeht CORS/CSP)"]
+    subgraph Browser ["Firefox Browser & Extension"]
+        DashBridge["Dashboard Content-Script Bridge (postMessage <-> runtime.sendMessage)"]
+        BgScript["Extension Background Worker (Hybrid-Scraper: fetch + Tab-DOM-Fallback)"]
         ContentScript["Smart-Panel Content Script (ricardo.ch / tutti.ch / ebay.de / kleinanzeigen.de)"]
-        BgScript <-->|REST API (Entwürfe & Bilder)| DraftStore
+        PriceSites["6 Preisquellen (eBay DE Gebraucht/Beendet, Kleinanzeigen, Idealo, Ricardo, Toppreise, Digitec)"]
+        
+        Dashboard <-->|2. Optionale Preisrecherche| DashBridge
+        DashBridge <--> BgScript
+        BgScript -->|Abruf & Parsing im echten Browser| PriceSites
         ContentScript <-->|browser.runtime.sendMessage| BgScript
         ContentScript -->|Schrittweise DOM-Injektion & File-Upload| PlatformForms["Plattform-Wizards (CH & DE)"]
+    end
+
+    subgraph Local_Backend ["Lokales Backend (127.0.0.1:8000)"]
+        Dashboard --> ImgProc["Bild-Pipeline (Pillow/HEIF, EXIF-Strip, Auto-Enhance, opt. rembg/Blur)"]
+        Dashboard --> DraftStore["Persistente Entwurfs-Verwaltung (Lokale JSON + Bild-Ordner)"]
+        Dashboard -->|3. KI-Analyse (inkl. Extension-Preise falls ermittelt)| AI_Engine["Gemini API (konfigurierbar via .env / UI)"]
+        AI_Engine -->|Nur falls Schritt 2 übersprungen| FallbackPrice["Fallback: Backend eBay-Parser & opt. Google Search Grounding"]
+        BgScript <-->|REST API (Entwürfe & Bilder)| DraftStore
     end
 ```
 
@@ -61,7 +65,9 @@ flowchart TD
   * Lokale Speicherung mehrerer Artikel-Entwürfe auf Vorrat (inkl. Status: *Entwurf*, *Bereit*, *Veröffentlicht*).
   * Jederzeitiges Nachbearbeiten: Weitere Fotos oder Notizen können nachträglich zu einem bestehenden Entwurf hinzugefügt und die KI-Analyse gezielt neu angestossen werden.
   * Alle generierten Felder (Titel, Beschreibung, Preise, Kategorien für CH- und DE-Plattformen) sind im Dashboard vor der Übergabe an den Browser manuell editierbar.
-* **Kurzbeschreibung / Stichworte:** Freitextfeld für grobe Angaben (z.B. *"Sony WH-1000XM4, ca. 2 Jahre alt, wenig gebraucht, OVP & Ladekabel dabei, Polster intakt"*).
+* **Aufgeteilte Eingabefelder (Produktname vs. Kurzbeschreibung):**
+  * **Produktname / Modell:** Eigenes Eingabefeld für die genaue Modellbezeichnung (z.B. *"Sony WH-1000XM4"* oder *"HP Color LaserJet Pro MFP 4302fdw"*), das direkt als Suchbegriff für die Preisrecherche über die Firefox-Extension dient.
+  * **Kurzbeschreibung / Zustand & Lieferumfang:** Separates Freitextfeld für Zustand, Alter, Mängel und Zubehör (z.B. *"ca. 2 Jahre alt, wenig gebraucht, OVP & Ladekabel dabei, Polster intakt"*).
 * **Konfigurierbare Voreinstellungen (Presets für CH & DE):**
   * Bevorzugte Verkaufsart bei Auktionsplattformen (Auktion vs. Sofortkauf für Ricardo.ch und eBay.de) bzw. Preistyp bei Kleinanzeigen (Verhandlungsbasis/VB vs. Festpreis).
   * **Schweizer Versand-Presets (CHF):** Nach aktuellen Schweizer Post-Tarifen (z.B. B-Post Paket bis 2 kg, B-Post bis 10 kg, Grossbrief, Abholung vor Ort).
@@ -83,14 +89,26 @@ flowchart TD
 * **Rechtlicher Hinweis (Compliance):**
   * Keine Verwendung fremder Urheberrechts-Bilder aus dem Web als Inseratefoto (Vermeidung von Sperrungen/Abmahnungen gemäss Plattform-AGB und Urheberrecht). Web-Referenzen dienen ausschliesslich der Modellidentifikation und Spezifikationsabfrage.
 
-### 3.3 Hybride Marktrecherche & Preisermittlung (CH & DE)
-Da Google Search Grounding allein beendete Auktionen oder verkaufte eBay-Artikel (`LH_Sold=1`) im Suchindex oft nicht zuverlässig sieht, arbeitet das System **hybrid**:
-* **1. Echte eBay-DE Transaktionsdaten (Backend-Parser):**
-  * Direkter Abruf/Parsing tatsächlich verkaufter Artikel auf eBay Deutschland (`LH_Sold=1&LH_Complete=1`) im Backend zur Ermittlung realer Gebraucht-Transaktionspreise (Median / Preisspanne in EUR), inkl. automatischer Umrechnung EUR $\rightarrow$ CHF.
-* **2. Länderübergreifende Neupreis-Anker (Gemini Search Grounding):**
-  * **Schweiz (CHF):** Abfrage des aktuellen Schweizer Strassen-/Neupreises (z.B. Digitec/Galaxus, Toppreise.ch) sowie sichtbarer CH-Marktangebote.
-  * **Deutschland (EUR):** Abfrage des aktuellen deutschen Strassen-/Neupreises (z.B. Idealo.de, Geizhals.de) sowie aktueller Vergleichsangebote auf eBay.de und Kleinanzeigen.de.
-  * **Intelligente Markt-Abwägung:** Separate Preisempfehlungen in **CHF** (unter Berücksichtigung des oft tieferen CH-Neupreises wegen 8.1 % MwSt. und Ricardo-Gebühren) sowie in **EUR** (passend zum deutschen Gebrauchtmarkt auf eBay.de und Kleinanzeigen.de).
+### 3.3 Mehrstufige Marktrecherche & Preisermittlung über Firefox-Extension (CH & DE)
+Da Server-/Backend-Requests häufig durch Anti-Bot-Systeme (z.B. eBay Captchas, Cloudflare) blockiert werden und Google Search Grounding im Free Tier strengen Quota-Limits (`429 RESOURCE_EXHAUSTED`) unterliegt, arbeitet das System in einem **mehrstufigen Prozess**:
+
+* **Schritt 1: Eingabe (Produktname & Kurzbeschreibung):**
+  * Der Benutzer erfasst den **Produktnamen** sowie die **Kurzbeschreibung** (und lädt Fotos hoch).
+* **Schritt 2 (Optional, manuell ausgelöst): Preisrecherche über die Firefox-Extension:**
+  * Über den Button *"🔍 1. Preisrecherche über Extension (Optional)"* im Dashboard befragt die Firefox-Extension direkt im Browser des Nutzers **alle 6 Preisquellen** mittels **Hybrid-Scraping** (zuerst schneller `fetch()`, bei SPA/Bot-Schutz oder 0 Treffern automatischer Fallback auf einen temporären inaktiven Hintergrund-Tab mit DOM-Extraktion nach JS-Rendering):
+    1. **eBay DE (Gebraucht und Beendet):** Verkaufte Gebraucht-Artikel (`LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`) in EUR (inkl. Umrechnung in CHF).
+    2. **Kleinanzeigen.de Suche:** Aktuelle Gebraucht-Angebote auf `kleinanzeigen.de` in EUR.
+    3. **Idealo.de Neupreis:** Aktueller deutscher Strassen-/Neupreis auf `idealo.de` in EUR.
+    4. **Ricardo.ch Suche:** Aktuelle Angebote auf `ricardo.ch` in CHF.
+    5. **Toppreise.ch Neupreis:** Aktueller Schweizer Neupreisvergleich auf `toppreise.ch` in CHF.
+    6. **Digitec/Galaxus Suche:** Aktueller Schweizer Neupreis auf `digitec.ch` in CHF.
+  * Für jede Quelle werden **Median** (mit 10%-Outlier-Trimming ab 4 Treffern), **Preisspanne (Min–Max)** und **Anzahl Treffer** berechnet, im Dashboard angezeigt und im Entwurf gespeichert.
+* **Schritt 3: KI-Analyse & Preisfindung (`⚡ 2. KI-Analyse starten`):**
+  * **Fall A – Preise wurden in Schritt 2 über die Extension ermittelt:**
+    * Alle 6 ermittelten Preisstatistiken werden strukturiert im Prompt an Gemini übergeben.
+    * **Google Search Grounding wird für diesen Aufruf automatisch deaktiviert** (schont das API-Quota und verhindert 429-Fehler); die KI bestimmt die optimalen Plattformpreise und generiert die Inseratetexte direkt auf Basis der echten Marktdaten.
+  * **Fall B – Schritt 2 wurde übersprungen (keine Extension-Preise vorhanden):**
+    * Das System überlässt die Preisrecherche der KI (je nach Einstellung in `⚙️ Einstellungen` mit oder ohne Google Search Grounding sowie Backend-eBay-Fallback).
 * **Preis-Strategie-Ausgabe & Prüflinks:**
   * **CH-Preise (in CHF):**
     * Empfohlener Startpreis für Ricardo-Auktionen (`ricardo_start_chf`).
@@ -101,7 +119,7 @@ Da Google Search Grounding allein beendete Auktionen oder verkaufte eBay-Artikel
     * Empfohlener Sofort-Kaufen-Preis für eBay.de (`ebay_buynow_eur`).
     * Empfohlener Preis für Kleinanzeigen.de (`kleinanzeigen_vb_eur`).
   * **Direkte 1-Klick-Prüflinks** im Dashboard zu:
-    * eBay.de Verkaufte Artikel (`LH_Sold=1&LH_Complete=1`)
+    * eBay.de Verkaufte Gebraucht-Artikel (`LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`)
     * Kleinanzeigen.de Suche
     * Idealo.de (DE-Neupreisvergleich)
     * Ricardo.ch Suche
