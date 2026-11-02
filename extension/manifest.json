@@ -5,6 +5,8 @@
   "description": "Smart-Panel und Auto-Fill Assistent für Verkaufsplattformen",
   "permissions": ["storage", "activeTab", "tabs", "scripting"],
   "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*",
     "*://*.ricardo.ch/*",
@@ -24,8 +26,8 @@
   "content_scripts": [
     {
       "matches": [
-        "http://127.0.0.1:8000/*",
-        "http://localhost:8000/*",
+        "http://127.0.0.1/*",
+        "http://localhost/*",
         "*://*.ricardo.ch/*",
         "*://*.tutti.ch/*",
         "*://*.ebay.de/*",

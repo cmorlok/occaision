@@ -2,7 +2,7 @@ import logging
 import os
 from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -74,21 +74,6 @@ class UpdateSystemConfigRequest(BaseModel):
     enable_search_grounding: Optional[bool] = None
 
 
-class ExtensionScrapeRequest(BaseModel):
-    request_id: str
-    query: str
-    eur_to_chf_rate: float = 0.94
-
-
-class ExtensionScrapeResultPayload(BaseModel):
-    request_id: str
-    ok: bool = True
-    query: str = ""
-    sources: Dict[str, Any] = {}
-    verification_links: Optional[Dict[str, str]] = None
-    error: Optional[str] = None
-
-
 def create_app(
     settings: Optional[Settings] = None,
     storage_service: Optional[StorageService] = None,
@@ -137,55 +122,6 @@ def create_app(
     @app.get("/api/health")
     def health():
         return {"status": "ok", "model": cfg.gemini_model}
-
-    # 1b. Extension Scrape Broker (allows background.js and Dashboard to communicate without content-script host issues)
-    pending_scrapes: Dict[str, Dict[str, Any]] = {}
-    completed_scrapes: Dict[str, Dict[str, Any]] = {}
-
-    @app.post("/api/extension/scrape-request")
-    def create_extension_scrape_request(body: ExtensionScrapeRequest):
-        logger.info(
-            f"[ExtensionBroker] Neue Preisrecherche-Anfrage '{body.request_id}' für '{body.query}' in Warteschlange."
-        )
-        pending_scrapes[body.request_id] = {
-            "request_id": body.request_id,
-            "query": body.query,
-            "eur_to_chf_rate": body.eur_to_chf_rate,
-        }
-        return {"ok": True, "request_id": body.request_id}
-
-    @app.get("/api/extension/pending")
-    def get_pending_extension_scrapes():
-        items = list(pending_scrapes.values())
-        pending_scrapes.clear()
-        if items:
-            logger.info(
-                f"[ExtensionBroker] Extension Background-Worker holt {len(items)} Anfrage(n) ab: "
-                f"{[i['query'] for i in items]}"
-            )
-        return {"pending": items}
-
-    @app.post("/api/extension/result")
-    def submit_extension_scrape_result(body: ExtensionScrapeResultPayload):
-        pending_scrapes.pop(body.request_id, None)
-        completed_scrapes[body.request_id] = body.model_dump()
-        hit_summary = {
-            k: v.get("sample_count", 0)
-            for k, v in (body.sources or {}).items()
-            if isinstance(v, dict)
-        }
-        logger.info(
-            f"[ExtensionBroker] Ergebnis von Extension erhalten für '{body.request_id}' "
-            f"(ok={body.ok}, Treffer pro Quelle={hit_summary})."
-        )
-        return {"ok": True}
-
-    @app.get("/api/extension/result/{request_id}")
-    def get_extension_scrape_result(request_id: str):
-        if request_id in completed_scrapes:
-            res = completed_scrapes.pop(request_id)
-            return {"status": "done", "result": res}
-        return {"status": "pending"}
 
     # 2. Settings
     @app.get("/api/settings", response_model=PresetSettings)

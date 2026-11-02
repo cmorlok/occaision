@@ -32,8 +32,8 @@ def test_manifest_v3_validity():
     assert any("digitec.ch" in p for p in host_perms)
 
     matches = manifest["content_scripts"][0].get("matches", [])
-    assert any("127.0.0.1:8000" in m for m in matches)
-    assert any("localhost:8000" in m for m in matches)
+    assert any("127.0.0.1" in m for m in matches)
+    assert any("localhost" in m for m in matches)
     assert any("ricardo.ch" in m for m in matches)
     assert any("tutti.ch" in m for m in matches)
     assert any("ebay.de" in m for m in matches)

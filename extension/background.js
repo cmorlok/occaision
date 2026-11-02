@@ -10,8 +10,8 @@ const browserApi =
 const BACKEND_BASE = "http://127.0.0.1:8000";
 
 const ALL_HOST_ORIGINS = [
-  "http://127.0.0.1:8000/*",
-  "http://localhost:8000/*",
+  "http://127.0.0.1/*",
+  "http://localhost/*",
   "*://*.ricardo.ch/*",
   "*://*.tutti.ch/*",
   "*://*.ebay.de/*",
@@ -380,15 +380,6 @@ async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94) {
     console.log(`[Seller Assistant] === Starte 6-Quellen-Preisrecherche (${key}) für '${query}' ===`);
     const result = await scrapeAllPriceSources(query, eurToChfRate);
     console.log(`[Seller Assistant] === 6-Quellen-Preisrecherche abgeschlossen (${key}) ===`, result);
-    if (requestId) {
-      fetch(`${BACKEND_BASE}/api/extension/result`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          Object.assign({ request_id: requestId }, result)
-        ),
-      }).catch(() => {});
-    }
     return result;
   })();
 
@@ -522,27 +513,6 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
 
     return false;
   });
-
-  // Poll Backend broker every 1500ms so Dashboard requests work even without content.js injection
-  setInterval(async () => {
-    try {
-      const res = await fetch(`${BACKEND_BASE}/api/extension/pending`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const pending = data.pending || [];
-      for (const item of pending) {
-        runDeduplicatedScrape(
-          item.request_id,
-          item.query || "",
-          item.eur_to_chf_rate || 0.94
-        ).catch(err => {
-          console.error("[Seller Assistant] Broker scrape error:", err);
-        });
-      }
-    } catch (_) {
-      // Backend offline or unreachable, ignore silently
-    }
-  }, 1500);
 }
 
 if (typeof module !== "undefined" && module.exports) {

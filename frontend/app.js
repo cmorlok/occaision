@@ -807,27 +807,13 @@ async function scrapePricesViaExtension() {
   }
 
   try {
-    // Queue request on Backend broker AND postMessage to Content-Script bridge simultaneously
-    // so whichever channel responds first resolves immediately.
-    await fetch("/api/extension/scrape-request", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        request_id: reqId,
-        query: query,
-        eur_to_chf_rate: rate,
-      }),
-    }).catch(() => {});
-
     const extResult = await new Promise((resolve, reject) => {
       let settled = false;
-      let pollTimer = null;
 
       function finish(ok, dataOrErr) {
         if (settled) return;
         settled = true;
         clearTimeout(timeout);
-        if (pollTimer) clearInterval(pollTimer);
         window.removeEventListener("message", onMsg);
         if (ok) resolve(dataOrErr);
         else reject(dataOrErr);
@@ -838,7 +824,7 @@ async function scrapePricesViaExtension() {
           false,
           new Error(
             "Keine Antwort von der Seller Assistant Firefox-Extension erhalten. " +
-              "Bitte prüfe in Firefox unter about:debugging, ob die Extension geladen ist, und klicke einmal auf das Seller Assistant Icon in der Firefox-Toolbar (um die Berechtigungen freizugeben)."
+              "Bitte stelle sicher, dass die Extension in Firefox geladen ist, klicke einmal auf das Seller Assistant Icon in der Firefox-Toolbar (um die Berechtigungen freizugeben) und lade das Dashboard neu (F5)."
           )
         );
       }, 35000);
@@ -876,24 +862,6 @@ async function scrapePricesViaExtension() {
         }),
         "*"
       );
-
-      // Also poll Backend broker every 1000ms in case content.js is not injected on localhost
-      pollTimer = setInterval(async () => {
-        if (settled) return;
-        try {
-          const r = await fetch(`/api/extension/result/${reqId}`);
-          if (r.ok) {
-            const d = await r.json();
-            if (d.status === "done" && d.result) {
-              if (d.result.ok) {
-                finish(true, d.result);
-              } else {
-                finish(false, new Error(d.result.error || "Extension-Fehler"));
-              }
-            }
-          }
-        } catch (_) {}
-      }, 1000);
     });
 
     if (!currentDraft.price_analysis) {
