@@ -178,12 +178,15 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
         "source-box-ricardo",
         "source-box-toppreise",
         "source-box-digitec",
+        "source-box-tutti",
+        "link-tutti",
         "cfg-src-ebay_de_sold",
         "cfg-src-kleinanzeigen",
         "cfg-src-idealo",
         "cfg-src-ricardo",
         "cfg-src-toppreise",
         "cfg-src-digitec",
+        "cfg-src-tutti",
         "cfg-keep-tabs-open",
     ]
     for element_id in required_ids:

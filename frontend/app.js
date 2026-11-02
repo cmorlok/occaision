@@ -36,6 +36,8 @@ const priceToppreiseMedian = document.getElementById("price-toppreise-median");
 const priceToppreiseCount = document.getElementById("price-toppreise-count");
 const priceDigitecMedian = document.getElementById("price-digitec-median");
 const priceDigitecCount = document.getElementById("price-digitec-count");
+const priceTuttiMedian = document.getElementById("price-tutti-median");
+const priceTuttiCount = document.getElementById("price-tutti-count");
 const priceChNew = document.getElementById("price-ch-new");
 const priceDeNew = document.getElementById("price-de-new");
 const priceRecStart = document.getElementById("price-rec-start");
@@ -51,6 +53,7 @@ const linkIdealo = document.getElementById("link-idealo");
 const linkRicardo = document.getElementById("link-ricardo");
 const linkToppreise = document.getElementById("link-toppreise");
 const linkDigitec = document.getElementById("link-digitec");
+const linkTutti = document.getElementById("link-tutti");
 
 // Section 3: Platform elements
 const ricardoTitle = document.getElementById("ricardo-title");
@@ -154,13 +157,14 @@ const ALL_PRICE_SOURCES = [
   { id: "ricardo", boxId: "source-box-ricardo", linkId: "link-ricardo" },
   { id: "toppreise", boxId: "source-box-toppreise", linkId: "link-toppreise" },
   { id: "digitec", boxId: "source-box-digitec", linkId: "link-digitec" },
+  { id: "tutti", boxId: "source-box-tutti", linkId: "link-tutti" },
 ];
 
 function getEnabledPriceSources() {
   if (settings && Array.isArray(settings.enabled_price_sources)) {
     return settings.enabled_price_sources;
   }
-  return ["ebay_de_sold", "kleinanzeigen", "idealo", "ricardo", "toppreise", "digitec"];
+  return ["ebay_de_sold", "kleinanzeigen", "idealo", "ricardo", "toppreise", "digitec", "tutti"];
 }
 
 function updatePriceSourcesVisibility() {
@@ -445,6 +449,7 @@ function populateForm() {
   renderSourceBox("ricardo", priceRicardoMedian, priceRicardoCount, null);
   renderSourceBox("toppreise", priceToppreiseMedian, priceToppreiseCount, null);
   renderSourceBox("digitec", priceDigitecMedian, priceDigitecCount, null);
+  renderSourceBox("tutti", priceTuttiMedian, priceTuttiCount, null);
   updatePriceSourcesVisibility();
 
   if (extensionScrapeStatus) {
@@ -492,6 +497,7 @@ function populateForm() {
     linkRicardo.href = vl.ricardo_search_url || "#";
     linkToppreise.href = vl.toppreise_url || "#";
     linkDigitec.href = vl.digitec_url || "#";
+    if (linkTutti) linkTutti.href = vl.tutti_search_url || "#";
   }
 
   // Ricardo
@@ -1094,6 +1100,27 @@ async function scrapePricesViaExtension() {
               "Preis (CHF)": it.price,
               "Zustand": it.condition || "Neu",
               "Titel": it.title,
+            }))
+          );
+        } catch (_) {}
+      }
+    }
+
+    if (sources.tutti && sources.tutti.items && sources.tutti.items.length > 0) {
+      const tut = sources.tutti;
+      console.group(`[Seller Assistant] [Dashboard] Tutti.ch extrahierte Inserate (${tut.items.length} Treffer):`);
+      tut.items.forEach((it, idx) => {
+        console.log(`  #${idx + 1}: ${it.price} CHF | "${it.title}"`);
+      });
+      console.groupEnd();
+      if (typeof console.table === "function") {
+        try {
+          console.table(
+            tut.items.map((it, idx) => ({
+              "#": idx + 1,
+              "Preis (CHF)": it.price,
+              "Titel": it.title,
+              "URL": it.url,
             }))
           );
         } catch (_) {}

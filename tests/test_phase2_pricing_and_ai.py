@@ -52,6 +52,8 @@ def test_verification_links_generation():
     
     assert ("galaxus.ch/de/search" in links.digitec_url or "digitec.ch/de/search" in links.digitec_url)
     assert "Sony" in links.digitec_url
+    
+    assert "tutti.ch" in links.tutti_search_url
 
 
 def test_ai_json_extractor_and_grounding_config_compatibility():

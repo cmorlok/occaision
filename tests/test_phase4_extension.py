@@ -117,6 +117,9 @@ def test_extension_price_parser_and_stats_via_node():
     if (!links.ricardo_search_url.includes('item_condition=used') || !links.ricardo_search_url.includes('seller_type=individual') || !links.ricardo_search_url.includes('HP%20Color%20LaserJet')) {
       throw new Error('Ricardo search url invalid: ' + links.ricardo_search_url);
     }
+    if (!links.tutti_search_url.includes('tutti.ch')) {
+      throw new Error('Tutti search url invalid: ' + links.tutti_search_url);
+    }
 
     // Test Kleinanzeigen JSON parsing
     const kaJsonContent = fs.readFileSync('temp/kleinanzeigen.json', 'utf8');
@@ -245,6 +248,23 @@ def test_extension_price_parser_and_stats_via_node():
     const ricardoPrices = bg.extractPricesFromHtml('ricardo', ricardoHtml);
     if (!ricardoPrices || ricardoPrices.length !== 1 || ricardoPrices[0] !== 300) {
       throw new Error('Expected [300] from extractPricesFromHtml for regular ricardo results, got: ' + JSON.stringify(ricardoPrices));
+    }
+
+    const tuttiHtml = fs.readFileSync('temp/tutti-13 Inserate für _HP Color LaserJet Pro MFP 4302fdw_ in Alle Kategorien - tutti.html', 'utf8');
+    const tuttiItems = bg.extractTuttiItems(tuttiHtml);
+    if (!Array.isArray(tuttiItems) || tuttiItems.length !== 13) {
+      throw new Error('Expected exactly 13 tutti items (excluding Ricardo ads), got: ' + (tuttiItems ? tuttiItems.length : 0));
+    }
+    if (tuttiItems[0].price !== 250 || !tuttiItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+      throw new Error('Unexpected tutti item 0: ' + JSON.stringify(tuttiItems[0]));
+    }
+    const tuttiPrices = bg.extractPricesFromHtml('tutti', tuttiHtml);
+    if (!tuttiPrices || tuttiPrices.length !== 13 || tuttiPrices[0] !== 250) {
+      throw new Error('Expected 13 prices starting with 250 from extractPricesFromHtml for tutti, got: ' + JSON.stringify(tuttiPrices));
+    }
+    const copytronItem = tuttiItems.find(it => it.title.includes('cyan Toner, 220X, W2201X'));
+    if (!copytronItem || copytronItem.price !== 178) {
+      throw new Error('Expected price 178 for Copytron cyan toner with logo (not postal code 8152), got: ' + JSON.stringify(copytronItem));
     }
 
     const ebayHtml = `

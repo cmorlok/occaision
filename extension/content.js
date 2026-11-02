@@ -820,7 +820,57 @@ if (typeof browserApi !== "undefined" && browserApi.runtime && browserApi.runtim
         }
       }
 
-      sendResponse({ html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards, ricardoCards });
+      const tuttiCards = [];
+      const tuttiItems = document.querySelectorAll('[data-private-srp-listing-item-id]');
+      for (const item of tuttiItems) {
+        const link = item.querySelector('a[href*="/vi/"]');
+        if (!link) continue;
+        const href = link.href || link.getAttribute("href") || "";
+        if (href.includes("ricardo.ch") || href.includes("utm_source=tutti-web")) continue;
+
+        const h2 = item.querySelector("h2");
+        const title = (h2 ? h2.textContent : "").trim() || "Tutti Inserat";
+
+        let rawPrice = "";
+        for (const el of item.querySelectorAll("span, p, div")) {
+          if (el.children && el.children.length > 0) continue;
+          const t = (el.textContent || "").trim();
+          if (
+            /^(?:CHF|Fr\.)?\s*(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2})?)\s*(?:CHF|Fr\.)?$/i.test(t) &&
+            (/[.\-–]|CHF|Fr/i.test(t))
+          ) {
+            rawPrice = t;
+            break;
+          }
+        }
+        if (!rawPrice) {
+          for (const el of item.querySelectorAll("span, p")) {
+            const t = (el.textContent || "").trim();
+            if (
+              /^(?:CHF|Fr\.)?\s*(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2})?)\s*(?:CHF|Fr\.)?$/i.test(t) &&
+              (/[.\-–]|CHF|Fr/i.test(t))
+            ) {
+              rawPrice = t;
+              break;
+            }
+          }
+        }
+        if (!rawPrice) {
+          const allText = item.textContent || "";
+          const m = allText.match(/(\d+['’.,\s\u00a0\u202f\d]*(?:\.–|\.-|--))/);
+          if (m) rawPrice = m[1].trim();
+        }
+
+        if (rawPrice) {
+          tuttiCards.push({
+            title,
+            rawPrice,
+            url: href,
+          });
+        }
+      }
+
+      sendResponse({ html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards, ricardoCards, tuttiCards });
       return true;
     }
     return false;

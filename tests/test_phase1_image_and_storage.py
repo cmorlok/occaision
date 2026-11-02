@@ -132,6 +132,7 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
         "ricardo",
         "toppreise",
         "digitec",
+        "tutti",
     ]
 
     # Test updating enabled price sources & debug setting

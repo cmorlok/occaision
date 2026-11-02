@@ -54,6 +54,7 @@ DEFAULT_PRICE_SOURCES = [
     "ricardo",
     "toppreise",
     "digitec",
+    "tutti",
 ]
 
 
@@ -121,6 +122,7 @@ class VerificationLinks(BaseModel):
     ricardo_search_url: str
     toppreise_url: str
     digitec_url: str
+    tutti_search_url: str = ""
 
 
 class PriceAnalysis(BaseModel):

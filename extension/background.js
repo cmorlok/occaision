@@ -60,6 +60,7 @@ function buildVerificationLinks(query) {
     ricardo_search_url: `https://www.ricardo.ch/de/s/${qRaw}/?item_condition=used&seller_type=individual`,
     toppreise_url: `https://www.toppreise.ch/produktsuche?q=${q}`,
     digitec_url: `https://www.galaxus.ch/de/search?q=${q}`,
+    tutti_search_url: "https://www.tutti.ch/de",
   };
 }
 
@@ -550,6 +551,109 @@ function logRicardoExtractedItems(items) {
   }
 }
 
+function extractTuttiItems(html, priceNodes = [], tuttiCards = []) {
+  const items = [];
+  const seenUrls = new Set();
+
+  // 1. Live DOM-extracted cards from background tab
+  if (Array.isArray(tuttiCards) && tuttiCards.length > 0) {
+    for (const card of tuttiCards) {
+      if (card.url && seenUrls.has(card.url)) continue;
+      if (card.url) seenUrls.add(card.url);
+
+      const p = parsePriceText(card.rawPrice);
+      if (p !== null && p > 0) {
+        items.push({
+          title: (card.title || "Tutti Inserat").trim(),
+          condition: "Gebraucht",
+          price: p,
+          rawPrice: card.rawPrice,
+          url: card.url || "",
+        });
+      }
+    }
+    if (items.length > 0) return items.slice(0, 30);
+  }
+
+  // 2. HTML parsing from rendered HTML string
+  if (html && typeof html === "string") {
+    const cardRegex = /<div[^>]*?data-private-srp-listing-item-id=\"([^\"]+)\"[\s\S]*?(?=<div[^>]*?data-private-srp-listing-item-id=|$)/gi;
+    let match;
+    while ((match = cardRegex.exec(html)) !== null) {
+      const cardHtml = match[0];
+      if (cardHtml.includes("ricardo.ch") || cardHtml.includes("utm_source=tutti-web")) continue;
+
+      const hrefMatch = cardHtml.match(/href=\"([^\"]*\/vi\/[^\"]*)\"/i);
+      const url = hrefMatch ? hrefMatch[1] : "";
+      if (!url || seenUrls.has(url)) continue;
+      seenUrls.add(url);
+
+      const titleMatch = cardHtml.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i);
+      const title = (titleMatch ? titleMatch[1].replace(/<[^>]+>/g, "").trim() : "Tutti Inserat");
+
+      const priceMatch = cardHtml.match(/(\d+['’.,\s\u00a0\u202f\d]*(?:\.–|\.-|--))/);
+      if (priceMatch) {
+        const p = parsePriceText(priceMatch[1]);
+        if (p !== null && p > 0) {
+          items.push({
+            title,
+            condition: "Gebraucht",
+            price: p,
+            rawPrice: priceMatch[1].trim(),
+            url,
+          });
+        }
+      }
+    }
+    if (items.length > 0) return items.slice(0, 30);
+  }
+
+  // 3. Fallback: priceNodes
+  if (Array.isArray(priceNodes) && priceNodes.length > 0) {
+    for (const raw of priceNodes) {
+      const p = parsePriceText(raw);
+      if (p !== null && p > 0) {
+        items.push({
+          title: "Tutti Inserat",
+          condition: "Gebraucht",
+          price: p,
+          rawPrice: raw,
+          url: "",
+        });
+      }
+    }
+  }
+
+  return items.slice(0, 30);
+}
+
+function logTuttiExtractedItems(items) {
+  if (!items || items.length === 0) {
+    console.log("[Seller Assistant] [tutti] Keine Tutti-Preise extrahiert (0 Treffer).");
+    return;
+  }
+  console.group(`[Seller Assistant] [tutti] Extrahierte Tutti.ch Inserate (${items.length} Treffer):`);
+  items.forEach((it, idx) => {
+    console.log(
+      `  #${idx + 1}: ${it.price} CHF | Titel: "${it.title}"`
+    );
+  });
+  console.groupEnd();
+
+  if (typeof console.table === "function") {
+    try {
+      console.table(
+        items.map((it, idx) => ({
+          "#": idx + 1,
+          "Preis (CHF)": it.price,
+          "Titel": it.title,
+          "URL": it.url,
+        }))
+      );
+    } catch (_) {}
+  }
+}
+
 function findIdealoProductsInNextData(obj) {
   const items = [];
   function walk(node, depth = 0) {
@@ -968,6 +1072,11 @@ function extractPricesFromHtml(sourceId, html) {
     return items.map(it => it.price);
   }
 
+  if (sourceId === "tutti") {
+    const items = extractTuttiItems(html);
+    return items.map(it => it.price);
+  }
+
   // Try JSON-LD structured product/offer data first
   const ldPrices = extractJsonLdPrices(html);
   prices.push(...ldPrices);
@@ -1068,7 +1177,7 @@ function computeSourceStats(
   };
 }
 
-async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
+async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query = "") {
   const api = getBrowserApi();
   if (!api || !api.tabs || !api.scripting) {
     return { prices: [], loginRequired: false };
@@ -1093,6 +1202,108 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
 
     // Wait standard 1200ms for DOM ready / client hydration
     await new Promise(r => setTimeout(r, 1200));
+
+    if (sourceId === "tutti" && query) {
+      try {
+        console.log(`[Seller Assistant] [tutti] Fülle Suchmaske für '${query}' auf ${url} aus...`);
+        const searchAction = await api.scripting.executeScript({
+          target: { tabId: tab.id },
+          args: [query],
+          func: async (q) => {
+            const curUrl = location.href || "";
+            if (curUrl.includes("/q/") || curUrl.includes("/suche")) {
+              return { status: "already_on_search_page", url: curUrl };
+            }
+
+            const input = document.querySelector(
+              'input[data-testid="search-field"], input[data-e2e-testid="search-field"], input[placeholder*="suchst du"]'
+            );
+            if (!input) {
+              return { status: "no_input_found", url: curUrl };
+            }
+
+            input.focus();
+            const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set;
+            if (nativeSetter) {
+              nativeSetter.call(input, q);
+            } else {
+              input.value = q;
+            }
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+
+            // Wait 250ms for React/MUI Autocomplete state update
+            await new Promise(r => setTimeout(r, 250));
+
+            const form = input.closest("form") || input.form;
+            const submitBtn = (form ? form.querySelector('button[type="submit"]') : null) ||
+                              document.querySelector('form button[type="submit"], button[aria-label="Suchen"], button[type="submit"][aria-label="Suchen"]');
+            if (submitBtn) {
+              submitBtn.focus();
+              submitBtn.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
+              submitBtn.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+              submitBtn.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, cancelable: true }));
+              submitBtn.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+              submitBtn.click();
+            }
+
+            // Also dispatch Enter on input
+            input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+            input.dispatchEvent(new KeyboardEvent("keypress", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+            input.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+
+            if (form && typeof form.requestSubmit === "function") {
+              try {
+                form.requestSubmit(submitBtn || undefined);
+              } catch (_) {
+                try {
+                  form.requestSubmit();
+                } catch (_) {}
+              }
+            }
+
+            return { status: "submitted", query: q, inputFound: true, buttonFound: Boolean(submitBtn) };
+          },
+        });
+
+        console.log("[Seller Assistant] [tutti] Suchmaske-Aktion Ergebnis:", searchAction?.[0]?.result);
+
+        // Wait for results to render or navigate (poll up to 8s)
+        const startWait = Date.now();
+        let navigatedToSearch = false;
+        while (Date.now() - startWait < 8000) {
+          await new Promise(r => setTimeout(r, 600));
+          try {
+            const checkRes = await api.scripting.executeScript({
+              target: { tabId: tab.id },
+              func: () => {
+                const cur = location.href || "";
+                const isSearch = cur.includes("/q/") || cur.includes("/suche");
+                const count = isSearch ? document.querySelectorAll('[data-private-srp-listing-item-id]').length : 0;
+                const hasNoResults = isSearch && /keine inserate|keine treffer|0 inserate|keine ergebnisse/i.test(document.body ? document.body.innerText : "");
+                return { isSearch, count, hasNoResults, url: cur };
+              },
+            });
+            if (checkRes && checkRes[0] && checkRes[0].result) {
+              const res = checkRes[0].result;
+              if (res.isSearch) {
+                console.log(`[Seller Assistant] [tutti] Suchergebnisseite erfolgreich geladen: ${res.url} (${res.count} Treffer, keineTreffer=${res.hasNoResults})`);
+                navigatedToSearch = true;
+                if (res.count === 0 && !res.hasNoResults) {
+                  await new Promise(r => setTimeout(r, 600));
+                }
+                break;
+              }
+            }
+          } catch (_) {}
+        }
+        if (!navigatedToSearch) {
+          console.warn("[Seller Assistant] [tutti] Konnte Suchergebnisseite nach 8s nicht erreichen (Tab verbleibt möglicherweise auf Startseite).");
+        }
+      } catch (tuttiSearchErr) {
+        console.warn("[Seller Assistant] [tutti] Fehler beim Ausfüllen der Suchmaske:", tuttiSearchErr);
+      }
+    }
 
     let pageData = null;
     try {
@@ -1288,7 +1499,57 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
             }
           }
 
-          return { html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards, ricardoCards };
+          const tuttiCards = [];
+          const tuttiItems = document.querySelectorAll('[data-private-srp-listing-item-id]');
+          for (const item of tuttiItems) {
+            const link = item.querySelector('a[href*="/vi/"]');
+            if (!link) continue;
+            const href = link.href || link.getAttribute("href") || "";
+            if (href.includes("ricardo.ch") || href.includes("utm_source=tutti-web")) continue;
+
+            const h2 = item.querySelector("h2");
+            const title = (h2 ? h2.textContent : "").trim() || "Tutti Inserat";
+
+            let rawPrice = "";
+            for (const el of item.querySelectorAll("span, p, div")) {
+              if (el.children && el.children.length > 0) continue;
+              const t = (el.textContent || "").trim();
+              if (
+                /^(?:CHF|Fr\.)?\s*(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2})?)\s*(?:CHF|Fr\.)?$/i.test(t) &&
+                (/[.\-–]|CHF|Fr/i.test(t))
+              ) {
+                rawPrice = t;
+                break;
+              }
+            }
+            if (!rawPrice) {
+              for (const el of item.querySelectorAll("span, p")) {
+                const t = (el.textContent || "").trim();
+                if (
+                  /^(?:CHF|Fr\.)?\s*(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2})?)\s*(?:CHF|Fr\.)?$/i.test(t) &&
+                  (/[.\-–]|CHF|Fr/i.test(t))
+                ) {
+                  rawPrice = t;
+                  break;
+                }
+              }
+            }
+            if (!rawPrice) {
+              const allText = item.textContent || "";
+              const m = allText.match(/(\d+['’.,\s\u00a0\u202f\d]*(?:\.–|\.-|--))/);
+              if (m) rawPrice = m[1].trim();
+            }
+
+            if (rawPrice) {
+              tuttiCards.push({
+                title,
+                rawPrice,
+                url: href,
+              });
+            }
+          }
+
+          return { html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards, ricardoCards, tuttiCards };
         },
       });
 
@@ -1395,6 +1656,28 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
         }
         return { prices: [], ricardoItems: [], loginRequired: false };
       }
+      if (sourceId === "tutti") {
+        const isSearchPage = (currentUrl || "").includes("/q/") || (currentUrl || "").includes("/suche");
+        if (!isSearchPage) {
+          console.warn(`[Seller Assistant] [tutti] Nicht auf Suchergebnisseite (${currentUrl}), ignoriere Startseiten-Karten.`);
+          return { prices: [], tuttiItems: [], finalUrl: currentUrl, loginRequired: false };
+        }
+        const tuttiItems = extractTuttiItems(html, priceNodes, pageData.tuttiCards || []);
+        if (tuttiItems.length > 0) {
+          return { prices: tuttiItems.map(it => it.price), tuttiItems, finalUrl: currentUrl, loginRequired: false };
+        }
+        if (priceNodes && priceNodes.length > 0) {
+          const domPrices = [];
+          for (const txt of priceNodes) {
+            const p = parsePriceText(txt);
+            if (p !== null && p > 0) domPrices.push(p);
+          }
+          if (domPrices.length > 0) {
+            return { prices: domPrices.slice(0, 30), finalUrl: currentUrl, loginRequired: false };
+          }
+        }
+        return { prices: [], tuttiItems: [], finalUrl: currentUrl, loginRequired: false };
+      }
       const extracted = extractPricesFromHtml(sourceId, html);
       if (extracted.length > 0) {
         return { prices: extracted, loginRequired: false };
@@ -1428,7 +1711,7 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
 }
 
 async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keepTabsOpen = false) {
-  const url = sourceConfig.url;
+  let url = sourceConfig.url;
   let prices = [];
   let method = "fetch";
   let loginRequired = false;
@@ -1438,8 +1721,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let toppreiseItems = [];
   let digitecItems = [];
   let ricardoItems = [];
+  let tuttiItems = [];
 
-  const TAB_ONLY_SOURCES = new Set(["idealo", "digitec", "ricardo"]);
+  const TAB_ONLY_SOURCES = new Set(["idealo", "digitec", "ricardo", "tutti"]);
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
   // Step 1: Fast background fetch() with 5s timeout (skipped for client-rendered SPA sources like Idealo)
@@ -1496,7 +1780,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   if (prices.length === 0) {
     method = "tab";
     console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
-    const tabRes = await scrapeViaBackgroundTab(url, sourceConfig.id, keepTabsOpen);
+    const tabRes = await scrapeViaBackgroundTab(url, sourceConfig.id, keepTabsOpen, query);
     prices = tabRes.prices || [];
     if (tabRes.ebayItems && tabRes.ebayItems.length > 0) {
       ebayItems = tabRes.ebayItems;
@@ -1515,6 +1799,12 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     }
     if (tabRes.ricardoItems && tabRes.ricardoItems.length > 0) {
       ricardoItems = tabRes.ricardoItems;
+    }
+    if (tabRes.tuttiItems && tabRes.tuttiItems.length > 0) {
+      tuttiItems = tabRes.tuttiItems;
+    }
+    if (tabRes.finalUrl && (tabRes.finalUrl.includes("/q/") || tabRes.finalUrl.includes("tutti.ch"))) {
+      url = tabRes.finalUrl;
     }
     if (tabRes.loginRequired) {
       loginRequired = true;
@@ -1577,6 +1867,11 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     if (ricardoItems && ricardoItems.length > 0) {
       extra.items = ricardoItems;
       logRicardoExtractedItems(ricardoItems);
+    }
+  } else if (sourceConfig.id === "tutti") {
+    if (tuttiItems && tuttiItems.length > 0) {
+      extra.items = tuttiItems;
+      logTuttiExtractedItems(tuttiItems);
     }
   }
 
@@ -1651,6 +1946,12 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources 
       currency: "CHF",
       url: links.digitec_url,
     },
+    {
+      id: "tutti",
+      label: "Tutti.ch Suche",
+      currency: "CHF",
+      url: links.tutti_search_url || "https://www.tutti.ch/de",
+    },
   ];
 
   if (Array.isArray(enabledSources)) {
@@ -1664,6 +1965,10 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources 
   const sourcesMap = {};
   for (const r of results) {
     sourcesMap[r.source_id] = r;
+  }
+
+  if (sourcesMap.tutti && sourcesMap.tutti.url) {
+    links.tutti_search_url = sourcesMap.tutti.url;
   }
 
   return {
@@ -1760,6 +2065,8 @@ if (typeof module !== "undefined" && module.exports) {
     logDigitecExtractedItems,
     extractRicardoItems,
     logRicardoExtractedItems,
+    extractTuttiItems,
+    logTuttiExtractedItems,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,
