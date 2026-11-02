@@ -191,6 +191,10 @@ function openSettingsModal() {
       cb.checked = enabled.includes(src.id);
     }
   });
+  const cfgKeepTabsOpen = document.getElementById("cfg-keep-tabs-open");
+  if (cfgKeepTabsOpen) {
+    cfgKeepTabsOpen.checked = Boolean(settings && settings.keep_tabs_open_after_search);
+  }
   settingsModal.classList.remove("hidden");
 }
 
@@ -220,6 +224,9 @@ async function saveSystemConfig() {
     }
   });
 
+  const cfgKeepTabsOpen = document.getElementById("cfg-keep-tabs-open");
+  const keepTabsOpen = cfgKeepTabsOpen ? cfgKeepTabsOpen.checked : false;
+
   try {
     btnSaveSettings.disabled = true;
     const res = await fetch("/api/config", {
@@ -231,10 +238,11 @@ async function saveSystemConfig() {
       systemConfig = await res.json();
       updateKeyStatusUI();
 
-      // Also persist enabled_price_sources in /api/settings
+      // Also persist settings (enabled_price_sources, keep_tabs_open_after_search) in /api/settings
       if (settings) {
         const updatedSettings = Object.assign({}, settings, {
           enabled_price_sources: enabledSources,
+          keep_tabs_open_after_search: keepTabsOpen,
         });
         const putRes = await fetch("/api/settings", {
           method: "PUT",
@@ -940,6 +948,7 @@ async function scrapePricesViaExtension() {
       }
 
       const enabledSources = getEnabledPriceSources();
+      const keepTabsOpen = Boolean(settings && settings.keep_tabs_open_after_search);
       window.addEventListener("message", onMsg);
       window.postMessage(
         JSON.stringify({
@@ -948,6 +957,7 @@ async function scrapePricesViaExtension() {
           query: query,
           eurToChfRate: rate,
           enabledSources: enabledSources,
+          keepTabsOpen: keepTabsOpen,
         }),
         "*"
       );

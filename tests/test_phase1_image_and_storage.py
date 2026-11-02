@@ -134,11 +134,14 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
         "digitec",
     ]
 
-    # Test updating enabled price sources
+    # Test updating enabled price sources & debug setting
+    assert settings.keep_tabs_open_after_search is False
     settings.enabled_price_sources = ["ebay_de_sold", "toppreise"]
+    settings.keep_tabs_open_after_search = True
     storage.update_settings(settings)
     reloaded_settings = storage.get_settings()
     assert reloaded_settings.enabled_price_sources == ["ebay_de_sold", "toppreise"]
+    assert reloaded_settings.keep_tabs_open_after_search is True
     
     # Create 3 drafts
     d1 = storage.create_draft(user_notes="Wenig gebraucht, OVP", identified_product="Sony WH-1000XM4")

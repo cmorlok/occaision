@@ -192,6 +192,7 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
         "cfg-src-ricardo",
         "cfg-src-toppreise",
         "cfg-src-digitec",
+        "cfg-keep-tabs-open",
     ]
     for element_id in required_ids:
         assert f'id="{element_id}"' in html or f"id='{element_id}'" in html, f"Missing #{element_id} in HTML"
@@ -344,14 +345,17 @@ def test_analyze_endpoint_skips_backend_ebay_when_extension_prices_present(test_
 def test_analyze_skips_ebay_and_filters_sources_when_disabled_in_settings(test_app):
     client = TestClient(test_app)
 
-    # 1. Update settings to disable ebay_de_sold and idealo
+    # 1. Update settings to disable ebay_de_sold and idealo and enable keep_tabs_open_after_search
     res_settings = client.get("/api/settings")
     assert res_settings.status_code == 200
     settings_data = res_settings.json()
+    assert settings_data["keep_tabs_open_after_search"] is False
     settings_data["enabled_price_sources"] = ["kleinanzeigen", "toppreise"]
+    settings_data["keep_tabs_open_after_search"] = True
     res_update = client.put("/api/settings", json=settings_data)
     assert res_update.status_code == 200
     assert res_update.json()["enabled_price_sources"] == ["kleinanzeigen", "toppreise"]
+    assert res_update.json()["keep_tabs_open_after_search"] is True
 
     # 2. Create draft with product name and 3 extension market sources
     res_create = client.post(

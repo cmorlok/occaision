@@ -159,6 +159,33 @@ def test_extension_price_parser_and_stats_via_node():
       if (resEnabled.sources.ebay_de_sold || resEnabled.sources.idealo) {
         throw new Error('resEnabled.sources has disabled keys: ' + JSON.stringify(keys));
       }
+
+      // Test keepTabsOpen behavior in scrapeViaBackgroundTab
+      let removedTabs = [];
+      global.browser = {
+        tabs: {
+          create: async () => ({ id: 42 }),
+          onUpdated: { addListener: (cb) => setTimeout(() => cb(42, { status: "complete" }), 10), removeListener: () => {} },
+          remove: async (id) => { removedTabs.push(id); },
+        },
+        scripting: {
+          executeScript: async () => [{ result: { html: "", currentUrl: "", priceNodes: [] } }]
+        }
+      };
+
+      // 1. When keepTabsOpen = false -> tab 42 must be removed
+      removedTabs = [];
+      await bg.scrapeViaBackgroundTab("https://example.com", "toppreise", false);
+      if (!removedTabs.includes(42)) {
+        throw new Error("Expected tab 42 to be removed when keepTabsOpen=false");
+      }
+
+      // 2. When keepTabsOpen = true -> tab 42 must NOT be removed
+      removedTabs = [];
+      await bg.scrapeViaBackgroundTab("https://example.com", "toppreise", true);
+      if (removedTabs.includes(42)) {
+        throw new Error("Expected tab 42 NOT to be removed when keepTabsOpen=true");
+      }
     })().catch(err => {
       console.error(err);
       process.exit(1);

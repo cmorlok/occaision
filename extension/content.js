@@ -498,8 +498,9 @@ function setupDashboardBridge() {
       const query = msg.query || "";
       const eurToChfRate = msg.eurToChfRate || 0.94;
       const enabledSources = Array.isArray(msg.enabledSources) ? msg.enabledSources : null;
+      const keepTabsOpen = Boolean(msg.keepTabsOpen);
 
-      console.log(`[Seller Assistant] Content-Script empfängt Scrape-Anfrage (${reqId}) für '${query}' (enabled: ${enabledSources ? enabledSources.join(',') : 'all'})`);
+      console.log(`[Seller Assistant] Content-Script empfängt Scrape-Anfrage (${reqId}) für '${query}' (enabled: ${enabledSources ? enabledSources.join(',') : 'all'}, keepTabsOpen: ${keepTabsOpen})`);
 
       browserApi.runtime.sendMessage(
         {
@@ -508,6 +509,7 @@ function setupDashboardBridge() {
           query: query,
           eurToChfRate: eurToChfRate,
           enabledSources: enabledSources,
+          keepTabsOpen: keepTabsOpen,
         },
         response => {
           const payload = Object.assign(

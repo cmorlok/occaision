@@ -1,12 +1,13 @@
 // Background Service Worker for Seller Assistant
 // Bypasses CORS and CSP by executing HTTP calls and hybrid price scraping inside the WebExtension privileged context.
 
-const browserApi =
-  typeof browser !== "undefined"
-    ? browser
-    : typeof chrome !== "undefined"
-    ? chrome
-    : null;
+function getBrowserApi() {
+  if (typeof browser !== "undefined") return browser;
+  if (typeof chrome !== "undefined") return chrome;
+  return null;
+}
+
+const browserApi = getBrowserApi();
 const BACKEND_BASE = "http://127.0.0.1:8000";
 
 const ALL_HOST_ORIGINS = [
@@ -291,32 +292,33 @@ function computeSourceStats(
   };
 }
 
-async function scrapeViaBackgroundTab(url, sourceId) {
-  if (!browserApi || !browserApi.tabs || !browserApi.scripting) {
+async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
+  const api = getBrowserApi();
+  if (!api || !api.tabs || !api.scripting) {
     return { prices: [], loginRequired: false };
   }
   let tab = null;
   try {
-    tab = await browserApi.tabs.create({ url: url, active: false });
+    tab = await api.tabs.create({ url: url, active: false });
     await new Promise(resolve => {
       const timeout = setTimeout(() => {
-        browserApi.tabs.onUpdated.removeListener(listener);
+        api.tabs.onUpdated.removeListener(listener);
         resolve();
       }, 5000);
       function listener(tabId, info) {
         if (tabId === tab.id && info.status === "complete") {
           clearTimeout(timeout);
-          browserApi.tabs.onUpdated.removeListener(listener);
+          api.tabs.onUpdated.removeListener(listener);
           resolve();
         }
       }
-      browserApi.tabs.onUpdated.addListener(listener);
+      api.tabs.onUpdated.addListener(listener);
     });
 
     // Wait 1200ms for SPA client-side hydration (Digitec, Ricardo, Idealo, eBay)
     await new Promise(r => setTimeout(r, 1200));
 
-    const results = await browserApi.scripting.executeScript({
+    const results = await api.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
         const html = document.documentElement ? document.documentElement.outerHTML : "";
@@ -359,16 +361,18 @@ async function scrapeViaBackgroundTab(url, sourceId) {
   } catch (err) {
     console.warn(`[Seller Assistant] Tab fallback failed for ${sourceId}:`, err);
   } finally {
-    if (tab && tab.id !== undefined) {
+    if (!keepTabsOpen && tab && tab.id !== undefined) {
       try {
-        await browserApi.tabs.remove(tab.id);
+        await api.tabs.remove(tab.id);
       } catch (_) {}
+    } else if (keepTabsOpen && tab && tab.id !== undefined) {
+      console.log(`[Seller Assistant] [Debug] Tab #${tab.id} für ${sourceId} bleibt geöffnet (${url})`);
     }
   }
   return { prices: [], loginRequired: false };
 }
 
-async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
+async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keepTabsOpen = false) {
   const url = sourceConfig.url;
   let prices = [];
   let method = "fetch";
@@ -415,7 +419,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
   if (prices.length === 0) {
     method = "tab";
     console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
-    const tabRes = await scrapeViaBackgroundTab(url, sourceConfig.id);
+    const tabRes = await scrapeViaBackgroundTab(url, sourceConfig.id, keepTabsOpen);
     prices = tabRes.prices || [];
     if (tabRes.loginRequired) {
       loginRequired = true;
@@ -442,16 +446,16 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
 
 const activeScrapePromises = new Map();
 
-async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94, enabledSources = null) {
+async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94, enabledSources = null, keepTabsOpen = false) {
   const sourcesKey = Array.isArray(enabledSources) ? enabledSources.slice().sort().join(",") : "all";
-  const key = requestId ? `${requestId}_${sourcesKey}` : `q_${query}_${sourcesKey}`;
+  const key = requestId ? `${requestId}_${sourcesKey}_keep_${keepTabsOpen}` : `q_${query}_${sourcesKey}_keep_${keepTabsOpen}`;
   if (activeScrapePromises.has(key)) {
     return activeScrapePromises.get(key);
   }
 
   const p = (async () => {
-    console.log(`[Seller Assistant] === Starte Preisrecherche (${key}) für '${query}' (enabled: ${sourcesKey}) ===`);
-    const result = await scrapeAllPriceSources(query, eurToChfRate, enabledSources);
+    console.log(`[Seller Assistant] === Starte Preisrecherche (${key}) für '${query}' (enabled: ${sourcesKey}, keepTabs: ${keepTabsOpen}) ===`);
+    const result = await scrapeAllPriceSources(query, eurToChfRate, enabledSources, keepTabsOpen);
     console.log(`[Seller Assistant] === Preisrecherche abgeschlossen (${key}) ===`, result);
     return result;
   })();
@@ -464,7 +468,7 @@ async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94, enab
   }
 }
 
-async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources = null) {
+async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources = null, keepTabsOpen = false) {
   const links = buildVerificationLinks(query);
   let sourceConfigs = [
     {
@@ -510,7 +514,7 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources 
   }
 
   const results = await Promise.all(
-    sourceConfigs.map(cfg => scrapeSourceHybrid(cfg, query, eurToChfRate))
+    sourceConfigs.map(cfg => scrapeSourceHybrid(cfg, query, eurToChfRate, keepTabsOpen))
   );
 
   const sourcesMap = {};
@@ -582,7 +586,8 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
         request.requestId || "",
         request.query || "",
         request.eurToChfRate || 0.94,
-        request.enabledSources || null
+        request.enabledSources || null,
+        Boolean(request.keepTabsOpen)
       )
         .then(res => sendResponse(res))
         .catch(err => sendResponse({ ok: false, error: err.message }));
@@ -600,6 +605,7 @@ if (typeof module !== "undefined" && module.exports) {
     isEbayLoginRequired,
     extractPricesFromHtml,
     computeSourceStats,
+    scrapeViaBackgroundTab,
     scrapeSourceHybrid,
     scrapeAllPriceSources,
   };
