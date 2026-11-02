@@ -117,6 +117,18 @@ def test_extension_price_parser_and_stats_via_node():
     if (ebayItems[0].title !== 'HP 4302fdw' || ebayItems[0].price !== 250) {
       throw new Error('Unexpected ebay item[0]: ' + JSON.stringify(ebayItems[0]));
     }
+
+    const ebayFewerKeywordsHtml = `
+      <div class="s-item"><div class="s-item__title">HP 4302fdw</div><span class="s-item__price">EUR 250,00</span></div>
+      <div class="s-item"><div class="s-item__title">HP 4302fdw Drucker</div><span class="s-item__price">290,00 €</span></div>
+      <div class="srp-river-answer"><h3>Ergebnisse für weniger Suchbegriffe</h3></div>
+      <div class="s-item"><div class="s-item__title">HP Toner Schwarz</div><span class="s-item__price">50,00 €</span></div>
+      <div class="s-item"><div class="s-item__title">Anderes Modell</div><span class="s-item__price">465,82 €</span></div>
+    `;
+    const filteredItems = bg.extractEbayItemsFromHtml(ebayFewerKeywordsHtml);
+    if (filteredItems.length !== 2) {
+      throw new Error('Expected 2 items before fewer words divider, got: ' + filteredItems.length);
+    }
     const stats = bg.computeSourceStats(
       { id: 'ebay_de_sold', label: 'eBay DE (Gebraucht & Beendet)', currency: 'EUR' },
       ebayPrices,

@@ -83,6 +83,19 @@ class EbayService:
             logger.debug("=" * 70)
             return EbaySoldStats(query=query, sample_count=0, exchange_rate=rate)
 
+        # Filter out everything from "Ergebnisse für weniger Suchbegriffe" / "Results matching fewer words" onwards
+        fewer_words_pattern = re.compile(
+            r"(?:Ergebnisse für weniger Suchbegriffe|Ergebnisse für weniger Suchwörter|Results matching fewer words)",
+            re.IGNORECASE,
+        )
+        split_html = fewer_words_pattern.split(html, maxsplit=1)
+        if len(split_html) > 1:
+            logger.info(
+                f"[EbayService] 'Ergebnisse für weniger Suchbegriffe' erkannt – filtere nachfolgende ungenaue Treffer für '{query}' heraus."
+            )
+            html = split_html[0]
+            soup = BeautifulSoup(html, "lxml")
+
         items = soup.select(".s-item, .s-card")
         logger.debug(
             f"[EbayService] Gefundene DOM-Elemente ('.s-item, .s-card'): {len(items)}"

@@ -158,6 +158,17 @@ function extractEbayItemsFromHtml(html) {
     return [];
   }
 
+  // Filter out everything from "Ergebnisse für weniger Suchbegriffe" / "Results matching fewer words" onwards
+  const fewerWordsMatch = html.match(
+    /(?:Ergebnisse für weniger Suchbegriffe|Ergebnisse für weniger Suchwörter|Results matching fewer words)/i
+  );
+  if (fewerWordsMatch && fewerWordsMatch.index !== undefined) {
+    console.log(
+      `[Seller Assistant] [ebay_de_sold] 'Ergebnisse für weniger Suchbegriffe' an Position ${fewerWordsMatch.index} erkannt – filtere alle nachfolgenden ungenauen Treffer heraus.`
+    );
+    html = html.substring(0, fewerWordsMatch.index);
+  }
+
   const items = [];
   const itemBlocks = html.split(/class=["'][^"']*s-(?:item|card)\b/i).slice(1);
 

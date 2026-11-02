@@ -569,4 +569,43 @@ async def test_ai_filters_out_disabled_price_sources(temp_data_dir: Path):
         assert "279.0" not in prompt_str
 
 
+def test_ebay_parser_filters_out_fewer_keywords_results():
+    ebay_service = EbayService()
+    html_with_fewer_keywords = """
+    <html>
+    <body>
+      <div class="s-item">
+        <div class="s-item__title">Sony WH-1000XM4 Kopfhörer Schwarz</div>
+        <span class="s-item__price">EUR 180,00</span>
+      </div>
+      <div class="s-item">
+        <div class="s-item__title">Sony WH-1000XM4 ANC Top</div>
+        <span class="s-item__price">EUR 190,00</span>
+      </div>
+      <div class="srp-river-answer srp-river-answer--REWRITE_START">
+        <span class="srp-river-answer__title">Ergebnisse für weniger Suchbegriffe</span>
+      </div>
+      <div class="s-item">
+        <div class="s-item__title">Ladekabel USB-C für Sony Kopfhörer</div>
+        <span class="s-item__price">EUR 9,99</span>
+      </div>
+      <div class="s-item">
+        <div class="s-item__title">Ohrpolster Ersatzpolster</div>
+        <span class="s-item__price">EUR 14,50</span>
+      </div>
+      <div class="s-item">
+        <div class="s-item__title">Sony WH-1000XM5 Neues Modell</div>
+        <span class="s-item__price">EUR 380,00</span>
+      </div>
+    </body>
+    </html>
+    """
+    stats = ebay_service.parse_sold_html(html_with_fewer_keywords, query="Sony WH-1000XM4")
+    assert stats.sample_count == 2
+    assert stats.min_eur == 180.0
+    assert stats.max_eur == 190.0
+    assert stats.median_eur == 185.0
+
+
+
 
