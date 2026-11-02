@@ -3,14 +3,17 @@
   "name": "Seller Assistant",
   "version": "1.0.0",
   "description": "Smart-Panel und Auto-Fill Assistent für Verkaufsplattformen",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "tabs", "scripting"],
   "host_permissions": [
     "http://127.0.0.1:8000/*",
     "http://localhost:8000/*",
     "*://*.ricardo.ch/*",
     "*://*.tutti.ch/*",
     "*://*.ebay.de/*",
-    "*://*.kleinanzeigen.de/*"
+    "*://*.kleinanzeigen.de/*",
+    "*://*.idealo.de/*",
+    "*://*.toppreise.ch/*",
+    "*://*.digitec.ch/*"
   ],
   "action": {
     "default_title": "Seller Assistant (Berechtigungen prüfen)"
@@ -21,6 +24,8 @@
   "content_scripts": [
     {
       "matches": [
+        "http://127.0.0.1:8000/*",
+        "http://localhost:8000/*",
         "*://*.ricardo.ch/*",
         "*://*.tutti.ch/*",
         "*://*.ebay.de/*",

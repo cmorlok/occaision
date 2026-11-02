@@ -17,14 +17,23 @@ def test_manifest_v3_validity():
     assert "scripts" in manifest["background"]
     assert "background.js" in manifest["background"]["scripts"]
     
+    perms = manifest.get("permissions", [])
+    assert "tabs" in perms
+    assert "scripting" in perms
+
     host_perms = manifest.get("host_permissions", [])
     assert any("127.0.0.1:8000" in p for p in host_perms)
     assert any("ricardo.ch" in p for p in host_perms)
     assert any("tutti.ch" in p for p in host_perms)
     assert any("ebay.de" in p for p in host_perms)
     assert any("kleinanzeigen.de" in p for p in host_perms)
+    assert any("idealo.de" in p for p in host_perms)
+    assert any("toppreise.ch" in p for p in host_perms)
+    assert any("digitec.ch" in p for p in host_perms)
 
     matches = manifest["content_scripts"][0].get("matches", [])
+    assert any("127.0.0.1:8000" in m for m in matches)
+    assert any("localhost:8000" in m for m in matches)
     assert any("ricardo.ch" in m for m in matches)
     assert any("tutti.ch" in m for m in matches)
     assert any("ebay.de" in m for m in matches)
@@ -79,3 +88,49 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "isEbayDE" in content_js_code
     assert "isKleinanzeigen" in content_js_code
     assert "setDescriptionValue" in content_js_code
+
+    # 6. 6-source hybrid price scraper & dashboard bridge
+    assert "SCRAPE_ALL_PRICE_SOURCES" in bg_js_code
+    assert "scrapeSourceHybrid" in bg_js_code
+    assert "LH_ItemCondition=3000" in bg_js_code
+    assert "isLocalDashboard" in content_js_code
+    assert "SELLER_ASSISTANT_SCRAPE_PRICES" in content_js_code
+
+
+def test_extension_price_parser_and_stats_via_node():
+    node_script = """
+    const bg = require('./extension/background.js');
+    const ebayHtml = `
+      <div class="s-item"><div class="s-item__title">Shop on eBay</div><span class="s-item__price">EUR 19,99</span></div>
+      <div class="s-item"><div class="s-item__title">HP 4302fdw</div><span class="s-item__price">EUR 250,00</span></div>
+      <div class="s-item"><div class="s-item__title">HP 4302fdw Drucker</div><span class="s-item__price">290,00 €</span></div>
+      <div class="s-item"><div class="s-item__title">HP 4302fdw Spanne</div><span class="s-item__price">EUR 100,00 bis EUR 400,00</span></div>
+    `;
+    const ebayPrices = bg.extractPricesFromHtml('ebay_de_sold', ebayHtml);
+    if (ebayPrices.length !== 2 || ebayPrices[0] !== 250 || ebayPrices[1] !== 290) {
+      throw new Error('Unexpected ebay prices: ' + JSON.stringify(ebayPrices));
+    }
+    const stats = bg.computeSourceStats(
+      { id: 'ebay_de_sold', label: 'eBay DE (Gebraucht & Beendet)', currency: 'EUR' },
+      ebayPrices,
+      'https://www.ebay.de/test',
+      'fetch',
+      0.94
+    );
+    if (stats.sample_count !== 2 || stats.median_price !== 270 || stats.median_chf !== 253.8) {
+      throw new Error('Unexpected stats: ' + JSON.stringify(stats));
+    }
+
+    const jsonLdHtml = `
+      <script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"Product","offers":{"@type":"AggregateOffer","lowPrice":"419.00","priceCurrency":"CHF"}}
+      </script>
+    `;
+    const digitecPrices = bg.extractPricesFromHtml('digitec', jsonLdHtml);
+    if (!digitecPrices.includes(419)) {
+      throw new Error('Expected 419 from JSON-LD: ' + JSON.stringify(digitecPrices));
+    }
+    """
+    res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+    assert res.returncode == 0, f"Node test failed: {res.stderr}"
+

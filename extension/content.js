@@ -107,11 +107,17 @@ function isKleinanzeigen(hostname) {
   return h.includes("kleinanzeigen.de");
 }
 
+function isLocalDashboard(hostname) {
+  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
+  return h === "127.0.0.1" || h === "localhost" || h.includes("127.0.0.1") || h.includes("localhost");
+}
+
 function detectPlatform(hostname) {
   if (isRicardo(hostname)) return "ricardo";
   if (isTutti(hostname)) return "tutti";
   if (isEbayDE(hostname)) return "ebay_de";
   if (isKleinanzeigen(hostname)) return "kleinanzeigen";
+  if (isLocalDashboard(hostname)) return "dashboard";
   return "unknown";
 }
 
@@ -450,12 +456,60 @@ function executeStep2(draft) {
   }
 }
 
+// Setup Dashboard Bridge on http://127.0.0.1:8000 / http://localhost:8000
+function setupDashboardBridge() {
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.dataset.sellerAssistantExtension = "installed";
+  }
+  if (typeof window === "undefined") return;
+
+  window.addEventListener("message", event => {
+    if (event.source !== window || !event.data) return;
+
+    if (event.data.type === "SELLER_ASSISTANT_PING") {
+      window.postMessage({ type: "SELLER_ASSISTANT_PONG" }, "*");
+      return;
+    }
+
+    if (event.data.type === "SELLER_ASSISTANT_SCRAPE_PRICES") {
+      const reqId = event.data.requestId;
+      const query = event.data.query || "";
+      const eurToChfRate = event.data.eurToChfRate || 0.94;
+
+      browserApi.runtime.sendMessage(
+        {
+          action: "SCRAPE_ALL_PRICE_SOURCES",
+          query: query,
+          eurToChfRate: eurToChfRate,
+        },
+        response => {
+          const payload = Object.assign(
+            {
+              type: "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT",
+              requestId: reqId,
+            },
+            response || { ok: false, error: "Keine Antwort vom Extension Background-Worker" }
+          );
+          window.postMessage(payload, "*");
+        }
+      );
+    }
+  });
+}
+
 // Initialize on page ready
 if (typeof document !== "undefined") {
+  const initExt = () => {
+    if (isLocalDashboard()) {
+      setupDashboardBridge();
+    } else {
+      createSmartPanel();
+    }
+  };
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", createSmartPanel);
+    document.addEventListener("DOMContentLoaded", initExt);
   } else {
-    createSmartPanel();
+    initExt();
   }
 }
 
@@ -467,10 +521,12 @@ if (typeof module !== "undefined" && module.exports) {
     injectFilesIntoInput,
     dataUrlToUint8Array,
     createSmartPanel,
+    setupDashboardBridge,
     isRicardo,
     isTutti,
     isEbayDE,
     isKleinanzeigen,
+    isLocalDashboard,
     detectPlatform,
     getPlatformData,
   };
