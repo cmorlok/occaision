@@ -169,12 +169,14 @@ Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt mit folgender Struktur:
 
 
 def build_verification_links(query: str) -> VerificationLinks:
-    q = urllib.parse.quote_plus((query or "").strip())
+    trimmed = (query or "").strip()
+    q = urllib.parse.quote_plus(trimmed)
+    q_raw = urllib.parse.quote(trimmed)
     return VerificationLinks(
         ebay_sold_url=f"https://www.ebay.de/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000",
         kleinanzeigen_search_url=f"https://www.kleinanzeigen.de/anbieter:privat/s-{q}/k0+global.zustand:alright%2Clike_new%2Cok",
         idealo_url=f"https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q={q}",
-        ricardo_search_url=f"https://www.ricardo.ch/de/s/{q}",
+        ricardo_search_url=f"https://www.ricardo.ch/de/s/{q_raw}/?item_condition=used&seller_type=individual",
         toppreise_url=f"https://www.toppreise.ch/produktsuche?q={q}",
         digitec_url=f"https://www.galaxus.ch/de/search?q={q}",
     )

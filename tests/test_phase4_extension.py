@@ -114,6 +114,9 @@ def test_extension_price_parser_and_stats_via_node():
     if (!links.kleinanzeigen_search_url.includes('anbieter:privat') || !links.kleinanzeigen_search_url.includes('global.zustand:alright%2Clike_new%2Cok')) {
       throw new Error('Kleinanzeigen search url missing condition or private filter: ' + links.kleinanzeigen_search_url);
     }
+    if (!links.ricardo_search_url.includes('item_condition=used') || !links.ricardo_search_url.includes('seller_type=individual') || !links.ricardo_search_url.includes('HP%20Color%20LaserJet')) {
+      throw new Error('Ricardo search url invalid: ' + links.ricardo_search_url);
+    }
 
     // Test Kleinanzeigen JSON parsing
     const kaJsonContent = fs.readFileSync('temp/kleinanzeigen.json', 'utf8');
@@ -229,6 +232,19 @@ def test_extension_price_parser_and_stats_via_node():
     }
     if (digitecItems[0].price !== 428 || !digitecItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
       throw new Error('Unexpected digitec item 0: ' + JSON.stringify(digitecItems[0]));
+    }
+
+    const ricardoHtml = fs.readFileSync('temp/ricardo-Hp Color Laserjet Pro Mfp 4302fdw kaufen _ Günstig auf Ricardo.ch finden.html', 'utf8');
+    const ricardoItems = bg.extractRicardoItems(ricardoHtml);
+    if (!Array.isArray(ricardoItems) || ricardoItems.length !== 1) {
+      throw new Error('Expected exactly 1 regular ricardo item (excluding relaxed search keywords), got: ' + (ricardoItems ? ricardoItems.length : 0));
+    }
+    if (ricardoItems[0].price !== 300 || !ricardoItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+      throw new Error('Unexpected ricardo item 0: ' + JSON.stringify(ricardoItems[0]));
+    }
+    const ricardoPrices = bg.extractPricesFromHtml('ricardo', ricardoHtml);
+    if (!ricardoPrices || ricardoPrices.length !== 1 || ricardoPrices[0] !== 300) {
+      throw new Error('Expected [300] from extractPricesFromHtml for regular ricardo results, got: ' + JSON.stringify(ricardoPrices));
     }
 
     const ebayHtml = `

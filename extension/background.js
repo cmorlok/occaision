@@ -50,12 +50,14 @@ function arrayBufferToBase64DataUrl(buffer, mimeType = "image/jpeg") {
 }
 
 function buildVerificationLinks(query) {
-  const q = encodeURIComponent((query || "").trim()).replace(/%20/g, "+");
+  const trimmed = (query || "").trim();
+  const q = encodeURIComponent(trimmed).replace(/%20/g, "+");
+  const qRaw = encodeURIComponent(trimmed);
   return {
     ebay_sold_url: `https://www.ebay.de/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`,
     kleinanzeigen_search_url: `https://www.kleinanzeigen.de/anbieter:privat/s-${q}/k0+global.zustand:alright%2Clike_new%2Cok`,
     idealo_url: `https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q=${q}`,
-    ricardo_search_url: `https://www.ricardo.ch/de/s/${q}`,
+    ricardo_search_url: `https://www.ricardo.ch/de/s/${qRaw}/?item_condition=used&seller_type=individual`,
     toppreise_url: `https://www.toppreise.ch/produktsuche?q=${q}`,
     digitec_url: `https://www.galaxus.ch/de/search?q=${q}`,
   };
@@ -414,6 +416,133 @@ function logKleinanzeigenExtractedItems(items) {
           "#": idx + 1,
           "Preis (€)": it.price,
           "Zustand": it.condition || "Gebraucht",
+          "Titel": it.title,
+        }))
+      );
+    } catch (_) {}
+  }
+}
+
+function extractRicardoItems(html, priceNodes = [], ricardoCards = []) {
+  const items = [];
+  const seenUrls = new Set();
+
+  // 1. Live DOM-extracted cards from background tab
+  if (Array.isArray(ricardoCards) && ricardoCards.length > 0) {
+    for (const card of ricardoCards) {
+      if (card.url && seenUrls.has(card.url)) continue;
+      if (card.url) seenUrls.add(card.url);
+
+      const p = parsePriceText(card.rawPrice);
+      if (p !== null && p > 0) {
+        items.push({
+          title: (card.title || "Ricardo Angebot").trim(),
+          condition: "Gebraucht",
+          bidType: card.bidType || "Angebot",
+          price: p,
+          rawPrice: card.rawPrice,
+          url: card.url || "",
+        });
+      }
+    }
+    if (items.length > 0) return items.slice(0, 30);
+  }
+
+  // 2. HTML parsing from rendered HTML string (scoped to [data-testid="regular-results"] to exclude relaxed search keywords)
+  if (html && typeof html === "string") {
+    let scope = html;
+    const regMatch = html.match(/data-testid=["']regular-results["'][\s\S]*/i);
+    if (regMatch) {
+      scope = regMatch[0];
+      const divider = scope.match(/(?:<h[2-6][^>]*>[^<]*ergebnisse f[uü]r|<a[^>]*href=["'][^"']*\/de\/s\/[^"']+["'][^>]*>[^<]*Alle Ergebnisse anzeigen)/i);
+      if (divider) {
+        scope = scope.slice(0, divider.index);
+      }
+    } else {
+      const divider = html.match(/(?:<h[2-6][^>]*>[^<]*ergebnisse f[uü]r|<a[^>]*href=["'][^"']*\/de\/s\/[^"']+["'][^>]*>[^<]*Alle Ergebnisse anzeigen)/i);
+      if (divider) {
+        scope = html.slice(0, divider.index);
+      }
+    }
+
+    const aRegex = /<a[^>]+href=["']([^"']*(?:\/de)?\/a\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while ((m = aRegex.exec(scope)) !== null) {
+      const url = m[1];
+      if (seenUrls.has(url)) continue;
+      seenUrls.add(url);
+
+      const content = m[2];
+      const tMatch = content.match(/<span[^>]*class=["'][^"']*MuiTypography-body1[^"']*["'][^>]*>([^<]+)<\/span>/i);
+      const altMatch = content.match(/<img[^>]*alt=["']([^"']+)["']/i);
+      const title = (tMatch ? tMatch[1] : (altMatch ? altMatch[1] : "Ricardo Angebot")).trim();
+
+      const clean = content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+      const sofortM = clean.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.\d{2})?)\s*(?:Sofort kaufen|Achat direct|Compra subito)/i);
+      const gebotM = clean.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.\d{2})?)\s*\(\d+\s*(?:Gebot|offre|offerta)/i);
+
+      let rawPrice = sofortM ? sofortM[1].trim() : (gebotM ? gebotM[1].trim() : null);
+      if (!rawPrice) {
+        const numM = clean.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*\.\d{2})/);
+        if (numM) rawPrice = numM[1].trim();
+      }
+
+      if (rawPrice) {
+        const p = parsePriceText(rawPrice);
+        if (p !== null && p > 0) {
+          items.push({
+            title: title || "Ricardo Angebot",
+            condition: "Gebraucht",
+            bidType: sofortM ? "Sofortkauf" : "Auktion",
+            price: p,
+            rawPrice,
+            url,
+          });
+        }
+      }
+    }
+    if (items.length > 0) return items.slice(0, 30);
+  }
+
+  // 3. Fallback: priceNodes
+  if (Array.isArray(priceNodes) && priceNodes.length > 0) {
+    for (const raw of priceNodes) {
+      const p = parsePriceText(raw);
+      if (p !== null && p > 0) {
+        items.push({
+          title: "Ricardo Angebot",
+          condition: "Gebraucht",
+          bidType: "Angebot",
+          price: p,
+          rawPrice: raw,
+        });
+      }
+    }
+  }
+
+  return items.slice(0, 30);
+}
+
+function logRicardoExtractedItems(items) {
+  if (!items || items.length === 0) {
+    console.log("[Seller Assistant] [ricardo] Keine Ricardo-Angebote extrahiert (0 Treffer).");
+    return;
+  }
+  console.group(`[Seller Assistant] [ricardo] Extrahierte Ricardo-Angebote (${items.length} Treffer):`);
+  items.forEach((it, idx) => {
+    console.log(
+      `  #${idx + 1}: ${it.price} CHF | [${it.bidType || "Angebot"}] | Titel: "${it.title}"`
+    );
+  });
+  console.groupEnd();
+
+  if (typeof console.table === "function") {
+    try {
+      console.table(
+        items.map((it, idx) => ({
+          "#": idx + 1,
+          "Preis (CHF)": it.price,
+          "Art": it.bidType || "Angebot",
           "Titel": it.title,
         }))
       );
@@ -834,6 +963,11 @@ function extractPricesFromHtml(sourceId, html) {
     return items.map(it => it.price);
   }
 
+  if (sourceId === "ricardo") {
+    const items = extractRicardoItems(html);
+    return items.map(it => it.price);
+  }
+
   // Try JSON-LD structured product/offer data first
   const ldPrices = extractJsonLdPrices(html);
   prices.push(...ldPrices);
@@ -1111,7 +1245,50 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
             }
           }
 
-          return { html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards };
+          const ricardoCards = [];
+          const regContainer = document.querySelector('[data-testid="regular-results"]');
+          const ricardoScope = regContainer || document;
+          const ricardoLinks = ricardoScope.querySelectorAll('a[href*="/de/a/"], a[href*="/a/"]');
+          const seenRicardoUrls = new Set();
+          for (const a of ricardoLinks) {
+            if (!regContainer) {
+              const prevText = a.parentElement ? a.parentElement.textContent : "";
+              if (/ergebnisse f[uü]r/i.test(prevText)) break;
+            }
+
+            const href = a.getAttribute("href") || "";
+            if (!href || seenRicardoUrls.has(href)) continue;
+            seenRicardoUrls.add(href);
+
+            const titleEl = a.querySelector('[class*="MuiTypography-body1"]');
+            const imgEl = a.querySelector('img[alt]');
+            const title = (titleEl ? titleEl.textContent : (imgEl ? imgEl.getAttribute("alt") : "Ricardo Angebot")).trim();
+
+            const cardText = a.textContent || "";
+            const sofortM = cardText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.\d{2})?)\s*(?:Sofort kaufen|Achat direct|Compra subito)/i);
+            const gebotM = cardText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.\d{2})?)\s*\(\d+\s*(?:Gebot|offre|offerta)/i);
+
+            const buyNowRaw = sofortM ? sofortM[1].trim() : null;
+            const bidRaw = gebotM ? gebotM[1].trim() : null;
+            let rawPrice = buyNowRaw || bidRaw;
+            if (!rawPrice) {
+              const numM = cardText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*\.\d{2})/);
+              if (numM) rawPrice = numM[1].trim();
+            }
+
+            if (rawPrice) {
+              ricardoCards.push({
+                title: title || "Ricardo Angebot",
+                rawPrice,
+                buyNowRaw,
+                bidRaw,
+                bidType: sofortM ? "Sofortkauf" : "Auktion",
+                url: href,
+              });
+            }
+          }
+
+          return { html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards, ricardoCards };
         },
       });
 
@@ -1201,6 +1378,23 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
         }
         return { prices: [], digitecItems: [], loginRequired: false };
       }
+      if (sourceId === "ricardo") {
+        const ricardoItems = extractRicardoItems(html, priceNodes, pageData.ricardoCards || []);
+        if (ricardoItems.length > 0) {
+          return { prices: ricardoItems.map(it => it.price), ricardoItems, loginRequired: false };
+        }
+        if (priceNodes && priceNodes.length > 0) {
+          const domPrices = [];
+          for (const txt of priceNodes) {
+            const p = parsePriceText(txt);
+            if (p !== null && p > 0) domPrices.push(p);
+          }
+          if (domPrices.length > 0) {
+            return { prices: domPrices.slice(0, 30), loginRequired: false };
+          }
+        }
+        return { prices: [], ricardoItems: [], loginRequired: false };
+      }
       const extracted = extractPricesFromHtml(sourceId, html);
       if (extracted.length > 0) {
         return { prices: extracted, loginRequired: false };
@@ -1243,8 +1437,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let idealoItems = [];
   let toppreiseItems = [];
   let digitecItems = [];
+  let ricardoItems = [];
 
-  const TAB_ONLY_SOURCES = new Set(["idealo", "digitec"]);
+  const TAB_ONLY_SOURCES = new Set(["idealo", "digitec", "ricardo"]);
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
   // Step 1: Fast background fetch() with 5s timeout (skipped for client-rendered SPA sources like Idealo)
@@ -1318,6 +1513,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     if (tabRes.digitecItems && tabRes.digitecItems.length > 0) {
       digitecItems = tabRes.digitecItems;
     }
+    if (tabRes.ricardoItems && tabRes.ricardoItems.length > 0) {
+      ricardoItems = tabRes.ricardoItems;
+    }
     if (tabRes.loginRequired) {
       loginRequired = true;
     }
@@ -1374,6 +1572,11 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
       logDigitecExtractedItems(digitecItems);
       // For Galaxus/Digitec: The first product in the list or product page is the primary product's best new price!
       prices = [digitecItems[0].price];
+    }
+  } else if (sourceConfig.id === "ricardo") {
+    if (ricardoItems && ricardoItems.length > 0) {
+      extra.items = ricardoItems;
+      logRicardoExtractedItems(ricardoItems);
     }
   }
 
@@ -1555,6 +1758,8 @@ if (typeof module !== "undefined" && module.exports) {
     logToppreiseExtractedItems,
     extractDigitecItems,
     logDigitecExtractedItems,
+    extractRicardoItems,
+    logRicardoExtractedItems,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,

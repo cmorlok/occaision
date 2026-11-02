@@ -44,6 +44,8 @@ def test_verification_links_generation():
     
     assert "https://www.ricardo.ch/de/s/" in links.ricardo_search_url
     assert "Sony" in links.ricardo_search_url
+    assert "item_condition=used" in links.ricardo_search_url
+    assert "seller_type=individual" in links.ricardo_search_url
     
     assert "https://www.toppreise.ch/produktsuche" in links.toppreise_url
     assert "Sony" in links.toppreise_url

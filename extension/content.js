@@ -777,7 +777,50 @@ if (typeof browserApi !== "undefined" && browserApi.runtime && browserApi.runtim
         }
       }
 
-      sendResponse({ html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards });
+      const ricardoCards = [];
+      const regContainer = document.querySelector('[data-testid="regular-results"]');
+      const ricardoScope = regContainer || document;
+      const ricardoLinks = ricardoScope.querySelectorAll('a[href*="/de/a/"], a[href*="/a/"]');
+      const seenRicardoUrls = new Set();
+      for (const a of ricardoLinks) {
+        if (!regContainer) {
+          const prevText = a.parentElement ? a.parentElement.textContent : "";
+          if (/ergebnisse f[uü]r/i.test(prevText)) break;
+        }
+
+        const href = a.getAttribute("href") || "";
+        if (!href || seenRicardoUrls.has(href)) continue;
+        seenRicardoUrls.add(href);
+
+        const titleEl = a.querySelector('[class*="MuiTypography-body1"]');
+        const imgEl = a.querySelector('img[alt]');
+        const title = (titleEl ? titleEl.textContent : (imgEl ? imgEl.getAttribute("alt") : "Ricardo Angebot")).trim();
+
+        const cardText = a.textContent || "";
+        const sofortM = cardText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.\d{2})?)\s*(?:Sofort kaufen|Achat direct|Compra subito)/i);
+        const gebotM = cardText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.\d{2})?)\s*\(\d+\s*(?:Gebot|offre|offerta)/i);
+
+        const buyNowRaw = sofortM ? sofortM[1].trim() : null;
+        const bidRaw = gebotM ? gebotM[1].trim() : null;
+        let rawPrice = buyNowRaw || bidRaw;
+        if (!rawPrice) {
+          const numM = cardText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*\.\d{2})/);
+          if (numM) rawPrice = numM[1].trim();
+        }
+
+        if (rawPrice) {
+          ricardoCards.push({
+            title: title || "Ricardo Angebot",
+            rawPrice,
+            buyNowRaw,
+            bidRaw,
+            bidType: sofortM ? "Sofortkauf" : "Auktion",
+            url: href,
+          });
+        }
+      }
+
+      sendResponse({ html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards, ricardoCards });
       return true;
     }
     return false;
