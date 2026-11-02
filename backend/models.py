@@ -86,6 +86,19 @@ class EbaySoldStats(BaseModel):
     exchange_rate: float = 0.94
 
 
+class MarketSourceStats(BaseModel):
+    source_id: str
+    label: str
+    currency: str = "EUR"
+    sample_count: int = 0
+    min_price: Optional[float] = None
+    max_price: Optional[float] = None
+    median_price: Optional[float] = None
+    median_chf: Optional[float] = None
+    url: str = ""
+    method: str = "fetch"
+
+
 class VerificationLinks(BaseModel):
     ebay_sold_url: str
     kleinanzeigen_search_url: str = ""
@@ -97,6 +110,8 @@ class VerificationLinks(BaseModel):
 
 class PriceAnalysis(BaseModel):
     ebay_stats: Optional[EbaySoldStats] = None
+    market_sources: Dict[str, MarketSourceStats] = Field(default_factory=dict)
+    prices_fetched_via_extension: bool = False
     ch_new_price_chf: Optional[float] = None
     de_new_price_eur: Optional[float] = None
     ricardo_start_chf: float = 1.0

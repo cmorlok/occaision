@@ -7,6 +7,7 @@ from backend.models import (
     Draft,
     DraftStatus,
     ImageVariantMode,
+    MarketSourceStats,
     OfferType,
     PresetSettings,
 )
@@ -126,20 +127,35 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     assert any(p.country.value == "DE" for p in settings.shipping_presets)
     
     # Create 3 drafts
-    d1 = storage.create_draft(user_notes="Sony headphones")
+    d1 = storage.create_draft(user_notes="Wenig gebraucht, OVP", identified_product="Sony WH-1000XM4")
     d2 = storage.create_draft(user_notes="Apple iPad")
     d3 = storage.create_draft(user_notes="Vintage Lamp")
     
     assert d1.id != d2.id
     assert d1.status == DraftStatus.DRAFT
+    assert d1.identified_product == "Sony WH-1000XM4"
+    assert d1.user_notes == "Wenig gebraucht, OVP"
     assert d1.ricardo.offer_type == settings.default_offer_type
     assert d1.ricardo.shipping_preset_id == settings.default_shipping_preset_id
     assert d1.ebay_de.offer_type == settings.default_offer_type
     assert d1.ebay_de.shipping_preset_id == settings.default_de_shipping_preset_id
     assert d1.kleinanzeigen.shipping_preset_id == settings.default_de_shipping_preset_id
     
-    # Update d2
+    # Update d2 with extension-scraped market sources
     d2.status = DraftStatus.READY
+    d2.price_analysis.prices_fetched_via_extension = True
+    d2.price_analysis.market_sources["ebay_de_sold"] = MarketSourceStats(
+        source_id="ebay_de_sold",
+        label="eBay DE (Gebraucht & Beendet)",
+        currency="EUR",
+        sample_count=6,
+        min_price=120.0,
+        max_price=180.0,
+        median_price=150.0,
+        median_chf=141.0,
+        url="https://www.ebay.de/sch/i.html?_nkw=Apple+iPad&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000",
+        method="fetch",
+    )
     # Test title safeguard: longer than 60 chars must be truncated <= 60
     d2.ricardo.title = "A" * 75
     d2.tutti.title = "B" * 90
@@ -150,6 +166,8 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     assert len(saved_d2.tutti.title) <= 80
     assert len(saved_d2.ebay_de.title) <= 80
     assert len(saved_d2.kleinanzeigen.title) <= 65
+    assert saved_d2.price_analysis.prices_fetched_via_extension is True
+    assert saved_d2.price_analysis.market_sources["ebay_de_sold"].median_price == 150.0
     
     # Create fake image folder for d1 to verify deletion cleanup
     img_dir_d1 = temp_data_dir / "images" / d1.id

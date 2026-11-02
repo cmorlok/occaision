@@ -73,7 +73,7 @@ class StorageService:
                     return Draft.model_validate(d)
             return None
 
-    def create_draft(self, user_notes: str = "") -> Draft:
+    def create_draft(self, user_notes: str = "", identified_product: str = "") -> Draft:
         settings = self.get_settings()
         now_iso = datetime.now(timezone.utc).isoformat()
         draft_id = f"draft_{uuid.uuid4().hex[:12]}"
@@ -83,6 +83,7 @@ class StorageService:
             created_at=now_iso,
             updated_at=now_iso,
             user_notes=user_notes,
+            identified_product=identified_product,
         )
         draft.ricardo.offer_type = settings.default_offer_type
         draft.ricardo.shipping_preset_id = settings.default_shipping_preset_id
