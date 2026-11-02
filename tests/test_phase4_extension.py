@@ -110,6 +110,13 @@ def test_extension_price_parser_and_stats_via_node():
     if (ebayPrices.length !== 2 || ebayPrices[0] !== 250 || ebayPrices[1] !== 290) {
       throw new Error('Unexpected ebay prices: ' + JSON.stringify(ebayPrices));
     }
+    const ebayItems = bg.extractEbayItemsFromHtml(ebayHtml);
+    if (ebayItems.length !== 2) {
+      throw new Error('Expected 2 ebay items, got ' + ebayItems.length);
+    }
+    if (ebayItems[0].title !== 'HP 4302fdw' || ebayItems[0].price !== 250) {
+      throw new Error('Unexpected ebay item[0]: ' + JSON.stringify(ebayItems[0]));
+    }
     const stats = bg.computeSourceStats(
       { id: 'ebay_de_sold', label: 'eBay DE (Gebraucht & Beendet)', currency: 'EUR' },
       ebayPrices,

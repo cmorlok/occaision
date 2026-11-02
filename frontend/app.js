@@ -981,6 +981,26 @@ async function scrapePricesViaExtension() {
         median_chf: eb.median_chf ?? null,
         exchange_rate: rate,
       };
+
+      if (eb.items && eb.items.length > 0) {
+        console.group(`[Seller Assistant] [Dashboard] eBay DE extrahierte Artikel (${eb.items.length} Treffer):`);
+        eb.items.forEach((it, idx) => {
+          console.log(`  #${idx + 1}: ${it.price} € | [${it.condition}] | "${it.title}"`);
+        });
+        console.groupEnd();
+        if (typeof console.table === "function") {
+          try {
+            console.table(
+              eb.items.map((it, idx) => ({
+                "#": idx + 1,
+                "Preis (€)": it.price,
+                "Zustand": it.condition,
+                "Titel": it.title,
+              }))
+            );
+          } catch (_) {}
+        }
+      }
     } else {
       currentDraft.price_analysis.ebay_stats = null;
     }

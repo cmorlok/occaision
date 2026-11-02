@@ -512,6 +512,26 @@ function setupDashboardBridge() {
           keepTabsOpen: keepTabsOpen,
         },
         response => {
+          if (response && response.sources && response.sources.ebay_de_sold && response.sources.ebay_de_sold.items) {
+            const items = response.sources.ebay_de_sold.items;
+            console.group(`[Seller Assistant] [Content-Bridge] eBay DE verkaufte Artikel (${items.length} Treffer):`);
+            items.forEach((it, idx) => {
+              console.log(`  [#${idx + 1}] ${it.price} € | Zustand: [${it.condition}] | "${it.title}"`);
+            });
+            console.groupEnd();
+            if (typeof console.table === "function") {
+              try {
+                console.table(
+                  items.map((it, idx) => ({
+                    "#": idx + 1,
+                    "Preis (€)": it.price,
+                    "Zustand": it.condition,
+                    "Titel": it.title,
+                  }))
+                );
+              } catch (_) {}
+            }
+          }
           const payload = Object.assign(
             {
               type: "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT",

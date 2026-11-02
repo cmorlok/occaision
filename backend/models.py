@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -111,6 +111,7 @@ class MarketSourceStats(BaseModel):
     method: str = "fetch"
     login_required: bool = False
     error: Optional[str] = None
+    items: Optional[List[Dict[str, Any]]] = None
 
 
 class VerificationLinks(BaseModel):

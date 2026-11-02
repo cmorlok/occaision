@@ -146,6 +146,102 @@ function isEbayLoginRequired(html, finalUrl = "") {
   return false;
 }
 
+function extractEbayItemsFromHtml(html) {
+  if (!html || typeof html !== "string") return [];
+
+  if (
+    html.includes("splashui/challenge") ||
+    html.includes("Pardon Our Interruption") ||
+    html.includes("cf-chl-bypass") ||
+    html.includes("captcha-delivery.com")
+  ) {
+    return [];
+  }
+
+  const items = [];
+  const itemBlocks = html.split(/class=["'][^"']*s-(?:item|card)\b/i).slice(1);
+
+  for (const block of itemBlocks) {
+    if (block.includes("Shop on eBay")) continue;
+
+    // 1. Price
+    const priceMatch = block.match(
+      /class=["'][^"']*s-(?:item|card)__price[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|div)>/i
+    );
+    if (!priceMatch) continue;
+    const rawPrice = priceMatch[1].replace(/<[^>]+>/g, " ").trim();
+    const price = parsePriceText(rawPrice);
+    if (price === null) continue;
+
+    // 2. Title
+    let title = "Unbekannter Titel";
+    const titleMatch = block.match(
+      /class=["'][^"']*(?:s-item__title|s-card__title)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|h3|span)>/i
+    );
+    if (titleMatch) {
+      title = titleMatch[1]
+        .replace(/<span[^>]*class=["'][^"']*clipped[^"']*["'][^>]*>[\s\S]*?<\/span>/gi, "")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+    if (!title || title.toLowerCase().includes("shop on ebay") || title === "Neues Angebot") {
+      continue;
+    }
+
+    // 3. Condition (Zustand)
+    let condition = "Gebraucht";
+    const condMatch = block.match(
+      /class=["'][^"']*(?:SECONDARY_INFO|s-item__subtitle|s-item__condition)[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|div)>/i
+    );
+    if (condMatch) {
+      const parsedCond = condMatch[1]
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (parsedCond) {
+        condition = parsedCond;
+      }
+    }
+
+    items.push({
+      title,
+      condition,
+      price,
+      rawPrice,
+    });
+  }
+
+  return items.slice(0, 30);
+}
+
+function logEbayExtractedItems(items) {
+  if (!items || items.length === 0) {
+    console.log("[Seller Assistant] [ebay_de_sold] Keine verkauften Artikel extrahiert (0 Treffer).");
+    return;
+  }
+  console.group(`[Seller Assistant] [ebay_de_sold] Extrahierte verkaufte Artikel (${items.length} Treffer):`);
+  items.forEach((it, idx) => {
+    console.log(
+      `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition}] | Titel: "${it.title}"`
+    );
+  });
+  console.groupEnd();
+
+  if (typeof console.table === "function") {
+    try {
+      console.table(
+        items.map((it, idx) => ({
+          "#": idx + 1,
+          "Preis (€)": it.price,
+          "Zustand": it.condition,
+          "Titel": it.title,
+        }))
+      );
+    } catch (_) {}
+  }
+}
+
 function extractPricesFromHtml(sourceId, html) {
   if (!html || typeof html !== "string") return [];
 
@@ -162,20 +258,8 @@ function extractPricesFromHtml(sourceId, html) {
   const prices = [];
 
   if (sourceId === "ebay_de_sold") {
-    // Parse eBay .s-item / .s-card blocks
-    const itemBlocks = html.split(/class=["'][^"']*s-(?:item|card)\b/i).slice(1);
-    for (const block of itemBlocks) {
-      if (block.includes("Shop on eBay")) continue;
-      const priceMatch = block.match(
-        /class=["'][^"']*s-(?:item|card)__price[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|div)>/i
-      );
-      if (priceMatch) {
-        const rawText = priceMatch[1].replace(/<[^>]+>/g, " ").trim();
-        const val = parsePriceText(rawText);
-        if (val !== null) prices.push(val);
-      }
-    }
-    return prices.slice(0, 30);
+    const items = extractEbayItemsFromHtml(html);
+    return items.map(it => it.price);
   }
 
   // Try JSON-LD structured product/offer data first
@@ -287,8 +371,9 @@ function computeSourceStats(
     median_chf: medianChf,
     url: url,
     method: method,
-    login_required: false,
-    error: null,
+    login_required: Boolean(extra.login_required),
+    error: extra.error || null,
+    items: extra.items || null,
   };
 }
 
@@ -340,6 +425,12 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
       if (sourceId === "ebay_de_sold" && isEbayLoginRequired(html, currentUrl)) {
         return { prices: [], loginRequired: true };
       }
+      if (sourceId === "ebay_de_sold") {
+        const ebayItems = extractEbayItemsFromHtml(html);
+        if (ebayItems.length > 0) {
+          return { prices: ebayItems.map(it => it.price), ebayItems, loginRequired: false };
+        }
+      }
       const extracted = extractPricesFromHtml(sourceId, html);
       if (extracted.length > 0) {
         return { prices: extracted, loginRequired: false };
@@ -377,50 +468,63 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let prices = [];
   let method = "fetch";
   let loginRequired = false;
+  let ebayItems = [];
 
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
-  // Step 1: Fast background fetch() with 5s timeout
-  try {
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+  // Step 1: Fast background fetch() with 5s timeout (unless keepTabsOpen is requested, which forces tabs to stay open)
+  if (!keepTabsOpen) {
     try {
-      const resp = await fetch(url, {
-        credentials: "include",
-        signal: controller ? controller.signal : undefined,
-        headers: {
-          "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
-        },
-      });
-      if (resp.ok) {
-        const html = await resp.text();
-        if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
-          loginRequired = true;
-          console.warn(
-            `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
-          );
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+      try {
+        const resp = await fetch(url, {
+          credentials: "include",
+          signal: controller ? controller.signal : undefined,
+          headers: {
+            "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
+          },
+        });
+        if (resp.ok) {
+          const html = await resp.text();
+          if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
+            loginRequired = true;
+            console.warn(
+              `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
+            );
+          } else {
+            if (sourceConfig.id === "ebay_de_sold") {
+              ebayItems = extractEbayItemsFromHtml(html);
+              prices = ebayItems.map(it => it.price);
+            } else {
+              prices = extractPricesFromHtml(sourceConfig.id, html);
+            }
+            console.log(
+              `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
+            );
+          }
         } else {
-          prices = extractPricesFromHtml(sourceConfig.id, html);
-          console.log(
-            `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
-          );
+          console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
         }
-      } else {
-        console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
+      } finally {
+        if (timer) clearTimeout(timer);
       }
-    } finally {
-      if (timer) clearTimeout(timer);
+    } catch (err) {
+      console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
     }
-  } catch (err) {
-    console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
+  } else {
+    console.log(`[Seller Assistant] [${sourceConfig.id}] Debug: keepTabsOpen aktiv -> öffne Browser-Tab zur Inspektion...`);
   }
 
-  // Step 2: Fallback to inactive background tab if fetch returned 0 prices
+  // Step 2: Fallback to inactive background tab if fetch returned 0 prices (or in keepTabsOpen mode)
   if (prices.length === 0) {
     method = "tab";
     console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
     const tabRes = await scrapeViaBackgroundTab(url, sourceConfig.id, keepTabsOpen);
     prices = tabRes.prices || [];
+    if (tabRes.ebayItems && tabRes.ebayItems.length > 0) {
+      ebayItems = tabRes.ebayItems;
+    }
     if (tabRes.loginRequired) {
       loginRequired = true;
     }
@@ -434,6 +538,13 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     console.warn(
       `⚠️ [Seller Assistant] [${sourceConfig.id}] eBay erfordert einen Login für verkaufte Artikel! Bitte in Firefox auf https://www.ebay.de einloggen.`
     );
+  }
+
+  if (sourceConfig.id === "ebay_de_sold") {
+    if (ebayItems && ebayItems.length > 0) {
+      extra.items = ebayItems;
+      logEbayExtractedItems(ebayItems);
+    }
   }
 
   const stats = computeSourceStats(sourceConfig, prices, url, method, eurToChfRate, extra);
@@ -604,6 +715,8 @@ if (typeof module !== "undefined" && module.exports) {
     parsePriceText,
     isEbayLoginRequired,
     extractPricesFromHtml,
+    extractEbayItemsFromHtml,
+    logEbayExtractedItems,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,
