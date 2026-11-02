@@ -414,7 +414,7 @@ function populateForm() {
       const unit = src.currency === "CHF" ? "CHF" : "€";
       const chfHint = src.currency !== "CHF" && src.median_chf ? ` (~${src.median_chf} CHF)` : "";
       medianEl.textContent = `${src.median_price} ${unit}${chfHint}`;
-      if (srcKey === "idealo" && src.items && src.items[0] && src.items[0].title) {
+      if ((srcKey === "idealo" || srcKey === "toppreise") && src.items && src.items[0] && src.items[0].title) {
         const prodTitle = src.items[0].title;
         countEl.textContent = prodTitle.length > 35 ? prodTitle.slice(0, 32) + "..." : prodTitle;
         countEl.title = prodTitle;
@@ -1050,6 +1050,27 @@ async function scrapePricesViaExtension() {
             idl.items.map((it, idx) => ({
               "#": idx + 1,
               "Preis (€)": it.price,
+              "Zustand": it.condition || "Neu",
+              "Titel": it.title,
+            }))
+          );
+        } catch (_) {}
+      }
+    }
+
+    if (sources.toppreise && sources.toppreise.items && sources.toppreise.items.length > 0) {
+      const tp = sources.toppreise;
+      console.group(`[Seller Assistant] [Dashboard] Toppreise extrahierte Neupreise (${tp.items.length} Treffer):`);
+      tp.items.forEach((it, idx) => {
+        console.log(`  #${idx + 1}: ${it.price} CHF | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
+      });
+      console.groupEnd();
+      if (typeof console.table === "function") {
+        try {
+          console.table(
+            tp.items.map((it, idx) => ({
+              "#": idx + 1,
+              "Preis (CHF)": it.price,
               "Zustand": it.condition || "Neu",
               "Titel": it.title,
             }))

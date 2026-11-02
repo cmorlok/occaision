@@ -39,6 +39,7 @@ def test_manifest_v3_validity():
     assert any("ebay.de" in m for m in matches)
     assert any("kleinanzeigen.de" in m for m in matches)
     assert any("idealo.de" in m for m in matches)
+    assert any("toppreise.ch" in m for m in matches)
     
     # Assert all referenced files exist
     assert (Path("extension") / "background.js").exists()
@@ -150,6 +151,58 @@ def test_extension_price_parser_and_stats_via_node():
     const idealoPrices = bg.extractPricesFromHtml('idealo', idealoHtml);
     if (idealoPrices.length !== 1 || idealoPrices[0] !== 499) {
       throw new Error('Expected exactly [499] in idealoPrices: ' + JSON.stringify(idealoPrices));
+    }
+
+    // Test Toppreise extraction for single product page and search result list (first entry only)
+    const tpSingleHtml = fs.readFileSync('temp/toppreise-SONY Alpha 7 V Body (ILCE7M5B) ab CHF 2\\'173.45 bei Toppreise.ch.html', 'utf8');
+    const tpSingleItems = bg.extractToppreiseItems(tpSingleHtml);
+    if (!tpSingleItems || tpSingleItems.length !== 1) {
+      throw new Error('Expected exactly 1 toppreise item from single product page, got: ' + JSON.stringify(tpSingleItems));
+    }
+    if (tpSingleItems[0].price !== 2173.45 || !tpSingleItems[0].title.includes('SONY Alpha 7 V')) {
+      throw new Error('Unexpected toppreise single item: ' + JSON.stringify(tpSingleItems[0]));
+    }
+
+    const tpListHtml = fs.readFileSync('temp/toppreise-Alpha 7 V - Preisvergleich und Bewertungen bei Toppreise.ch.html', 'utf8');
+    const tpListItems = bg.extractToppreiseItems(tpListHtml);
+    if (!tpListItems || tpListItems.length !== 1) {
+      throw new Error('Expected exactly 1 toppreise item from search list, got: ' + JSON.stringify(tpListItems));
+    }
+    if (tpListItems[0].price !== 2173.45 || !tpListItems[0].title.includes('SONY Alpha 7 V')) {
+      throw new Error('Unexpected toppreise list item: ' + JSON.stringify(tpListItems[0]));
+    }
+
+    const tpHpHtml = fs.readFileSync('temp/toppreise-HP Color LaserJet Pro MFP 4302fdw - Preisvergleich und Bewertungen bei Toppreise.ch.htm', 'utf8');
+    const tpHpItems = bg.extractToppreiseItems(tpHpHtml);
+    if (!tpHpItems || tpHpItems.length !== 1) {
+      throw new Error('Expected exactly 1 toppreise item from HP list, got: ' + JSON.stringify(tpHpItems));
+    }
+    if (tpHpItems[0].price !== 387 || !tpHpItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+      throw new Error('Unexpected toppreise HP item: ' + JSON.stringify(tpHpItems[0]));
+    }
+    const tpPrices = bg.extractPricesFromHtml('toppreise', tpHpHtml);
+    if (tpPrices.length !== 1 || tpPrices[0] !== 387) {
+      throw new Error('Expected exactly [387] from extractPricesFromHtml toppreise, got: ' + JSON.stringify(tpPrices));
+    }
+
+    // Test Swiss notation with entities and HTML snippet: <div class="Plugin_Price "> 2'173.45 </div>
+    const swissCases = [
+      '<div class="Plugin_Price "> 2\\\'173.45 </div>',
+      '<div class="Plugin_Price "> 2&#39;173.45 </div>',
+      '<div class="Plugin_Price "> 2&apos;173.45 </div>',
+      '<div class="Plugin_Price "> 2&#x27;173.45 </div>',
+      '<div class="Plugin_Price "> 2’173.45 </div>',
+      '<div class="Plugin_Price "> 2`173.45 </div>',
+      '<div class="Plugin_Price "> 2 173.45 </div>',
+      '<div class="Plugin_Price "> 2\\u202f173.45 </div>',
+      '<div class="Plugin_Price "> 2&nbsp;173.45 </div>',
+      '2\\\'173.–'
+    ];
+    for (const sc of swissCases) {
+      const parsed = bg.parsePriceText(sc);
+      if (parsed !== 2173.45 && parsed !== 2173) {
+        throw new Error('Swiss price parsing failed for ' + sc + ', got: ' + parsed);
+      }
     }
 
     const ebayHtml = `

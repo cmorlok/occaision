@@ -573,6 +573,26 @@ function setupDashboardBridge() {
               } catch (_) {}
             }
           }
+          if (response && response.sources && response.sources.toppreise && response.sources.toppreise.items) {
+            const toppreiseItems = response.sources.toppreise.items;
+            console.group(`[Seller Assistant] [Content-Bridge] Toppreise Neupreise (${toppreiseItems.length} Treffer):`);
+            toppreiseItems.forEach((it, idx) => {
+              console.log(`  [#${idx + 1}] ${it.price} CHF | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
+            });
+            console.groupEnd();
+            if (typeof console.table === "function") {
+              try {
+                console.table(
+                  toppreiseItems.map((it, idx) => ({
+                    "#": idx + 1,
+                    "Preis (CHF)": it.price,
+                    "Zustand": it.condition || "Neu",
+                    "Titel": it.title,
+                  }))
+                );
+              } catch (_) {}
+            }
+          }
           const payload = Object.assign(
             {
               type: "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT",
@@ -604,16 +624,62 @@ if (typeof browserApi !== "undefined" && browserApi.runtime && browserApi.runtim
         });
       }
 
+      const toppreiseCards = [];
+      let tpSingleTitle = "";
+      let tpSinglePrice = "";
+      const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+      for (const s of jsonLdScripts) {
+        try {
+          const d = JSON.parse(s.textContent || "");
+          if (d && d["@type"] === "Product") {
+            tpSingleTitle = d.name || "";
+            if (d.offers) {
+              tpSinglePrice = String(d.offers.lowPrice ?? d.offers.price ?? "");
+            }
+            break;
+          }
+        } catch (_) {}
+      }
+      if (!tpSingleTitle) {
+        const h1 = document.querySelector("h1");
+        if (h1 && (location.href.includes("/preisvergleich/") || location.href.includes("toppreise.ch"))) {
+          tpSingleTitle = h1.textContent.trim();
+        }
+      }
+      if (!tpSinglePrice && tpSingleTitle) {
+        const pEl = document.querySelector(".Plugin_Price");
+        if (pEl) tpSinglePrice = pEl.textContent.trim();
+      }
+      if (tpSingleTitle && tpSinglePrice) {
+        toppreiseCards.push({
+          title: tpSingleTitle,
+          rawPrice: tpSinglePrice,
+        });
+      } else {
+        const mainEl = document.querySelector("main") || document;
+        const firstProdEl = mainEl.querySelector(".Plugin_Product");
+        if (firstProdEl) {
+          const titleEl = firstProdEl.querySelector('a.bold, a[href*="/preisvergleich/"], .product-name');
+          const priceEl = firstProdEl.querySelector('.Plugin_Price');
+          if (priceEl) {
+            toppreiseCards.push({
+              title: titleEl ? titleEl.textContent.trim() : "Toppreise Produkt",
+              rawPrice: priceEl.textContent.trim(),
+            });
+          }
+        }
+      }
+
       const priceNodes = Array.from(
         document.querySelectorAll(
-          '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="sr-detailedPriceInfo__price"], [class*="price" i], [data-testid*="price" i]'
+          '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="sr-detailedPriceInfo__price"], [class*="Plugin_Price"], [class*="price" i], [data-testid*="price" i]'
         )
       )
         .slice(0, 40)
         .map(el => (el.textContent || "").trim())
         .filter(Boolean);
 
-      sendResponse({ html, currentUrl, priceNodes, idealoCards });
+      sendResponse({ html, currentUrl, priceNodes, idealoCards, toppreiseCards });
       return true;
     }
     return false;

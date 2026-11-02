@@ -32,7 +32,8 @@
         "*://*.tutti.ch/*",
         "*://*.ebay.de/*",
         "*://*.kleinanzeigen.de/*",
-        "*://*.idealo.de/*"
+        "*://*.idealo.de/*",
+        "*://*.toppreise.ch/*"
       ],
       "js": ["content.js"],
       "css": ["panel.css"],

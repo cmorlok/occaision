@@ -66,10 +66,18 @@ function parsePriceText(text) {
   if (lower.includes("bis") || lower.includes(" to ") || lower.includes(" - ")) {
     return null;
   }
-  // Normalize Swiss apostrophe thousands separators (e.g. 1'250.00 or 419.–)
-  const cleaned = text
-    .replace(/['’]/g, "")
+  // Decode HTML entities for apostrophes, quotes, and non-breaking spaces
+  let cleaned = text
+    .replace(/&(?:#39|#039|#x27|#x0027|apos|rsquo|lsquo|#8217|#8216);/gi, "")
+    .replace(/&(?:nbsp|#160|#xa0);/gi, " ")
+    .replace(/['’‘ʼʻʽ‛′‵´`]/g, "")
     .replace(/\.–|\.-|--/g, ".00");
+
+  // Normalize thousands separators formatted as spaces (e.g. 2 173.45, 2\u00a0173, 2\u202f173)
+  while (/(\d)(?:[\s\u00a0\u202f]+)(\d{3})/i.test(cleaned)) {
+    cleaned = cleaned.replace(/(\d)(?:[\s\u00a0\u202f]+)(\d{3})/gi, "$1$2");
+  }
+
   const match = cleaned.match(/(\d+(?:[.,]\d+)*)/);
   if (!match) return null;
 
@@ -541,6 +549,127 @@ function logIdealoExtractedItems(items) {
   }
 }
 
+function extractToppreiseItems(html, priceNodes = [], toppreiseCards = []) {
+  const items = [];
+
+  // 1. Live DOM-extracted first card from browser tab
+  if (Array.isArray(toppreiseCards) && toppreiseCards.length > 0) {
+    const first = toppreiseCards[0];
+    const p = parsePriceText(first.rawPrice);
+    if (p !== null) {
+      items.push({
+        title: (first.title || "Toppreise Produkt").trim(),
+        condition: "Neu (Bestpreis)",
+        price: p,
+        rawPrice: first.rawPrice,
+      });
+      return items;
+    }
+  }
+
+  if (html && typeof html === "string") {
+    // 2. Check JSON-LD for single product page (@type: Product)
+    const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let match;
+    while ((match = scriptRegex.exec(html)) !== null) {
+      try {
+        const data = JSON.parse(match[1].trim());
+        if (data && data["@type"] === "Product") {
+          let lowPrice = null;
+          if (data.offers) {
+            const offers = data.offers;
+            if (typeof offers.lowPrice !== "undefined") lowPrice = offers.lowPrice;
+            else if (typeof offers.price !== "undefined") lowPrice = offers.price;
+            else if (Array.isArray(offers) && offers[0] && offers[0].price) lowPrice = offers[0].price;
+          }
+          const p = parsePriceText(String(lowPrice || ""));
+          if (p !== null) {
+            items.push({
+              title: String(data.name || "Toppreise Produkt").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+              condition: "Neu (Bestpreis)",
+              price: p,
+              rawPrice: `CHF ${p}`,
+            });
+            return items;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Search Results / Variant List: Restrict scope to <main> to ignore header history dropdowns
+    const mainMatch = html.match(/<main[\s\S]*?<\/main>/i);
+    const scope = mainMatch ? mainMatch[0] : html;
+
+    // In Toppreise search results, each product entry has class Plugin_Product
+    const prodBlockMatch = scope.match(/class=["'][^"']*\bPlugin_Product\b[^"']*["'][\s\S]*?(?:(?=class=["'][^"']*\bPlugin_Product\b)|<\/main>|$)/i);
+    const targetBlock = prodBlockMatch ? prodBlockMatch[0] : scope;
+
+    // Extract title: from a.bold or a[href*="/preisvergleich/"] or .product-name
+    let title = "";
+    const titleMatch = targetBlock.match(/<a[^>]*class=["'][^"']*\bbold\b[^"']*["'][^>]*href=["'][^"']*\/preisvergleich\/[^"']*["'][^>]*>([\s\S]*?)<\/a>/i) ||
+                       targetBlock.match(/<a[^>]*href=["'][^"']*\/preisvergleich\/[^"']*["'][^>]*class=["'][^"']*\bbold\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i) ||
+                       targetBlock.match(/class=["'][^"']*\bproduct-name\b[^"']*["'][\s\S]*?<a[^>]*href=["'][^"']*\/preisvergleich\/[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+    if (titleMatch) {
+      title = titleMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    // Extract price from Plugin_Price inside targetBlock
+    const priceMatch = targetBlock.match(/class=["'][^"']*\bPlugin_Price\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|span|p|a)>/i) ||
+                       targetBlock.match(/(?:CHF|Fr\.)\s*(\d{1,5}(?:['’.,]\d{2,3})*)/i);
+    if (priceMatch) {
+      const p = parsePriceText(priceMatch[1]);
+      if (p !== null) {
+        items.push({
+          title: title || "Toppreise Produkt",
+          condition: "Neu (Bestpreis)",
+          price: p,
+          rawPrice: priceMatch[1].trim(),
+        });
+        return items;
+      }
+    }
+  }
+
+  // 4. Fallback: priceNodes (first price only)
+  if (Array.isArray(priceNodes) && priceNodes.length > 0) {
+    const val = parsePriceText(priceNodes[0]);
+    if (val !== null) {
+      items.push({
+        title: "Toppreise Produkt",
+        condition: "Neu (Bestpreis)",
+        price: val,
+        rawPrice: priceNodes[0],
+      });
+      return items;
+    }
+  }
+
+  return [];
+}
+
+function logToppreiseExtractedItems(items) {
+  if (!items || items.length === 0) {
+    console.log("[Seller Assistant] [toppreise] Kein Toppreise-Neupreis extrahiert (0 Treffer).");
+    return;
+  }
+  const top = items[0];
+  console.group(`[Seller Assistant] [toppreise] Toppreise Neupreis (Bestpreis des ersten Produkts):`);
+  console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
+  console.groupEnd();
+
+  if (typeof console.table === "function") {
+    try {
+      console.table([
+        {
+          "Preis (CHF)": top.price,
+          "Zustand": top.condition || "Neu",
+          "Produktname": top.title,
+        }
+      ]);
+    } catch (_) {}
+  }
+}
+
 function extractPricesFromHtml(sourceId, html) {
   if (!html || typeof html !== "string") return [];
 
@@ -568,6 +697,11 @@ function extractPricesFromHtml(sourceId, html) {
 
   if (sourceId === "idealo") {
     const items = extractIdealoItems(html);
+    return items.map(it => it.price);
+  }
+
+  if (sourceId === "toppreise") {
+    const items = extractToppreiseItems(html);
     return items.map(it => it.price);
   }
 
@@ -716,15 +850,61 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
             });
           }
 
+          const toppreiseCards = [];
+          let tpSingleTitle = "";
+          let tpSinglePrice = "";
+          const jsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+          for (const s of jsonLdScripts) {
+            try {
+              const d = JSON.parse(s.textContent || "");
+              if (d && d["@type"] === "Product") {
+                tpSingleTitle = d.name || "";
+                if (d.offers) {
+                  tpSinglePrice = String(d.offers.lowPrice ?? d.offers.price ?? "");
+                }
+                break;
+              }
+            } catch (_) {}
+          }
+          if (!tpSingleTitle) {
+            const h1 = document.querySelector("h1");
+            if (h1 && (location.href.includes("/preisvergleich/") || location.href.includes("toppreise.ch"))) {
+              tpSingleTitle = h1.textContent.trim();
+            }
+          }
+          if (!tpSinglePrice && tpSingleTitle) {
+            const pEl = document.querySelector(".Plugin_Price");
+            if (pEl) tpSinglePrice = pEl.textContent.trim();
+          }
+          if (tpSingleTitle && tpSinglePrice) {
+            toppreiseCards.push({
+              title: tpSingleTitle,
+              rawPrice: tpSinglePrice,
+            });
+          } else {
+            const mainEl = document.querySelector("main") || document;
+            const firstProdEl = mainEl.querySelector(".Plugin_Product");
+            if (firstProdEl) {
+              const titleEl = firstProdEl.querySelector('a.bold, a[href*="/preisvergleich/"], .product-name');
+              const priceEl = firstProdEl.querySelector('.Plugin_Price');
+              if (priceEl) {
+                toppreiseCards.push({
+                  title: titleEl ? titleEl.textContent.trim() : "Toppreise Produkt",
+                  rawPrice: priceEl.textContent.trim(),
+                });
+              }
+            }
+          }
+
           const priceNodes = Array.from(
             document.querySelectorAll(
-              '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="sr-detailedPriceInfo__price"], [class*="price" i], [data-testid*="price" i]'
+              '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="sr-detailedPriceInfo__price"], [class*="Plugin_Price"], [class*="price" i], [data-testid*="price" i]'
             )
           )
             .slice(0, 40)
             .map(el => (el.textContent || "").trim())
             .filter(Boolean);
-          return { html, currentUrl, priceNodes, idealoCards };
+          return { html, currentUrl, priceNodes, idealoCards, toppreiseCards };
         },
       });
       if (results && results[0] && results[0].result) {
@@ -775,6 +955,25 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
         }
         return { prices: [], idealoItems: [], loginRequired: false };
       }
+      if (sourceId === "toppreise") {
+        const toppreiseItems = extractToppreiseItems(html, priceNodes, pageData.toppreiseCards || []);
+        if (toppreiseItems.length > 0) {
+          return { prices: [toppreiseItems[0].price], toppreiseItems, loginRequired: false };
+        }
+        if (priceNodes && priceNodes.length > 0) {
+          const p = parsePriceText(priceNodes[0]);
+          if (p !== null) {
+            const fallbackItem = [{
+              title: "Toppreise Top-Ergebnis",
+              condition: "Neu (Bestpreis)",
+              price: p,
+              rawPrice: priceNodes[0],
+            }];
+            return { prices: [p], toppreiseItems: fallbackItem, loginRequired: false };
+          }
+        }
+        return { prices: [], toppreiseItems: [], loginRequired: false };
+      }
       const extracted = extractPricesFromHtml(sourceId, html);
       if (extracted.length > 0) {
         return { prices: extracted, loginRequired: false };
@@ -815,6 +1014,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let ebayItems = [];
   let kleinanzeigenItems = [];
   let idealoItems = [];
+  let toppreiseItems = [];
 
   const TAB_ONLY_SOURCES = new Set(["idealo"]);
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
@@ -846,6 +1046,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
             } else if (sourceConfig.id === "kleinanzeigen") {
               kleinanzeigenItems = extractKleinanzeigenItems(html);
               prices = kleinanzeigenItems.map(it => it.price);
+            } else if (sourceConfig.id === "toppreise") {
+              toppreiseItems = extractToppreiseItems(html);
+              prices = toppreiseItems.map(it => it.price);
             } else {
               prices = extractPricesFromHtml(sourceConfig.id, html);
             }
@@ -880,6 +1083,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     }
     if (tabRes.idealoItems && tabRes.idealoItems.length > 0) {
       idealoItems = tabRes.idealoItems;
+    }
+    if (tabRes.toppreiseItems && tabRes.toppreiseItems.length > 0) {
+      toppreiseItems = tabRes.toppreiseItems;
     }
     if (tabRes.loginRequired) {
       loginRequired = true;
@@ -923,6 +1129,13 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
       logIdealoExtractedItems(idealoItems);
       // For Idealo: The first card (.sr-resultList_* .sr-detailedPriceInfo__price_*) is the primary product's best new price!
       prices = [idealoItems[0].price];
+    }
+  } else if (sourceConfig.id === "toppreise") {
+    if (toppreiseItems && toppreiseItems.length > 0) {
+      extra.items = toppreiseItems;
+      logToppreiseExtractedItems(toppreiseItems);
+      // For Toppreise: The first product in the list or product page is the primary product's best new price!
+      prices = [toppreiseItems[0].price];
     }
   }
 
@@ -1100,6 +1313,8 @@ if (typeof module !== "undefined" && module.exports) {
     logKleinanzeigenExtractedItems,
     extractIdealoItems,
     logIdealoExtractedItems,
+    extractToppreiseItems,
+    logToppreiseExtractedItems,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,
