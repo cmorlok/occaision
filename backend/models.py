@@ -65,16 +65,25 @@ class PresetSettings(BaseModel):
     enabled_price_sources: List[str] = Field(default_factory=lambda: list(DEFAULT_PRICE_SOURCES))
     keep_tabs_open_after_search: bool = False
     shipping_presets: List[ShippingPreset] = Field(default_factory=lambda: [
-        # Swiss Presets (CHF)
-        ShippingPreset(id="b_post_2kg", country=MarketCountry.CH, label="Paket B-Post bis 2 kg (8.50 CHF)", cost_chf=8.50, cost=8.50, currency="CHF", pickup_allowed=True),
-        ShippingPreset(id="b_post_10kg", country=MarketCountry.CH, label="Paket B-Post bis 10 kg (11.50 CHF)", cost_chf=11.50, cost=11.50, currency="CHF", pickup_allowed=True),
-        ShippingPreset(id="grossbrief", country=MarketCountry.CH, label="Grossbrief B-Post (2.00 CHF)", cost_chf=2.00, cost=2.00, currency="CHF", pickup_allowed=True),
+        # Swiss Presets (CHF) - B-Post
+        ShippingPreset(id="kleinsendung_100g", country=MarketCountry.CH, label="Kleinsendung B-Post bis 100 g (3.00 CHF)", cost_chf=3.00, cost=3.00, currency="CHF", pickup_allowed=True),
+        ShippingPreset(id="kleinsendung_500g", country=MarketCountry.CH, label="Kleinsendung B-Post bis 500 g (3.40 CHF)", cost_chf=3.40, cost=3.40, currency="CHF", pickup_allowed=True),
+        ShippingPreset(id="b_post_2kg", country=MarketCountry.CH, label="Paket B-Post bis 2 kg (9.00 CHF)", cost_chf=9.00, cost=9.00, currency="CHF", pickup_allowed=True),
+        ShippingPreset(id="b_post_10kg", country=MarketCountry.CH, label="Paket B-Post bis 10 kg (12.00 CHF)", cost_chf=12.00, cost=12.00, currency="CHF", pickup_allowed=True),
+        ShippingPreset(id="b_post_30kg", country=MarketCountry.CH, label="Paket B-Post bis 30 kg (21.00 CHF)", cost_chf=21.00, cost=21.00, currency="CHF", pickup_allowed=True),
         ShippingPreset(id="pickup_only", country=MarketCountry.CH, label="Nur Abholung vor Ort (0.00 CHF)", cost_chf=0.00, cost=0.00, currency="CHF", pickup_allowed=True),
         # German Presets (EUR)
-        ShippingPreset(id="dhl_2kg", country=MarketCountry.DE, label="DHL Paket bis 2 kg versichert (5.49 EUR)", cost_chf=0.0, cost=5.49, currency="EUR", pickup_allowed=True),
-        ShippingPreset(id="dhl_5kg", country=MarketCountry.DE, label="DHL Paket bis 5 kg versichert (6.99 EUR)", cost_chf=0.0, cost=6.99, currency="EUR", pickup_allowed=True),
-        ShippingPreset(id="hermes_s", country=MarketCountry.DE, label="Hermes S-Paket versichert (4.95 EUR)", cost_chf=0.0, cost=4.95, currency="EUR", pickup_allowed=True),
-        ShippingPreset(id="warensendung_de", country=MarketCountry.DE, label="Deutsche Post Bücher-/Warensendung (2.55 EUR)", cost_chf=0.0, cost=2.55, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="grossbrief_500g_de", country=MarketCountry.DE, label="Großbrief bis 500 g (1.80 EUR)", cost_chf=0.0, cost=1.80, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="warensendung_1000g_de", country=MarketCountry.DE, label="Warensendung bis 1.000 g (2.70 EUR)", cost_chf=0.0, cost=2.70, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="warensendung_2000g_de", country=MarketCountry.DE, label="Warensendung bis 2.000 g (3.55 EUR)", cost_chf=0.0, cost=3.55, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="maxibrief_1000g_de", country=MarketCountry.DE, label="Maxibrief bis 1.000 g (2.90 EUR)", cost_chf=0.0, cost=2.90, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_paeckchen_s", country=MarketCountry.DE, label="DHL Päckchen S bis 2 kg (4.19 EUR)", cost_chf=0.0, cost=4.19, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_paeckchen_m", country=MarketCountry.DE, label="DHL Päckchen M bis 2 kg (5.19 EUR)", cost_chf=0.0, cost=5.19, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_2kg", country=MarketCountry.DE, label="DHL Paket bis 2 kg versichert (6.19 EUR)", cost_chf=0.0, cost=6.19, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_5kg", country=MarketCountry.DE, label="DHL Paket bis 5 kg versichert (7.69 EUR)", cost_chf=0.0, cost=7.69, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_10kg", country=MarketCountry.DE, label="DHL Paket bis 10 kg versichert (10.49 EUR)", cost_chf=0.0, cost=10.49, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_20kg", country=MarketCountry.DE, label="DHL Paket bis 20 kg versichert (18.99 EUR)", cost_chf=0.0, cost=18.99, currency="EUR", pickup_allowed=True),
+        ShippingPreset(id="dhl_31_5kg", country=MarketCountry.DE, label="DHL Paket bis 31.5 kg versichert (23.99 EUR)", cost_chf=0.0, cost=23.99, currency="EUR", pickup_allowed=True),
         ShippingPreset(id="pickup_only_de", country=MarketCountry.DE, label="Nur Abholung vor Ort DE (0.00 EUR)", cost_chf=0.0, cost=0.00, currency="EUR", pickup_allowed=True),
     ])
 
