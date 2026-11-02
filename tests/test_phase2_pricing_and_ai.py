@@ -16,81 +16,17 @@ from backend.models import (
     RicardoListing,
     TuttiListing,
 )
-from backend.services.ai_service import AIService, extract_and_parse_json, post_process_ai_output
-from backend.services.ebay_service import EbayService
+from backend.services.ai_service import (
+    AIService,
+    build_verification_links,
+    extract_and_parse_json,
+    post_process_ai_output,
+)
 from backend.storage import StorageService
 
 
-MOCK_EBAY_HTML = """
-<!DOCTYPE html>
-<html>
-<body>
-<div class="s-item">
-    <div class="s-item__title">Shop on eBay</div>
-    <span class="s-item__price">EUR 19,99</span>
-</div>
-<div class="s-item">
-    <div class="s-item__title">Sony WH-1000XM4 Kopfhörer Schwarz</div>
-    <span class="s-item__price">EUR 1,00</span>
-</div>
-<div class="s-item">
-    <div class="s-item__title">Sony WH-1000XM4 Wireless Kopfhörer Top Zustand</div>
-    <span class="s-item__price">EUR 150,00</span>
-</div>
-<div class="s-item">
-    <div class="s-item__title">Sony WH-1000XM4 Noise Cancelling</div>
-    <span class="s-item__price">160,00 €</span>
-</div>
-<div class="s-item">
-    <div class="s-item__title">Sony WH 1000 XM4 Over-Ear Headphone</div>
-    <span class="s-item__price">EUR 170,00</span>
-</div>
-<div class="s-item">
-    <div class="s-item__title">Sony WH-1000XM4 Verschiedene Farben</div>
-    <span class="s-item__price">EUR 100,00 bis EUR 200,00</span>
-</div>
-</body>
-</html>
-"""
-
-MOCK_EBAY_CHALLENGE_HTML = """
-<!DOCTYPE html>
-<html>
-<head><title>Pardon Our Interruption</title></head>
-<body>
-<div id="splashui/challenge">Please solve the captcha</div>
-</body>
-</html>
-"""
-
-
-def test_ebay_sold_html_parser_and_currency_conversion():
-    ebay_service = EbayService()
-    
-    stats = ebay_service.parse_sold_html(MOCK_EBAY_HTML, query="Sony WH-1000XM4", eur_to_chf=0.94)
-    
-    # 4 valid prices: 1.0, 150.0, 160.0, 170.0
-    # Range price "EUR 100,00 bis EUR 200,00" and placeholder "Shop on eBay" must be skipped
-    assert stats.sample_count == 4
-    assert stats.min_eur == 1.0
-    assert stats.max_eur == 170.0
-    assert stats.median_eur is not None
-    assert stats.median_chf is not None
-    # Median of [1.0, 150.0, 160.0, 170.0] -> (150+160)/2 = 155.0
-    # Or with 10% trim: [1.0, 150.0, 160.0, 170.0] trimmed -> 155.0
-    assert stats.median_eur == pytest.approx(155.0, abs=1.0)
-    assert stats.median_chf == round(stats.median_eur * 0.94, 2)
-    
-    # Verify challenge page handling
-    challenge_stats = ebay_service.parse_sold_html(MOCK_EBAY_CHALLENGE_HTML, query="Sony WH-1000XM4")
-    assert challenge_stats.sample_count == 0
-    assert challenge_stats.median_eur is None
-    assert challenge_stats.median_chf is None
-
-
 def test_verification_links_generation():
-    ebay_service = EbayService()
-    links = ebay_service.build_verification_links("Sony WH-1000XM4")
+    links = build_verification_links("Sony WH-1000XM4")
     
     assert "https://www.ebay.de/sch/i.html" in links.ebay_sold_url
     assert "LH_Sold=1" in links.ebay_sold_url
@@ -323,31 +259,6 @@ async def test_ai_prompt_debug_logging(temp_data_dir: Path, caplog):
 
 
 @pytest.mark.asyncio
-async def test_ebay_service_debug_logging(caplog):
-    from backend.main import configure_logging
-
-    configure_logging("DEBUG")
-    ebay_logger = logging.getLogger("seller.ebay")
-    assert ebay_logger.level == logging.DEBUG
-
-    ebay_service = EbayService()
-
-    with caplog.at_level(logging.DEBUG, logger="seller.ebay"):
-        stats = ebay_service.parse_sold_html(MOCK_EBAY_HTML, query="Sony WH-1000XM4", eur_to_chf=0.94)
-        assert stats.sample_count == 4
-
-        challenge_stats = ebay_service.parse_sold_html(
-            MOCK_EBAY_CHALLENGE_HTML, query="HP Color LaserJet Pro MFP 4302fdw"
-        )
-        assert challenge_stats.sample_count == 0
-
-    messages = [rec.message for rec in caplog.records]
-    assert any("EBAY SOLD PARSER DEBUG" in m for m in messages)
-    assert any("Sony WH-1000XM4" in m for m in messages)
-    assert any("Anti-Bot" in m or "challenge" in m.lower() for m in messages)
-
-
-@pytest.mark.asyncio
 async def test_extension_scraped_prices_injected_into_ai_and_grounding_disabled(temp_data_dir: Path):
     storage = StorageService(data_dir=temp_data_dir)
     draft = storage.create_draft(
@@ -567,44 +478,6 @@ async def test_ai_filters_out_disabled_price_sources(temp_data_dir: Path):
         assert "eBay DE (Gebraucht & Beendet)" not in prompt_str
         assert "Idealo.de Neupreis" not in prompt_str
         assert "279.0" not in prompt_str
-
-
-def test_ebay_parser_filters_out_fewer_keywords_results():
-    ebay_service = EbayService()
-    html_with_fewer_keywords = """
-    <html>
-    <body>
-      <div class="s-item">
-        <div class="s-item__title">Sony WH-1000XM4 Kopfhörer Schwarz</div>
-        <span class="s-item__price">EUR 180,00</span>
-      </div>
-      <div class="s-item">
-        <div class="s-item__title">Sony WH-1000XM4 ANC Top</div>
-        <span class="s-item__price">EUR 190,00</span>
-      </div>
-      <div class="srp-river-answer srp-river-answer--REWRITE_START">
-        <span class="srp-river-answer__title">Ergebnisse für weniger Suchbegriffe</span>
-      </div>
-      <div class="s-item">
-        <div class="s-item__title">Ladekabel USB-C für Sony Kopfhörer</div>
-        <span class="s-item__price">EUR 9,99</span>
-      </div>
-      <div class="s-item">
-        <div class="s-item__title">Ohrpolster Ersatzpolster</div>
-        <span class="s-item__price">EUR 14,50</span>
-      </div>
-      <div class="s-item">
-        <div class="s-item__title">Sony WH-1000XM5 Neues Modell</div>
-        <span class="s-item__price">EUR 380,00</span>
-      </div>
-    </body>
-    </html>
-    """
-    stats = ebay_service.parse_sold_html(html_with_fewer_keywords, query="Sony WH-1000XM4")
-    assert stats.sample_count == 2
-    assert stats.min_eur == 180.0
-    assert stats.max_eur == 190.0
-    assert stats.median_eur == 185.0
 
 
 

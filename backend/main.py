@@ -19,7 +19,6 @@ from backend.models import (
     PresetSettings,
 )
 from backend.services.ai_service import AIService
-from backend.services.ebay_service import EbayService
 from backend.services.image_service import ImageService
 from backend.storage import StorageService
 
@@ -80,7 +79,6 @@ def create_app(
     storage_service: Optional[StorageService] = None,
     image_service: Optional[ImageService] = None,
     ai_service: Optional[AIService] = None,
-    ebay_service: Optional[EbayService] = None,
 ) -> FastAPI:
     cfg = settings or default_settings
     configure_logging(cfg.log_level)
@@ -89,7 +87,6 @@ def create_app(
         data_dir=cfg.data_dir,
         rembg_model=cfg.rembg_model,
     )
-    ebay_svc = ebay_service or EbayService(default_eur_to_chf=cfg.eur_to_chf_rate)
     ai_svc = ai_service or AIService(
         api_key=cfg.gemini_api_key,
         model_name=cfg.gemini_model,
@@ -408,33 +405,7 @@ def create_app(
 
         # 1. Check if extension already fetched market prices
         pa = draft.price_analysis
-        has_extension_prices = bool(
-            (pa and pa.prices_fetched_via_extension)
-            or (pa and pa.market_sources and any(ms.sample_count > 0 for ms in pa.market_sources.values()))
-        )
-
-        search_query = (draft.identified_product or draft.user_notes or "").strip()
-        ebay_stats = None
-        if has_extension_prices:
-            logger.info(
-                f"[API] Draft {draft_id} enthält bereits Preisdaten aus der Firefox-Extension "
-                f"({len(pa.market_sources)} Quellen). Überspringe Backend-eBay-Abruf."
-            )
-            ebay_stats = pa.ebay_stats if "ebay_de_sold" in enabled_sources else None
-        elif search_query and "ebay_de_sold" in enabled_sources:
-            logger.debug(f"[API] Starte Vorab-eBay-Abfrage mit Suchbegriff: '{search_query}'")
-            ebay_stats = await ebay_svc.fetch_sold_stats(search_query)
-            logger.debug(
-                f"[API] Vorab-eBay-Abfrage Ergebnis: sample_count={ebay_stats.sample_count}, "
-                f"median_eur={ebay_stats.median_eur}, median_chf={ebay_stats.median_chf}"
-            )
-        elif "ebay_de_sold" not in enabled_sources:
-            logger.debug("[API] eBay DE Preisquelle in Einstellungen deaktiviert. Überspringe eBay-Abfrage.")
-        else:
-            logger.debug(
-                "[API] Kein Suchbegriff vor KI-Analyse vorhanden (identified_product/user_notes leer). "
-                "eBay-Abfrage erfolgt nach der KI-Produktidentifikation."
-            )
+        ebay_stats = pa.ebay_stats if (pa and "ebay_de_sold" in enabled_sources) else None
 
         # 2. Gather AI input images
         img_dir = cfg.data_dir / "images" / draft_id
@@ -472,14 +443,7 @@ def create_app(
                 detail=f"Fehler bei der KI-Analyse: {err_str}",
             )
 
-        # 4. If user provided no initial text notes and no extension prices, fetch eBay stats using AI-identified product (if enabled)
-        if "ebay_de_sold" in enabled_sources and not has_extension_prices and ebay_stats is None and analyzed_draft.identified_product:
-            logger.debug(
-                f"[API] Starte nachträgliche eBay-Abfrage mit KI-identifiziertem Produkt: '{analyzed_draft.identified_product}'"
-            )
-            analyzed_draft.price_analysis.ebay_stats = await ebay_svc.fetch_sold_stats(
-                analyzed_draft.identified_product
-            )
+        return storage.update_draft(analyzed_draft)
 
         return storage.update_draft(analyzed_draft)
 

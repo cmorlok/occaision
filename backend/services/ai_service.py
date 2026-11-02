@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import sys
 from typing import Any, Dict, List, Optional
+import urllib.parse
 from PIL import Image
 from google import genai
 from google.genai import types
@@ -17,8 +18,8 @@ from backend.models import (
     PriceAnalysis,
     RicardoListing,
     TuttiListing,
+    VerificationLinks,
 )
-from backend.services.ebay_service import EbayService
 
 logger = logging.getLogger("seller.ai")
 if not logger.handlers:
@@ -167,6 +168,18 @@ Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt mit folgender Struktur:
 """
 
 
+def build_verification_links(query: str) -> VerificationLinks:
+    q = urllib.parse.quote_plus((query or "").strip())
+    return VerificationLinks(
+        ebay_sold_url=f"https://www.ebay.de/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000",
+        kleinanzeigen_search_url=f"https://www.kleinanzeigen.de/s-{q}/k0",
+        idealo_url=f"https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q={q}",
+        ricardo_search_url=f"https://www.ricardo.ch/de/s/{q}",
+        toppreise_url=f"https://www.toppreise.ch/produktsuche?q={q}",
+        digitec_url=f"https://www.digitec.ch/de/search?q={q}",
+    )
+
+
 class AIService:
     def __init__(
         self,
@@ -180,7 +193,6 @@ class AIService:
         self.enable_search_grounding = enable_search_grounding
         self.eur_to_chf = eur_to_chf
         self._client: Optional[genai.Client] = None
-        self.ebay_service = EbayService(default_eur_to_chf=eur_to_chf)
 
     @property
     def client(self) -> genai.Client:
@@ -442,7 +454,7 @@ class AIService:
         draft.missing_photo_hints = payload.get("missing_photo_hints", [])
 
         # Build verification links
-        v_links = self.ebay_service.build_verification_links(product_name)
+        v_links = build_verification_links(product_name)
 
         ch_new_fallback = existing_pa.ch_new_price_chf if existing_pa else None
         if ch_new_fallback is None and market_sources:

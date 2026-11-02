@@ -114,21 +114,13 @@ def test_full_rest_lifecycle(test_app):
         import json
         mock_gemini.return_value = json.dumps(mock_ai_response)
         
-        with patch("backend.services.ebay_service.EbayService.fetch_sold_stats", new_callable=AsyncMock) as mock_ebay:
-            mock_ebay.return_value = EbaySoldStats(
-                query="Logitech MX Master 3",
-                sample_count=5,
-                median_eur=60.0,
-                median_chf=56.4,
-            )
-            
-            res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
-            assert res_analyze.status_code == 200
-            analyzed = res_analyze.json()
-            assert analyzed["status"] == DraftStatus.READY
-            assert analyzed["identified_product"] == "Logitech MX Master 3"
-            assert analyzed["price_analysis"]["ricardo_start_chf"] == 40.0
-            assert analyzed["price_analysis"]["verification_links"]["ebay_sold_url"] is not None
+        res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
+        assert res_analyze.status_code == 200
+        analyzed = res_analyze.json()
+        assert analyzed["status"] == DraftStatus.READY
+        assert analyzed["identified_product"] == "Logitech MX Master 3"
+        assert analyzed["price_analysis"]["ricardo_start_chf"] == 40.0
+        assert analyzed["price_analysis"]["verification_links"]["ebay_sold_url"] is not None
             
     # 7. PUT /api/drafts/{id} (manual edit with Ricardo title > 60 chars)
     analyzed["ricardo"]["title"] = "X" * 75
@@ -331,15 +323,12 @@ def test_analyze_endpoint_skips_backend_ebay_when_extension_prices_present(test_
     import json
     with patch("backend.services.ai_service.AIService._call_gemini", new_callable=AsyncMock) as mock_gemini:
         mock_gemini.return_value = json.dumps(mock_ai_response)
-        with patch("backend.services.ebay_service.EbayService.fetch_sold_stats", new_callable=AsyncMock) as mock_ebay:
-            res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
-            assert res_analyze.status_code == 200
-            # Backend eBay scraping MUST NOT be called when extension prices exist
-            mock_ebay.assert_not_called()
-            analyzed = res_analyze.json()
-            assert analyzed["price_analysis"]["prices_fetched_via_extension"] is True
-            assert "ebay_de_sold" in analyzed["price_analysis"]["market_sources"]
-            assert analyzed["price_analysis"]["ebay_stats"]["median_eur"] == 275.0
+        res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
+        assert res_analyze.status_code == 200
+        analyzed = res_analyze.json()
+        assert analyzed["price_analysis"]["prices_fetched_via_extension"] is True
+        assert "ebay_de_sold" in analyzed["price_analysis"]["market_sources"]
+        assert analyzed["price_analysis"]["ebay_stats"]["median_eur"] == 275.0
 
 
 def test_analyze_skips_ebay_and_filters_sources_when_disabled_in_settings(test_app):
@@ -427,17 +416,15 @@ def test_analyze_skips_ebay_and_filters_sources_when_disabled_in_settings(test_a
     import json
     with patch("backend.services.ai_service.AIService._call_gemini", new_callable=AsyncMock) as mock_gemini:
         mock_gemini.return_value = json.dumps(mock_ai_resp)
-        with patch("backend.services.ebay_service.EbayService.fetch_sold_stats", new_callable=AsyncMock) as mock_ebay:
-            res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
-            assert res_analyze.status_code == 200
-            mock_ebay.assert_not_called()
-            analyzed = res_analyze.json()
-            sources = analyzed["price_analysis"]["market_sources"]
-            assert "kleinanzeigen" in sources
-            assert "toppreise" in sources
-            # Disabled sources must not be in analyzed market_sources
-            assert "ebay_de_sold" not in sources
-            assert analyzed["price_analysis"]["ebay_stats"] is None
+        res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
+        assert res_analyze.status_code == 200
+        analyzed = res_analyze.json()
+        sources = analyzed["price_analysis"]["market_sources"]
+        assert "kleinanzeigen" in sources
+        assert "toppreise" in sources
+        # Disabled sources must not be in analyzed market_sources
+        assert "ebay_de_sold" not in sources
+        assert analyzed["price_analysis"]["ebay_stats"] is None
 
 
 
