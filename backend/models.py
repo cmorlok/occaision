@@ -97,6 +97,8 @@ class MarketSourceStats(BaseModel):
     median_chf: Optional[float] = None
     url: str = ""
     method: str = "fetch"
+    login_required: bool = False
+    error: Optional[str] = None
 
 
 class VerificationLinks(BaseModel):

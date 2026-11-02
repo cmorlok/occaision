@@ -130,6 +130,25 @@ def test_extension_price_parser_and_stats_via_node():
     if (!digitecPrices.includes(419)) {
       throw new Error('Expected 419 from JSON-LD: ' + JSON.stringify(digitecPrices));
     }
+
+    // Verify eBay login detection
+    if (!bg.isEbayLoginRequired('<html><head><title>Bitte einloggen | eBay</title></head><body><form id="signin-form"></form></body></html>', 'https://signin.ebay.de/ws/eBayISAPI.dll?SignIn')) {
+      throw new Error('Expected isEbayLoginRequired to detect signin page');
+    }
+    if (bg.isEbayLoginRequired(ebayHtml, 'https://www.ebay.de/sch/i.html?_nkw=HP')) {
+      throw new Error('Expected isEbayLoginRequired to be false on valid search results');
+    }
+    const loginStats = bg.computeSourceStats(
+      { id: 'ebay_de_sold', label: 'eBay DE (Gebraucht & Beendet)', currency: 'EUR' },
+      [],
+      'https://www.ebay.de/test',
+      'tab',
+      0.94,
+      { login_required: true, error: 'Login auf ebay.de erforderlich' }
+    );
+    if (!loginStats.login_required || !loginStats.error) {
+      throw new Error('Expected login_required=true in stats: ' + JSON.stringify(loginStats));
+    }
     """
     res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
     assert res.returncode == 0, f"Node test failed: {res.stderr}"

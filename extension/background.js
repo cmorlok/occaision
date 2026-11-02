@@ -119,6 +119,32 @@ function extractJsonLdPrices(html) {
   return prices;
 }
 
+function isEbayLoginRequired(html, finalUrl = "") {
+  const u = (finalUrl || "").toLowerCase();
+  if (
+    u.includes("signin.ebay.") ||
+    u.includes("/signin") ||
+    u.includes("ebayisapi.dll?signin")
+  ) {
+    return true;
+  }
+  if (!html || typeof html !== "string") return false;
+  const lower = html.toLowerCase();
+  if (
+    lower.includes('id="signin-form"') ||
+    lower.includes("id='signin-form'") ||
+    lower.includes('name="signinform"') ||
+    lower.includes('id="userid"') ||
+    lower.includes("signin-intro") ||
+    lower.includes("bitte einloggen") ||
+    lower.includes("melden sie sich an, um") ||
+    /<title[^>]*>[^<]*(?:einloggen|anmelden|sign in|sicherheitsma)/i.test(html)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function extractPricesFromHtml(sourceId, html) {
   if (!html || typeof html !== "string") return [];
 
@@ -201,7 +227,14 @@ function extractPricesFromHtml(sourceId, html) {
   return prices.slice(0, 30);
 }
 
-function computeSourceStats(sourceConfig, rawPrices, url, method, eurToChfRate = 0.94) {
+function computeSourceStats(
+  sourceConfig,
+  rawPrices,
+  url,
+  method,
+  eurToChfRate = 0.94,
+  extra = {}
+) {
   const valid = (rawPrices || []).filter(p => typeof p === "number" && !isNaN(p) && p > 0);
   if (valid.length === 0) {
     return {
@@ -215,6 +248,8 @@ function computeSourceStats(sourceConfig, rawPrices, url, method, eurToChfRate =
       median_chf: null,
       url: url,
       method: method,
+      login_required: Boolean(extra.login_required),
+      error: extra.error || null,
     };
   }
 
@@ -251,12 +286,14 @@ function computeSourceStats(sourceConfig, rawPrices, url, method, eurToChfRate =
     median_chf: medianChf,
     url: url,
     method: method,
+    login_required: false,
+    error: null,
   };
 }
 
 async function scrapeViaBackgroundTab(url, sourceId) {
   if (!browserApi || !browserApi.tabs || !browserApi.scripting) {
-    return [];
+    return { prices: [], loginRequired: false };
   }
   let tab = null;
   try {
@@ -283,6 +320,7 @@ async function scrapeViaBackgroundTab(url, sourceId) {
       target: { tabId: tab.id },
       func: () => {
         const html = document.documentElement ? document.documentElement.outerHTML : "";
+        const currentUrl = location.href || "";
         const priceNodes = Array.from(
           document.querySelectorAll(
             '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="price" i], [data-testid*="price" i]'
@@ -291,20 +329,32 @@ async function scrapeViaBackgroundTab(url, sourceId) {
           .slice(0, 40)
           .map(el => (el.textContent || "").trim())
           .filter(Boolean);
-        return { html, priceNodes };
+        return { html, currentUrl, priceNodes };
       },
     });
 
     if (results && results[0] && results[0].result) {
-      const { html, priceNodes } = results[0].result;
+      const { html, currentUrl, priceNodes } = results[0].result;
+      if (sourceId === "ebay_de_sold" && isEbayLoginRequired(html, currentUrl)) {
+        return { prices: [], loginRequired: true };
+      }
       const extracted = extractPricesFromHtml(sourceId, html);
-      if (extracted.length > 0) return extracted;
+      if (extracted.length > 0) {
+        return { prices: extracted, loginRequired: false };
+      }
       const domPrices = [];
       for (const txt of priceNodes || []) {
         const p = parsePriceText(txt);
         if (p !== null) domPrices.push(p);
       }
-      return domPrices.slice(0, 30);
+      if (
+        sourceId === "ebay_de_sold" &&
+        domPrices.length === 0 &&
+        html.includes("signin.ebay.de")
+      ) {
+        return { prices: [], loginRequired: true };
+      }
+      return { prices: domPrices.slice(0, 30), loginRequired: false };
     }
   } catch (err) {
     console.warn(`[Seller Assistant] Tab fallback failed for ${sourceId}:`, err);
@@ -315,13 +365,14 @@ async function scrapeViaBackgroundTab(url, sourceId) {
       } catch (_) {}
     }
   }
-  return [];
+  return { prices: [], loginRequired: false };
 }
 
 async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
   const url = sourceConfig.url;
   let prices = [];
   let method = "fetch";
+  let loginRequired = false;
 
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
@@ -339,10 +390,17 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
       });
       if (resp.ok) {
         const html = await resp.text();
-        prices = extractPricesFromHtml(sourceConfig.id, html);
-        console.log(
-          `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
-        );
+        if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
+          loginRequired = true;
+          console.warn(
+            `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
+          );
+        } else {
+          prices = extractPricesFromHtml(sourceConfig.id, html);
+          console.log(
+            `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
+          );
+        }
       } else {
         console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
       }
@@ -357,13 +415,27 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
   if (prices.length === 0) {
     method = "tab";
     console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
-    prices = await scrapeViaBackgroundTab(url, sourceConfig.id);
-    console.log(`[Seller Assistant] [${sourceConfig.id}] Hintergrund-Tab Ergebnis -> ${prices.length} Preise extrahiert`);
+    const tabRes = await scrapeViaBackgroundTab(url, sourceConfig.id);
+    prices = tabRes.prices || [];
+    if (tabRes.loginRequired) {
+      loginRequired = true;
+    }
+    console.log(`[Seller Assistant] [${sourceConfig.id}] Hintergrund-Tab Ergebnis -> ${prices.length} Preise extrahiert (loginRequired=${loginRequired})`);
   }
 
-  const stats = computeSourceStats(sourceConfig, prices, url, method, eurToChfRate);
+  const extra = {};
+  if (prices.length === 0 && loginRequired) {
+    extra.login_required = true;
+    extra.error = "Login auf ebay.de erforderlich (bitte in Firefox auf ebay.de einloggen)";
+    console.warn(
+      `⚠️ [Seller Assistant] [${sourceConfig.id}] eBay erfordert einen Login für verkaufte Artikel! Bitte in Firefox auf https://www.ebay.de einloggen.`
+    );
+  }
+
+  const stats = computeSourceStats(sourceConfig, prices, url, method, eurToChfRate, extra);
   console.log(
-    `[Seller Assistant] [${sourceConfig.id}] Fertig (${method}): ${stats.sample_count} Treffer, Median=${stats.median_price} ${stats.currency}`
+    `[Seller Assistant] [${sourceConfig.id}] Fertig (${method}): ${stats.sample_count} Treffer, Median=${stats.median_price} ${stats.currency}` +
+      (stats.login_required ? " [LOGIN ERFORDERLICH]" : "")
   );
   return stats;
 }
@@ -519,6 +591,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     buildVerificationLinks,
     parsePriceText,
+    isEbayLoginRequired,
     extractPricesFromHtml,
     computeSourceStats,
     scrapeSourceHybrid,

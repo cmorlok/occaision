@@ -328,6 +328,13 @@ function populateForm() {
   function renderSourceBox(srcKey, medianEl, countEl, fallbackStats) {
     if (!medianEl || !countEl) return;
     const src = ms[srcKey];
+    medianEl.style.color = "";
+    if (src && src.login_required) {
+      medianEl.textContent = "🔒 Login nötig";
+      medianEl.style.color = "var(--danger, #dc2626)";
+      countEl.innerHTML = `<a href="https://signin.ebay.de" target="_blank" rel="noopener" style="color: var(--danger, #dc2626); text-decoration: underline;">Bitte in Firefox auf ebay.de einloggen ↗</a>`;
+      return;
+    }
     if (src && src.sample_count > 0 && src.median_price !== null && src.median_price !== undefined) {
       const unit = src.currency === "CHF" ? "CHF" : "€";
       const chfHint = src.currency !== "CHF" && src.median_chf ? ` (~${src.median_chf} CHF)` : "";
@@ -337,6 +344,9 @@ function populateForm() {
     } else if (fallbackStats && fallbackStats.median_eur) {
       medianEl.textContent = `${fallbackStats.median_eur} € (~${fallbackStats.median_chf} CHF)`;
       countEl.textContent = `${fallbackStats.sample_count} verkaufte Artikel`;
+    } else if (src && src.error) {
+      medianEl.textContent = "⚠️ Fehler";
+      countEl.textContent = src.error;
     } else {
       medianEl.textContent = "-";
       countEl.textContent = "Keine Daten";
@@ -353,9 +363,18 @@ function populateForm() {
   if (extensionScrapeStatus) {
     if (pa.prices_fetched_via_extension) {
       const totalHits = Object.values(ms).reduce((acc, s) => acc + (s.sample_count || 0), 0);
-      extensionScrapeStatus.textContent = `✓ Extension-Preise aktiv (${totalHits} Treffer über ${Object.keys(ms).length} Quellen) – wird bei KI-Analyse direkt übergeben.`;
+      const ebayLoginNeeded = ms.ebay_de_sold && ms.ebay_de_sold.login_required;
+      if (ebayLoginNeeded) {
+        extensionScrapeStatus.innerHTML =
+          `⚠️ <strong>eBay DE erfordert einen Login für verkaufte Artikel!</strong> Bitte in Firefox auf <a href="https://signin.ebay.de" target="_blank" rel="noopener">ebay.de einloggen</a> und die Preisrecherche erneut starten. (Übrige Quellen: ${totalHits} Treffer)`;
+        extensionScrapeStatus.style.color = "var(--danger, #dc2626)";
+      } else {
+        extensionScrapeStatus.textContent = `✓ Extension-Preise aktiv (${totalHits} Treffer über ${Object.keys(ms).length} Quellen) – wird bei KI-Analyse direkt übergeben.`;
+        extensionScrapeStatus.style.color = "";
+      }
     } else {
       extensionScrapeStatus.textContent = "";
+      extensionScrapeStatus.style.color = "";
     }
   }
 
