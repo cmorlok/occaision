@@ -24,7 +24,7 @@ class EbayService:
     def build_verification_links(self, query: str) -> VerificationLinks:
         q = urllib.parse.quote_plus(query.strip())
         return VerificationLinks(
-            ebay_sold_url=f"https://www.ebay.de/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1",
+            ebay_sold_url=f"https://www.ebay.de/sch/i.html?_nkw={q}&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000",
             kleinanzeigen_search_url=f"https://www.kleinanzeigen.de/s-{q}/k0",
             idealo_url=f"https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q={q}",
             ricardo_search_url=f"https://www.ricardo.ch/de/s/{q}",

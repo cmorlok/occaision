@@ -271,8 +271,8 @@ class AIService:
             {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
         ]
 
-    def get_generate_config(self) -> types.GenerateContentConfig:
-        if self.enable_search_grounding:
+    def get_generate_config(self, force_disable_grounding: bool = False) -> types.GenerateContentConfig:
+        if self.enable_search_grounding and not force_disable_grounding:
             # Note: Do NOT set response_mime_type="application/json" when using google_search tool
             return types.GenerateContentConfig(
                 system_instruction=SYSTEM_INSTRUCTION,
@@ -301,11 +301,63 @@ class AIService:
         image_paths: List[Path],
         ebay_stats: Optional[EbaySoldStats] = None,
     ) -> Draft:
-        user_prompt_parts = [
-            f"Benutzernotizen zum Artikel: {draft.user_notes or 'Keine Notizen'}\n"
-        ]
+        user_prompt_parts = []
+        if draft.identified_product:
+            user_prompt_parts.append(
+                f"Produktname / Modell (vom Benutzer angegeben): {draft.identified_product}\n"
+            )
+        user_prompt_parts.append(
+            f"Benutzernotizen / Kurzbeschreibung zum Artikel: {draft.user_notes or 'Keine Notizen'}\n"
+        )
 
-        if ebay_stats and ebay_stats.sample_count > 0:
+        existing_pa = draft.price_analysis
+        market_sources = (
+            dict(existing_pa.market_sources)
+            if existing_pa and existing_pa.market_sources
+            else {}
+        )
+        has_extension_prices = bool(
+            (existing_pa and existing_pa.prices_fetched_via_extension)
+            or any(ms.sample_count > 0 for ms in market_sources.values())
+        )
+
+        if has_extension_prices and market_sources:
+            logger.info(
+                f"[AIService] Nutze {len(market_sources)} über die Firefox-Extension ermittelte Preisquellen "
+                "(Google Search Grounding wird für diesen Aufruf deaktiviert)."
+            )
+            source_lines = [
+                "Über die Firefox-Extension live ermittelte Marktpreise (bitte direkt für die Preisfindung nutzen):"
+            ]
+            for src_id, ms in market_sources.items():
+                if ms.sample_count > 0 and ms.median_price is not None:
+                    chf_info = (
+                        f" (~{ms.median_chf} CHF)"
+                        if ms.currency != "CHF" and ms.median_chf is not None
+                        else ""
+                    )
+                    source_lines.append(
+                        f"- {ms.label} ({src_id}): Stichprobe={ms.sample_count}, "
+                        f"Median={ms.median_price} {ms.currency}{chf_info}, "
+                        f"Spanne={ms.min_price} - {ms.max_price} {ms.currency}"
+                    )
+                else:
+                    source_lines.append(f"- {ms.label} ({src_id}): Keine Treffer (0)")
+            user_prompt_parts.append("\n".join(source_lines) + "\n")
+
+            # Sync ebay_stats from extension ebay_de_sold if not explicitly provided
+            if ebay_stats is None and "ebay_de_sold" in market_sources:
+                eb_ms = market_sources["ebay_de_sold"]
+                ebay_stats = EbaySoldStats(
+                    query=draft.identified_product or draft.user_notes or "",
+                    sample_count=eb_ms.sample_count,
+                    min_eur=eb_ms.min_price,
+                    max_eur=eb_ms.max_price,
+                    median_eur=eb_ms.median_price,
+                    median_chf=eb_ms.median_chf,
+                    exchange_rate=self.eur_to_chf,
+                )
+        elif ebay_stats and ebay_stats.sample_count > 0:
             logger.debug(
                 f"[AIService] Übernehme eBay-Statistik in den Prompt: "
                 f"{ebay_stats.sample_count} Treffer, Median {ebay_stats.median_eur} EUR ({ebay_stats.median_chf} CHF)"
@@ -342,16 +394,18 @@ class AIService:
                 except Exception as e:
                     logger.warning(f"Failed to read image {p}: {e}")
 
-        config = self.get_generate_config()
+        effective_grounding = self.enable_search_grounding and not has_extension_prices
+        config = self.get_generate_config(force_disable_grounding=has_extension_prices)
 
         logger.info(
-            f"[AIService] Sende Anfrage an Gemini (Modell: {self.model_name}, Bilder: {len(valid_images)}, Search Grounding: {self.enable_search_grounding})..."
+            f"[AIService] Sende Anfrage an Gemini (Modell: {self.model_name}, Bilder: {len(valid_images)}, "
+            f"Search Grounding: {effective_grounding}, Extension-Preise: {has_extension_prices})..."
         )
 
         logger.debug("=" * 70)
         logger.debug("--- [GEMINI AI PROMPT DEBUG START] ---")
         logger.debug(f"Modell: {self.model_name}")
-        logger.debug(f"Search Grounding aktiv: {self.enable_search_grounding}")
+        logger.debug(f"Search Grounding aktiv: {effective_grounding} (Extension-Preise: {has_extension_prices})")
         logger.debug(f"Bilder ({len(valid_images)}): {', '.join(valid_images) if valid_images else 'keine'}")
         logger.debug(f"\n[SYSTEM INSTRUCTION]:\n{SYSTEM_INSTRUCTION.strip()}")
         logger.debug(f"\n[USER PROMPT]:\n{user_prompt_text.strip()}")
@@ -370,17 +424,35 @@ class AIService:
         payload = post_process_ai_output(raw_payload)
 
         # Update draft
-        product_name = payload.get("identified_product", draft.user_notes or "Artikel")
+        product_name = (
+            payload.get("identified_product")
+            or draft.identified_product
+            or draft.user_notes
+            or "Artikel"
+        )
         draft.identified_product = product_name
         draft.missing_photo_hints = payload.get("missing_photo_hints", [])
 
         # Build verification links
         v_links = self.ebay_service.build_verification_links(product_name)
 
+        ch_new_fallback = existing_pa.ch_new_price_chf if existing_pa else None
+        if ch_new_fallback is None and market_sources:
+            for k in ("toppreise", "digitec"):
+                if k in market_sources and market_sources[k].median_price:
+                    ch_new_fallback = market_sources[k].median_price
+                    break
+
+        de_new_fallback = existing_pa.de_new_price_eur if existing_pa else None
+        if de_new_fallback is None and "idealo" in market_sources and market_sources["idealo"].median_price:
+            de_new_fallback = market_sources["idealo"].median_price
+
         draft.price_analysis = PriceAnalysis(
-            ebay_stats=ebay_stats,
-            ch_new_price_chf=payload.get("ch_new_price_chf"),
-            de_new_price_eur=payload.get("de_new_price_eur"),
+            ebay_stats=ebay_stats or (existing_pa.ebay_stats if existing_pa else None),
+            market_sources=market_sources,
+            prices_fetched_via_extension=has_extension_prices,
+            ch_new_price_chf=payload.get("ch_new_price_chf") or ch_new_fallback,
+            de_new_price_eur=payload.get("de_new_price_eur") or de_new_fallback,
             ricardo_start_chf=float(payload.get("ricardo_start_chf", 1.0)),
             ricardo_buynow_chf=float(payload.get("ricardo_buynow_chf", 10.0)),
             tutti_vhb_chf=float(payload.get("tutti_vhb_chf", 10.0)),

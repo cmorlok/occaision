@@ -10,6 +10,7 @@ from backend.models import (
     DraftImage,
     EbaySoldStats,
     ImageVariantMode,
+    MarketSourceStats,
     OfferType,
     PriceAnalysis,
     RicardoListing,
@@ -94,6 +95,7 @@ def test_verification_links_generation():
     assert "https://www.ebay.de/sch/i.html" in links.ebay_sold_url
     assert "LH_Sold=1" in links.ebay_sold_url
     assert "LH_Complete=1" in links.ebay_sold_url
+    assert "LH_ItemCondition=3000" in links.ebay_sold_url
     assert "Sony" in links.ebay_sold_url
     
     assert "kleinanzeigen.de" in links.kleinanzeigen_search_url
@@ -343,4 +345,147 @@ async def test_ebay_service_debug_logging(caplog):
     assert any("EBAY SOLD PARSER DEBUG" in m for m in messages)
     assert any("Sony WH-1000XM4" in m for m in messages)
     assert any("Anti-Bot" in m or "challenge" in m.lower() for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_extension_scraped_prices_injected_into_ai_and_grounding_disabled(temp_data_dir: Path):
+    storage = StorageService(data_dir=temp_data_dir)
+    draft = storage.create_draft(
+        user_notes="Wenig gebraucht, inklusive OVP und Original-Toner",
+        identified_product="HP Color LaserJet Pro MFP 4302fdw",
+    )
+    draft.price_analysis.prices_fetched_via_extension = True
+    draft.price_analysis.market_sources = {
+        "ebay_de_sold": MarketSourceStats(
+            source_id="ebay_de_sold",
+            label="eBay DE (Gebraucht & Beendet)",
+            currency="EUR",
+            sample_count=5,
+            min_price=240.0,
+            max_price=320.0,
+            median_price=280.0,
+            median_chf=263.2,
+            method="fetch",
+        ),
+        "kleinanzeigen": MarketSourceStats(
+            source_id="kleinanzeigen",
+            label="Kleinanzeigen.de Suche",
+            currency="EUR",
+            sample_count=8,
+            min_price=250.0,
+            max_price=350.0,
+            median_price=295.0,
+            median_chf=277.3,
+            method="fetch",
+        ),
+        "idealo": MarketSourceStats(
+            source_id="idealo",
+            label="Idealo.de Neupreis",
+            currency="EUR",
+            sample_count=4,
+            min_price=429.0,
+            max_price=489.0,
+            median_price=449.0,
+            median_chf=422.06,
+            method="tab",
+        ),
+        "ricardo": MarketSourceStats(
+            source_id="ricardo",
+            label="Ricardo.ch Suche",
+            currency="CHF",
+            sample_count=3,
+            min_price=260.0,
+            max_price=330.0,
+            median_price=290.0,
+            median_chf=290.0,
+            method="tab",
+        ),
+        "toppreise": MarketSourceStats(
+            source_id="toppreise",
+            label="Toppreise.ch Neupreis",
+            currency="CHF",
+            sample_count=5,
+            min_price=399.0,
+            max_price=450.0,
+            median_price=415.0,
+            median_chf=415.0,
+            method="fetch",
+        ),
+        "digitec": MarketSourceStats(
+            source_id="digitec",
+            label="Digitec/Galaxus Suche",
+            currency="CHF",
+            sample_count=2,
+            min_price=419.0,
+            max_price=429.0,
+            median_price=424.0,
+            median_chf=424.0,
+            method="tab",
+        ),
+    }
+
+    ai_service = AIService(
+        api_key="test_key",
+        model_name="gemini-3.8-flash",
+        enable_search_grounding=True,  # Enabled globally, but must be auto-disabled when Extension prices exist
+    )
+
+    mock_resp = {
+        "identified_product": "HP Color LaserJet Pro MFP 4302fdw",
+        "missing_photo_hints": [],
+        "ch_new_price_chf": 415.0,
+        "de_new_price_eur": 449.0,
+        "ricardo_start_chf": 220.0,
+        "ricardo_buynow_chf": 279.0,
+        "tutti_vhb_chf": 290.0,
+        "ebay_start_eur": 210.0,
+        "ebay_buynow_eur": 275.0,
+        "kleinanzeigen_vb_eur": 290.0,
+        "reasoning": "Basierend auf den 6 übermittelten Extension-Preisquellen berechnet.",
+        "ricardo_title": "HP Color LaserJet Pro MFP 4302fdw Farblaser Top",
+        "ricardo_description": "Top Drucker.",
+        "ricardo_condition": "gebraucht",
+        "tutti_title": "HP Color LaserJet Pro MFP 4302fdw Multifunktionsdrucker",
+        "tutti_category": "Büro & Gewerbe > Drucker",
+        "tutti_description": "Verkaufe HP Farblaserdrucker.",
+        "tutti_condition": "gebraucht",
+        "ebay_de_title": "HP Color LaserJet Pro MFP 4302fdw Farblaserdrucker WLAN Duplex OVP",
+        "ebay_de_category": "Computer, Tablets & Netzwerk > Drucker",
+        "ebay_de_description": "Gebrauchter HP Farblaserdrucker in sehr gutem Zustand.",
+        "ebay_de_condition": "gebraucht",
+        "kleinanzeigen_title": "HP Color LaserJet Pro MFP 4302fdw Farblaser WLAN Top",
+        "kleinanzeigen_category": "PC-Zubehör & Software > Drucker & Scanner",
+        "kleinanzeigen_description": "Verkaufe unseren HP Color LaserJet Pro MFP 4302fdw.",
+        "kleinanzeigen_condition": "gebraucht",
+    }
+
+    with patch.object(ai_service, "_call_gemini", new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = json.dumps(mock_resp)
+        result_draft = await ai_service.analyze_draft(draft=draft, image_paths=[])
+
+        assert mock_call.called
+        call_kwargs = mock_call.call_args.kwargs
+        passed_contents = call_kwargs["contents"]
+        passed_config = call_kwargs["config"]
+
+        # 1. Google Search Grounding must be disabled when extension prices are provided
+        assert getattr(passed_config, "tools", None) is None
+        assert getattr(passed_config, "response_mime_type", None) == "application/json"
+
+        # 2. All 6 price sources and split inputs must be included in the prompt text
+        prompt_str = passed_contents[0]
+        assert "HP Color LaserJet Pro MFP 4302fdw" in prompt_str
+        assert "Wenig gebraucht, inklusive OVP" in prompt_str
+        assert "280.0" in prompt_str   # eBay DE sold median
+        assert "295.0" in prompt_str   # Kleinanzeigen median
+        assert "449.0" in prompt_str   # Idealo median
+        assert "290.0" in prompt_str   # Ricardo median
+        assert "415.0" in prompt_str   # Toppreise median
+        assert "424.0" in prompt_str   # Digitec median
+
+        # 3. Draft must preserve extension market_sources and flag
+        assert result_draft.price_analysis.prices_fetched_via_extension is True
+        assert len(result_draft.price_analysis.market_sources) == 6
+        assert result_draft.price_analysis.market_sources["idealo"].median_price == 449.0
+
 
