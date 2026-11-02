@@ -30,6 +30,7 @@ def test_manifest_v3_validity():
     assert any("idealo.de" in p for p in host_perms)
     assert any("toppreise.ch" in p for p in host_perms)
     assert any("digitec.ch" in p for p in host_perms)
+    assert any("galaxus.ch" in p for p in host_perms)
 
     matches = manifest["content_scripts"][0].get("matches", [])
     assert any("127.0.0.1" in m for m in matches)
@@ -40,6 +41,8 @@ def test_manifest_v3_validity():
     assert any("kleinanzeigen.de" in m for m in matches)
     assert any("idealo.de" in m for m in matches)
     assert any("toppreise.ch" in m for m in matches)
+    assert any("digitec.ch" in m for m in matches)
+    assert any("galaxus.ch" in m for m in matches)
     
     # Assert all referenced files exist
     assert (Path("extension") / "background.js").exists()
@@ -203,6 +206,29 @@ def test_extension_price_parser_and_stats_via_node():
       if (parsed !== 2173.45 && parsed !== 2173) {
         throw new Error('Swiss price parsing failed for ' + sc + ', got: ' + parsed);
       }
+    }
+
+    // Test Galaxus / Digitec extraction for first product
+    const galaxusHtml = fs.readFileSync('temp/galaxus-HP Color LaserJet Pro MFP 4302fdw_ Suche - Galaxus.html', 'utf8');
+    const galaxusItems = bg.extractDigitecItems(galaxusHtml);
+    if (!galaxusItems || galaxusItems.length !== 1) {
+      throw new Error('Expected exactly 1 galaxus item, got: ' + JSON.stringify(galaxusItems));
+    }
+    if (galaxusItems[0].price !== 428 || !galaxusItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+      throw new Error('Unexpected galaxus item 0: ' + JSON.stringify(galaxusItems[0]));
+    }
+    const galaxusPrices = bg.extractPricesFromHtml('digitec', galaxusHtml);
+    if (galaxusPrices.length !== 1 || galaxusPrices[0] !== 428) {
+      throw new Error('Expected [428] from extractPricesFromHtml for digitec/galaxus: ' + JSON.stringify(galaxusPrices));
+    }
+
+    const digitecHtml = fs.readFileSync('temp/digitec-HP Color LaserJet Pro MFP 4302fdw_ Suche - Digitec.html', 'utf8');
+    const digitecItems = bg.extractDigitecItems(digitecHtml);
+    if (!digitecItems || digitecItems.length !== 1) {
+      throw new Error('Expected exactly 1 digitec item, got: ' + JSON.stringify(digitecItems));
+    }
+    if (digitecItems[0].price !== 428 || !digitecItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+      throw new Error('Unexpected digitec item 0: ' + JSON.stringify(digitecItems[0]));
     }
 
     const ebayHtml = `

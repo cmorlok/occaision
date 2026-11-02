@@ -48,7 +48,7 @@ def test_verification_links_generation():
     assert "https://www.toppreise.ch/produktsuche" in links.toppreise_url
     assert "Sony" in links.toppreise_url
     
-    assert "https://www.digitec.ch/de/search" in links.digitec_url
+    assert ("galaxus.ch/de/search" in links.digitec_url or "digitec.ch/de/search" in links.digitec_url)
     assert "Sony" in links.digitec_url
 
 

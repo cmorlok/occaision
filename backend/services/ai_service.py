@@ -176,7 +176,7 @@ def build_verification_links(query: str) -> VerificationLinks:
         idealo_url=f"https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q={q}",
         ricardo_search_url=f"https://www.ricardo.ch/de/s/{q}",
         toppreise_url=f"https://www.toppreise.ch/produktsuche?q={q}",
-        digitec_url=f"https://www.digitec.ch/de/search?q={q}",
+        digitec_url=f"https://www.galaxus.ch/de/search?q={q}",
     )
 
 

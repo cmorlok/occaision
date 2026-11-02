@@ -593,6 +593,26 @@ function setupDashboardBridge() {
               } catch (_) {}
             }
           }
+          if (response && response.sources && response.sources.digitec && response.sources.digitec.items) {
+            const digitecItems = response.sources.digitec.items;
+            console.group(`[Seller Assistant] [Content-Bridge] Galaxus/Digitec Neupreise (${digitecItems.length} Treffer):`);
+            digitecItems.forEach((it, idx) => {
+              console.log(`  [#${idx + 1}] ${it.price} CHF | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
+            });
+            console.groupEnd();
+            if (typeof console.table === "function") {
+              try {
+                console.table(
+                  digitecItems.map((it, idx) => ({
+                    "#": idx + 1,
+                    "Preis (CHF)": it.price,
+                    "Zustand": it.condition || "Neu",
+                    "Titel": it.title,
+                  }))
+                );
+              } catch (_) {}
+            }
+          }
           const payload = Object.assign(
             {
               type: "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT",
@@ -679,7 +699,85 @@ if (typeof browserApi !== "undefined" && browserApi.runtime && browserApi.runtim
         .map(el => (el.textContent || "").trim())
         .filter(Boolean);
 
-      sendResponse({ html, currentUrl, priceNodes, idealoCards, toppreiseCards });
+      const digitecCards = [];
+      let dgSingleTitle = "";
+      let dgSinglePrice = "";
+      const dgJsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+      for (const s of dgJsonLdScripts) {
+        try {
+          const d = JSON.parse(s.textContent || "");
+          if (d && d["@type"] === "Product") {
+            dgSingleTitle = d.name || "";
+            if (d.offers) {
+              dgSinglePrice = String(d.offers.price ?? d.offers.lowPrice ?? "");
+            }
+            break;
+          }
+        } catch (_) {}
+      }
+      if (!dgSingleTitle) {
+        const h1 = document.querySelector("h1");
+        if (h1 && location.href.includes("/product/")) {
+          dgSingleTitle = h1.textContent.trim();
+        }
+      }
+      if (!dgSinglePrice && dgSingleTitle) {
+        const pEl = document.querySelector('[data-test*="price" i], strong[class*="price" i], span[class*="price" i]');
+        if (pEl) dgSinglePrice = pEl.textContent.trim();
+      }
+      if (dgSingleTitle && dgSinglePrice) {
+        digitecCards.push({
+          title: dgSingleTitle,
+          rawPrice: dgSinglePrice,
+        });
+      } else {
+        const firstArt = document.querySelector("article");
+        if (firstArt) {
+          let title = "";
+          const titleLink = firstArt.querySelector('a[aria-label][href*="/product/"]');
+          if (titleLink && titleLink.getAttribute("aria-label")) {
+            title = titleLink.getAttribute("aria-label").trim();
+          }
+          if (!title) {
+            const img = firstArt.querySelector('img[alt*="Produktbild"]');
+            if (img && img.getAttribute("alt")) {
+              title = img.getAttribute("alt").replace(/^Produktbild\s+/i, "").trim();
+            }
+          }
+          if (!title) {
+            const p = firstArt.querySelector("p");
+            if (p) title = p.textContent.trim();
+          }
+          if (!title) title = "Galaxus Produkt";
+
+          let rawPrice = "";
+          for (const el of firstArt.querySelectorAll("span, div, p, strong")) {
+            const t = el.textContent || "";
+            if (t.includes(".–") || t.includes(".-") || t.includes("CHF")) {
+              const m = t.match(/(?:CHF|Fr\.)?\s*(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2}))/i) ||
+                        t.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--))/i);
+              if (m) {
+                rawPrice = m[1].trim();
+                break;
+              }
+            }
+          }
+          if (!rawPrice) {
+            const priceText = firstArt.textContent || "";
+            const m = priceText.match(/(?:CHF|Fr\.)[\s\S]*?(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2}))/i) ||
+                      priceText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--))/i);
+            if (m) rawPrice = m[1].trim();
+          }
+          if (rawPrice) {
+            digitecCards.push({
+              title: title.trim(),
+              rawPrice: rawPrice.trim(),
+            });
+          }
+        }
+      }
+
+      sendResponse({ html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards });
       return true;
     }
     return false;

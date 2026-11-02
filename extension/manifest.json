@@ -15,7 +15,8 @@
     "*://*.kleinanzeigen.de/*",
     "*://*.idealo.de/*",
     "*://*.toppreise.ch/*",
-    "*://*.digitec.ch/*"
+    "*://*.digitec.ch/*",
+    "*://*.galaxus.ch/*"
   ],
   "action": {
     "default_title": "Seller Assistant (Berechtigungen prüfen)"
@@ -33,7 +34,9 @@
         "*://*.ebay.de/*",
         "*://*.kleinanzeigen.de/*",
         "*://*.idealo.de/*",
-        "*://*.toppreise.ch/*"
+        "*://*.toppreise.ch/*",
+        "*://*.digitec.ch/*",
+        "*://*.galaxus.ch/*"
       ],
       "js": ["content.js"],
       "css": ["panel.css"],

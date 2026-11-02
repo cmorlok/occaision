@@ -20,6 +20,7 @@ const ALL_HOST_ORIGINS = [
   "*://*.idealo.de/*",
   "*://*.toppreise.ch/*",
   "*://*.digitec.ch/*",
+  "*://*.galaxus.ch/*",
 ];
 
 // Firefox MV3 Host Permissions prompt on action button click
@@ -56,7 +57,7 @@ function buildVerificationLinks(query) {
     idealo_url: `https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q=${q}`,
     ricardo_search_url: `https://www.ricardo.ch/de/s/${q}`,
     toppreise_url: `https://www.toppreise.ch/produktsuche?q=${q}`,
-    digitec_url: `https://www.digitec.ch/de/search?q=${q}`,
+    digitec_url: `https://www.galaxus.ch/de/search?q=${q}`,
   };
 }
 
@@ -670,6 +671,129 @@ function logToppreiseExtractedItems(items) {
   }
 }
 
+function extractDigitecItems(html, priceNodes = [], digitecCards = []) {
+  const items = [];
+
+  // 1. Live DOM-extracted first card from browser tab
+  if (Array.isArray(digitecCards) && digitecCards.length > 0) {
+    const first = digitecCards[0];
+    const p = parsePriceText(first.rawPrice);
+    if (p !== null) {
+      items.push({
+        title: (first.title || "Galaxus Produkt").trim(),
+        condition: "Neu (Bestpreis)",
+        price: p,
+        rawPrice: first.rawPrice,
+      });
+      return items;
+    }
+  }
+
+  if (html && typeof html === "string") {
+    // 2. Check JSON-LD for single product page (@type: Product)
+    const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+    let match;
+    while ((match = scriptRegex.exec(html)) !== null) {
+      try {
+        const data = JSON.parse(match[1].trim());
+        if (data && data["@type"] === "Product") {
+          let lowPrice = null;
+          if (data.offers) {
+            const offers = data.offers;
+            if (typeof offers.price !== "undefined") lowPrice = offers.price;
+            else if (typeof offers.lowPrice !== "undefined") lowPrice = offers.lowPrice;
+            else if (Array.isArray(offers) && offers[0] && offers[0].price) lowPrice = offers[0].price;
+          }
+          const p = parsePriceText(String(lowPrice || ""));
+          if (p !== null) {
+            items.push({
+              title: String(data.name || "Galaxus Produkt").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+              condition: "Neu (Bestpreis)",
+              price: p,
+              rawPrice: `CHF ${p}`,
+            });
+            return items;
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Search Results: Find first <article>
+    const articleMatch = html.match(/<article[\s\S]*?<\/article>/i);
+    if (articleMatch) {
+      const artHtml = articleMatch[0];
+
+      // Extract title: from a[aria-label] with /product/ href, alt="Produktbild...", or p strong+span
+      let title = "";
+      const ariaMatch = artHtml.match(/<a[^>]*aria-label=["']([^"']+)["'][^>]*href=["'][^"']*\/product\/[^"']*["']/i) ||
+                        artHtml.match(/<a[^>]*href=["'][^"']*\/product\/[^"']*["'][^>]*aria-label=["']([^"']+)["']/i);
+      if (ariaMatch) {
+        title = ariaMatch[1].trim();
+      } else {
+        const altMatch = artHtml.match(/alt=["']Produktbild\s+([^"']+)["']/i);
+        if (altMatch) {
+          title = altMatch[1].trim();
+        }
+      }
+
+      // Extract price from article
+      const priceMatch = artHtml.match(/(?:CHF|Fr\.)[\s\S]*?(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2}))/i) ||
+                         artHtml.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--))/i);
+      if (priceMatch) {
+        const p = parsePriceText(priceMatch[1]);
+        if (p !== null) {
+          items.push({
+            title: title || "Galaxus Produkt",
+            condition: "Neu (Bestpreis)",
+            price: p,
+            rawPrice: priceMatch[1].trim(),
+          });
+          return items;
+        }
+      }
+    }
+  }
+
+  // 4. Fallback: priceNodes (first price only)
+  if (Array.isArray(priceNodes) && priceNodes.length > 0) {
+    const val = parsePriceText(priceNodes[0]);
+    if (val !== null) {
+      items.push({
+        title: "Galaxus Produkt",
+        condition: "Neu (Bestpreis)",
+        price: val,
+        rawPrice: priceNodes[0],
+      });
+      return items;
+    }
+  }
+
+  return [];
+}
+
+function logDigitecExtractedItems(items) {
+  if (!items || items.length === 0) {
+    console.log("[Seller Assistant] [digitec] Kein Galaxus/Digitec-Neupreis extrahiert (0 Treffer).");
+    return;
+  }
+  const top = items[0];
+  console.group(`[Seller Assistant] [digitec] Galaxus/Digitec Neupreis (Bestpreis des ersten Produkts):`);
+  console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
+  console.groupEnd();
+
+  if (typeof console.table === "function") {
+    try {
+      console.table([
+        {
+          "Preis (CHF)": top.price,
+          "Zustand": top.condition || "Neu",
+          "Produktname": top.title,
+        }
+      ]);
+    } catch (_) {}
+  }
+}
+
 function extractPricesFromHtml(sourceId, html) {
   if (!html || typeof html !== "string") return [];
 
@@ -702,6 +826,11 @@ function extractPricesFromHtml(sourceId, html) {
 
   if (sourceId === "toppreise") {
     const items = extractToppreiseItems(html);
+    return items.map(it => it.price);
+  }
+
+  if (sourceId === "digitec") {
+    const items = extractDigitecItems(html);
     return items.map(it => it.price);
   }
 
@@ -828,9 +957,8 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
       api.tabs.onUpdated.addListener(listener);
     });
 
-    // Wait 1200ms (or 2000ms for Idealo SPA) for client-side hydration
-    const waitTime = sourceId === "idealo" ? 2000 : 1200;
-    await new Promise(r => setTimeout(r, waitTime));
+    // Wait standard 1200ms for DOM ready / client hydration
+    await new Promise(r => setTimeout(r, 1200));
 
     let pageData = null;
     try {
@@ -904,9 +1032,89 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
             .slice(0, 40)
             .map(el => (el.textContent || "").trim())
             .filter(Boolean);
-          return { html, currentUrl, priceNodes, idealoCards, toppreiseCards };
+
+          const digitecCards = [];
+          let dgSingleTitle = "";
+          let dgSinglePrice = "";
+          const dgJsonLdScripts = document.querySelectorAll('script[type="application/ld+json"]');
+          for (const s of dgJsonLdScripts) {
+            try {
+              const d = JSON.parse(s.textContent || "");
+              if (d && d["@type"] === "Product") {
+                dgSingleTitle = d.name || "";
+                if (d.offers) {
+                  dgSinglePrice = String(d.offers.price ?? d.offers.lowPrice ?? "");
+                }
+                break;
+              }
+            } catch (_) {}
+          }
+          if (!dgSingleTitle) {
+            const h1 = document.querySelector("h1");
+            if (h1 && location.href.includes("/product/")) {
+              dgSingleTitle = h1.textContent.trim();
+            }
+          }
+          if (!dgSinglePrice && dgSingleTitle) {
+            const pEl = document.querySelector('[data-test*="price" i], strong[class*="price" i], span[class*="price" i]');
+            if (pEl) dgSinglePrice = pEl.textContent.trim();
+          }
+          if (dgSingleTitle && dgSinglePrice) {
+            digitecCards.push({
+              title: dgSingleTitle,
+              rawPrice: dgSinglePrice,
+            });
+          } else {
+            const firstArt = document.querySelector("article");
+            if (firstArt) {
+              let title = "";
+              const titleLink = firstArt.querySelector('a[aria-label][href*="/product/"]');
+              if (titleLink && titleLink.getAttribute("aria-label")) {
+                title = titleLink.getAttribute("aria-label").trim();
+              }
+              if (!title) {
+                const img = firstArt.querySelector('img[alt*="Produktbild"]');
+                if (img && img.getAttribute("alt")) {
+                  title = img.getAttribute("alt").replace(/^Produktbild\s+/i, "").trim();
+                }
+              }
+              if (!title) {
+                const p = firstArt.querySelector("p");
+                if (p) title = p.textContent.trim();
+              }
+              if (!title) title = "Galaxus Produkt";
+
+              let rawPrice = "";
+              for (const el of firstArt.querySelectorAll("span, div, p, strong")) {
+                const t = el.textContent || "";
+                if (t.includes(".–") || t.includes(".-") || t.includes("CHF")) {
+                  const m = t.match(/(?:CHF|Fr\.)?\s*(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2}))/i) ||
+                            t.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--))/i);
+                  if (m) {
+                    rawPrice = m[1].trim();
+                    break;
+                  }
+                }
+              }
+              if (!rawPrice) {
+                const priceText = firstArt.textContent || "";
+                const m = priceText.match(/(?:CHF|Fr\.)[\s\S]*?(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--|,\d{2}|\.\d{2}))/i) ||
+                          priceText.match(/(\d{1,5}(?:['’.,\s\u00a0\u202f]\d{2,3})*(?:\.–|\.-|--))/i);
+                if (m) rawPrice = m[1].trim();
+              }
+              if (rawPrice) {
+                digitecCards.push({
+                  title: title.trim(),
+                  rawPrice: rawPrice.trim(),
+                });
+              }
+            }
+          }
+
+          return { html, currentUrl, priceNodes, idealoCards, toppreiseCards, digitecCards };
         },
       });
+
       if (results && results[0] && results[0].result) {
         pageData = results[0].result;
       }
@@ -974,6 +1182,25 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
         }
         return { prices: [], toppreiseItems: [], loginRequired: false };
       }
+      if (sourceId === "digitec") {
+        const digitecItems = extractDigitecItems(html, priceNodes, pageData.digitecCards || []);
+        if (digitecItems.length > 0) {
+          return { prices: [digitecItems[0].price], digitecItems, loginRequired: false };
+        }
+        if (priceNodes && priceNodes.length > 0) {
+          const p = parsePriceText(priceNodes[0]);
+          if (p !== null) {
+            const fallbackItem = [{
+              title: "Galaxus Top-Ergebnis",
+              condition: "Neu (Bestpreis)",
+              price: p,
+              rawPrice: priceNodes[0],
+            }];
+            return { prices: [p], digitecItems: fallbackItem, loginRequired: false };
+          }
+        }
+        return { prices: [], digitecItems: [], loginRequired: false };
+      }
       const extracted = extractPricesFromHtml(sourceId, html);
       if (extracted.length > 0) {
         return { prices: extracted, loginRequired: false };
@@ -1015,8 +1242,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let kleinanzeigenItems = [];
   let idealoItems = [];
   let toppreiseItems = [];
+  let digitecItems = [];
 
-  const TAB_ONLY_SOURCES = new Set(["idealo"]);
+  const TAB_ONLY_SOURCES = new Set(["idealo", "digitec"]);
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
   // Step 1: Fast background fetch() with 5s timeout (skipped for client-rendered SPA sources like Idealo)
@@ -1087,6 +1315,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     if (tabRes.toppreiseItems && tabRes.toppreiseItems.length > 0) {
       toppreiseItems = tabRes.toppreiseItems;
     }
+    if (tabRes.digitecItems && tabRes.digitecItems.length > 0) {
+      digitecItems = tabRes.digitecItems;
+    }
     if (tabRes.loginRequired) {
       loginRequired = true;
     }
@@ -1136,6 +1367,13 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
       logToppreiseExtractedItems(toppreiseItems);
       // For Toppreise: The first product in the list or product page is the primary product's best new price!
       prices = [toppreiseItems[0].price];
+    }
+  } else if (sourceConfig.id === "digitec") {
+    if (digitecItems && digitecItems.length > 0) {
+      extra.items = digitecItems;
+      logDigitecExtractedItems(digitecItems);
+      // For Galaxus/Digitec: The first product in the list or product page is the primary product's best new price!
+      prices = [digitecItems[0].price];
     }
   }
 
@@ -1315,6 +1553,8 @@ if (typeof module !== "undefined" && module.exports) {
     logIdealoExtractedItems,
     extractToppreiseItems,
     logToppreiseExtractedItems,
+    extractDigitecItems,
+    logDigitecExtractedItems,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,
