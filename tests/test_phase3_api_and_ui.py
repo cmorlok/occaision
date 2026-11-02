@@ -180,6 +180,18 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
         "ebay-de-description",
         "kleinanzeigen-description",
         "de-shipping-preset",
+        "source-box-ebay_de_sold",
+        "source-box-kleinanzeigen",
+        "source-box-idealo",
+        "source-box-ricardo",
+        "source-box-toppreise",
+        "source-box-digitec",
+        "cfg-src-ebay_de_sold",
+        "cfg-src-kleinanzeigen",
+        "cfg-src-idealo",
+        "cfg-src-ricardo",
+        "cfg-src-toppreise",
+        "cfg-src-digitec",
     ]
     for element_id in required_ids:
         assert f'id="{element_id}"' in html or f"id='{element_id}'" in html, f"Missing #{element_id} in HTML"
@@ -327,5 +339,101 @@ def test_analyze_endpoint_skips_backend_ebay_when_extension_prices_present(test_
             assert analyzed["price_analysis"]["prices_fetched_via_extension"] is True
             assert "ebay_de_sold" in analyzed["price_analysis"]["market_sources"]
             assert analyzed["price_analysis"]["ebay_stats"]["median_eur"] == 275.0
+
+
+def test_analyze_skips_ebay_and_filters_sources_when_disabled_in_settings(test_app):
+    client = TestClient(test_app)
+
+    # 1. Update settings to disable ebay_de_sold and idealo
+    res_settings = client.get("/api/settings")
+    assert res_settings.status_code == 200
+    settings_data = res_settings.json()
+    settings_data["enabled_price_sources"] = ["kleinanzeigen", "toppreise"]
+    res_update = client.put("/api/settings", json=settings_data)
+    assert res_update.status_code == 200
+    assert res_update.json()["enabled_price_sources"] == ["kleinanzeigen", "toppreise"]
+
+    # 2. Create draft with product name and 3 extension market sources
+    res_create = client.post(
+        "/api/drafts",
+        json={"user_notes": "Test", "identified_product": "Bose QC45"}
+    )
+    assert res_create.status_code == 200
+    draft = res_create.json()
+    draft_id = draft["id"]
+
+    draft["price_analysis"]["prices_fetched_via_extension"] = True
+    draft["price_analysis"]["market_sources"] = {
+        "ebay_de_sold": {
+            "source_id": "ebay_de_sold",
+            "label": "eBay DE (Gebraucht & Beendet)",
+            "currency": "EUR",
+            "sample_count": 4,
+            "min_price": 100.0,
+            "max_price": 150.0,
+            "median_price": 120.0,
+            "median_chf": 112.8,
+            "url": "https://www.ebay.de",
+            "method": "extension",
+        },
+        "kleinanzeigen": {
+            "source_id": "kleinanzeigen",
+            "label": "Kleinanzeigen.de Suche",
+            "currency": "EUR",
+            "sample_count": 6,
+            "min_price": 110.0,
+            "max_price": 160.0,
+            "median_price": 130.0,
+            "median_chf": 122.2,
+            "url": "https://www.kleinanzeigen.de",
+            "method": "extension",
+        },
+        "toppreise": {
+            "source_id": "toppreise",
+            "label": "Toppreise.ch Neupreis",
+            "currency": "CHF",
+            "sample_count": 2,
+            "min_price": 240.0,
+            "max_price": 260.0,
+            "median_price": 250.0,
+            "median_chf": 250.0,
+            "url": "https://www.toppreise.ch",
+            "method": "tab",
+        },
+    }
+    client.put(f"/api/drafts/{draft_id}", json=draft)
+
+    mock_ai_resp = {
+        "identified_product": "Bose QC45",
+        "missing_photo_hints": [],
+        "ricardo_start_chf": 80.0,
+        "ricardo_buynow_chf": 130.0,
+        "tutti_vhb_chf": 140.0,
+        "ebay_start_eur": 75.0,
+        "ebay_buynow_eur": 125.0,
+        "kleinanzeigen_vb_eur": 135.0,
+        "reasoning": "Preise ohne eBay",
+        "ricardo_title": "Bose QC45 Kopfhörer",
+        "ricardo_description": "Top Zustand",
+        "tutti_title": "Bose QC45",
+        "tutti_category": "Audio",
+        "tutti_description": "Top Zustand",
+    }
+
+    import json
+    with patch("backend.services.ai_service.AIService._call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.return_value = json.dumps(mock_ai_resp)
+        with patch("backend.services.ebay_service.EbayService.fetch_sold_stats", new_callable=AsyncMock) as mock_ebay:
+            res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
+            assert res_analyze.status_code == 200
+            mock_ebay.assert_not_called()
+            analyzed = res_analyze.json()
+            sources = analyzed["price_analysis"]["market_sources"]
+            assert "kleinanzeigen" in sources
+            assert "toppreise" in sources
+            # Disabled sources must not be in analyzed market_sources
+            assert "ebay_de_sold" not in sources
+            assert analyzed["price_analysis"]["ebay_stats"] is None
+
 
 

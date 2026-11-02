@@ -489,3 +489,84 @@ async def test_extension_scraped_prices_injected_into_ai_and_grounding_disabled(
         assert result_draft.price_analysis.market_sources["idealo"].median_price == 449.0
 
 
+@pytest.mark.asyncio
+async def test_ai_filters_out_disabled_price_sources(temp_data_dir: Path):
+    storage = StorageService(data_dir=temp_data_dir)
+    draft = storage.create_draft(
+        user_notes="Wenig gebraucht",
+        identified_product="Sony WH-1000XM4",
+    )
+    draft.price_analysis.prices_fetched_via_extension = True
+    draft.price_analysis.market_sources = {
+        "ebay_de_sold": MarketSourceStats(
+            source_id="ebay_de_sold",
+            label="eBay DE (Gebraucht & Beendet)",
+            currency="EUR",
+            sample_count=4,
+            median_price=150.0,
+            median_chf=141.0,
+        ),
+        "kleinanzeigen": MarketSourceStats(
+            source_id="kleinanzeigen",
+            label="Kleinanzeigen.de Suche",
+            currency="EUR",
+            sample_count=5,
+            median_price=160.0,
+            median_chf=150.4,
+        ),
+        "idealo": MarketSourceStats(
+            source_id="idealo",
+            label="Idealo.de Neupreis",
+            currency="EUR",
+            sample_count=3,
+            median_price=279.0,
+            median_chf=262.26,
+        ),
+    }
+
+    ai_service = AIService(api_key="test_key", model_name="gemini-3.8-flash")
+    mock_resp = {
+        "identified_product": "Sony WH-1000XM4",
+        "missing_photo_hints": [],
+        "ricardo_start_chf": 70.0,
+        "ricardo_buynow_chf": 120.0,
+        "tutti_vhb_chf": 130.0,
+        "ebay_start_eur": 65.0,
+        "ebay_buynow_eur": 120.0,
+        "kleinanzeigen_vb_eur": 130.0,
+        "reasoning": "Nur Kleinanzeigen aktiviert.",
+        "ricardo_title": "Sony WH-1000XM4",
+        "ricardo_description": "Top Kopfhörer.",
+        "tutti_title": "Sony WH-1000XM4",
+        "tutti_category": "Audio",
+        "tutti_description": "Top Kopfhörer.",
+    }
+
+    with patch.object(ai_service, "_call_gemini", new_callable=AsyncMock) as mock_call:
+        import json
+        mock_call.return_value = json.dumps(mock_resp)
+
+        # Only 'kleinanzeigen' is enabled; 'ebay_de_sold' and 'idealo' are excluded
+        await ai_service.analyze_draft(
+            draft=draft,
+            image_paths=[],
+            ebay_stats=None,
+            enabled_sources=["kleinanzeigen"],
+        )
+
+        assert mock_call.called
+        call_kwargs = mock_call.call_args.kwargs
+        passed_contents = call_kwargs["contents"]
+        prompt_str = passed_contents[0]
+
+        # Must include kleinanzeigen
+        assert "Kleinanzeigen.de Suche" in prompt_str
+        assert "160.0" in prompt_str
+
+        # Must NOT include disabled sources in the prompt
+        assert "eBay DE (Gebraucht & Beendet)" not in prompt_str
+        assert "Idealo.de Neupreis" not in prompt_str
+        assert "279.0" not in prompt_str
+
+
+

@@ -497,8 +497,9 @@ function setupDashboardBridge() {
       const reqId = msg.requestId;
       const query = msg.query || "";
       const eurToChfRate = msg.eurToChfRate || 0.94;
+      const enabledSources = Array.isArray(msg.enabledSources) ? msg.enabledSources : null;
 
-      console.log(`[Seller Assistant] Content-Script empfängt Scrape-Anfrage (${reqId}) für '${query}'`);
+      console.log(`[Seller Assistant] Content-Script empfängt Scrape-Anfrage (${reqId}) für '${query}' (enabled: ${enabledSources ? enabledSources.join(',') : 'all'})`);
 
       browserApi.runtime.sendMessage(
         {
@@ -506,6 +507,7 @@ function setupDashboardBridge() {
           requestId: reqId,
           query: query,
           eurToChfRate: eurToChfRate,
+          enabledSources: enabledSources,
         },
         response => {
           const payload = Object.assign(

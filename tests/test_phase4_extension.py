@@ -149,6 +149,20 @@ def test_extension_price_parser_and_stats_via_node():
     if (!loginStats.login_required || !loginStats.error) {
       throw new Error('Expected login_required=true in stats: ' + JSON.stringify(loginStats));
     }
+    (async () => {
+      // Test enabledSources filtering in scrapeAllPriceSources
+      const resEnabled = await bg.scrapeAllPriceSources('Test Query', 0.94, ['kleinanzeigen', 'toppreise']);
+      const keys = Object.keys(resEnabled.sources);
+      if (keys.length !== 2 || !resEnabled.sources.kleinanzeigen || !resEnabled.sources.toppreise) {
+        throw new Error('Expected only kleinanzeigen and toppreise: ' + JSON.stringify(keys));
+      }
+      if (resEnabled.sources.ebay_de_sold || resEnabled.sources.idealo) {
+        throw new Error('resEnabled.sources has disabled keys: ' + JSON.stringify(keys));
+      }
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
     """
     res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
     assert res.returncode == 0, f"Node test failed: {res.stderr}"

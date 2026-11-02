@@ -125,6 +125,20 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     assert len(settings.shipping_presets) >= 9
     assert any(p.country.value == "CH" for p in settings.shipping_presets)
     assert any(p.country.value == "DE" for p in settings.shipping_presets)
+    assert settings.enabled_price_sources == [
+        "ebay_de_sold",
+        "kleinanzeigen",
+        "idealo",
+        "ricardo",
+        "toppreise",
+        "digitec",
+    ]
+
+    # Test updating enabled price sources
+    settings.enabled_price_sources = ["ebay_de_sold", "toppreise"]
+    storage.update_settings(settings)
+    reloaded_settings = storage.get_settings()
+    assert reloaded_settings.enabled_price_sources == ["ebay_de_sold", "toppreise"]
     
     # Create 3 drafts
     d1 = storage.create_draft(user_notes="Wenig gebraucht, OVP", identified_product="Sony WH-1000XM4")

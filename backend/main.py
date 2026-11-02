@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from backend.config import Settings, settings as default_settings
 from backend.models import (
+    DEFAULT_PRICE_SOURCES,
     Draft,
     DraftImage,
     DraftStatus,
@@ -401,6 +402,10 @@ def create_app(
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found")
 
+        # 0. Load enabled price sources from settings
+        preset_settings = storage.get_settings()
+        enabled_sources = getattr(preset_settings, "enabled_price_sources", None) or list(DEFAULT_PRICE_SOURCES)
+
         # 1. Check if extension already fetched market prices
         pa = draft.price_analysis
         has_extension_prices = bool(
@@ -415,14 +420,16 @@ def create_app(
                 f"[API] Draft {draft_id} enthält bereits Preisdaten aus der Firefox-Extension "
                 f"({len(pa.market_sources)} Quellen). Überspringe Backend-eBay-Abruf."
             )
-            ebay_stats = pa.ebay_stats
-        elif search_query:
+            ebay_stats = pa.ebay_stats if "ebay_de_sold" in enabled_sources else None
+        elif search_query and "ebay_de_sold" in enabled_sources:
             logger.debug(f"[API] Starte Vorab-eBay-Abfrage mit Suchbegriff: '{search_query}'")
             ebay_stats = await ebay_svc.fetch_sold_stats(search_query)
             logger.debug(
                 f"[API] Vorab-eBay-Abfrage Ergebnis: sample_count={ebay_stats.sample_count}, "
                 f"median_eur={ebay_stats.median_eur}, median_chf={ebay_stats.median_chf}"
             )
+        elif "ebay_de_sold" not in enabled_sources:
+            logger.debug("[API] eBay DE Preisquelle in Einstellungen deaktiviert. Überspringe eBay-Abfrage.")
         else:
             logger.debug(
                 "[API] Kein Suchbegriff vor KI-Analyse vorhanden (identified_product/user_notes leer). "
@@ -439,6 +446,7 @@ def create_app(
                 draft=draft,
                 image_paths=ai_image_paths,
                 ebay_stats=ebay_stats,
+                enabled_sources=enabled_sources,
             )
         except Exception as e:
             logger.error(f"[API] KI-Analyse fehlgeschlagen: {e}")
@@ -464,8 +472,8 @@ def create_app(
                 detail=f"Fehler bei der KI-Analyse: {err_str}",
             )
 
-        # 4. If user provided no initial text notes and no extension prices, fetch eBay stats using AI-identified product
-        if not has_extension_prices and ebay_stats is None and analyzed_draft.identified_product:
+        # 4. If user provided no initial text notes and no extension prices, fetch eBay stats using AI-identified product (if enabled)
+        if "ebay_de_sold" in enabled_sources and not has_extension_prices and ebay_stats is None and analyzed_draft.identified_product:
             logger.debug(
                 f"[API] Starte nachträgliche eBay-Abfrage mit KI-identifiziertem Produkt: '{analyzed_draft.identified_product}'"
             )

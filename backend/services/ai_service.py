@@ -300,6 +300,7 @@ class AIService:
         draft: Draft,
         image_paths: List[Path],
         ebay_stats: Optional[EbaySoldStats] = None,
+        enabled_sources: Optional[List[str]] = None,
     ) -> Draft:
         user_prompt_parts = []
         if draft.identified_product:
@@ -316,6 +317,13 @@ class AIService:
             if existing_pa and existing_pa.market_sources
             else {}
         )
+        if enabled_sources is not None:
+            market_sources = {
+                k: v for k, v in market_sources.items()
+                if k in enabled_sources
+            }
+            if "ebay_de_sold" not in enabled_sources:
+                ebay_stats = None
         has_extension_prices = bool(
             (existing_pa and existing_pa.prices_fetched_via_extension)
             or any(ms.sample_count > 0 for ms in market_sources.values())
@@ -448,7 +456,7 @@ class AIService:
             de_new_fallback = market_sources["idealo"].median_price
 
         draft.price_analysis = PriceAnalysis(
-            ebay_stats=ebay_stats or (existing_pa.ebay_stats if existing_pa else None),
+            ebay_stats=ebay_stats or (existing_pa.ebay_stats if existing_pa and (enabled_sources is None or "ebay_de_sold" in enabled_sources) else None),
             market_sources=market_sources,
             prices_fetched_via_extension=has_extension_prices,
             ch_new_price_chf=payload.get("ch_new_price_chf") or ch_new_fallback,

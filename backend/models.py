@@ -47,10 +47,21 @@ class ShippingPreset(BaseModel):
     pickup_allowed: bool = True
 
 
+DEFAULT_PRICE_SOURCES = [
+    "ebay_de_sold",
+    "kleinanzeigen",
+    "idealo",
+    "ricardo",
+    "toppreise",
+    "digitec",
+]
+
+
 class PresetSettings(BaseModel):
     default_offer_type: OfferType = OfferType.AUCTION
     default_shipping_preset_id: str = "b_post_2kg"
     default_de_shipping_preset_id: str = "dhl_2kg"
+    enabled_price_sources: List[str] = Field(default_factory=lambda: list(DEFAULT_PRICE_SOURCES))
     shipping_presets: List[ShippingPreset] = Field(default_factory=lambda: [
         # Swiss Presets (CHF)
         ShippingPreset(id="b_post_2kg", country=MarketCountry.CH, label="Paket B-Post bis 2 kg (8.50 CHF)", cost_chf=8.50, cost=8.50, currency="CHF", pickup_allowed=True),

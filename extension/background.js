@@ -442,16 +442,17 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
 
 const activeScrapePromises = new Map();
 
-async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94) {
-  const key = requestId || `q_${query}`;
+async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94, enabledSources = null) {
+  const sourcesKey = Array.isArray(enabledSources) ? enabledSources.slice().sort().join(",") : "all";
+  const key = requestId ? `${requestId}_${sourcesKey}` : `q_${query}_${sourcesKey}`;
   if (activeScrapePromises.has(key)) {
     return activeScrapePromises.get(key);
   }
 
   const p = (async () => {
-    console.log(`[Seller Assistant] === Starte 6-Quellen-Preisrecherche (${key}) für '${query}' ===`);
-    const result = await scrapeAllPriceSources(query, eurToChfRate);
-    console.log(`[Seller Assistant] === 6-Quellen-Preisrecherche abgeschlossen (${key}) ===`, result);
+    console.log(`[Seller Assistant] === Starte Preisrecherche (${key}) für '${query}' (enabled: ${sourcesKey}) ===`);
+    const result = await scrapeAllPriceSources(query, eurToChfRate, enabledSources);
+    console.log(`[Seller Assistant] === Preisrecherche abgeschlossen (${key}) ===`, result);
     return result;
   })();
 
@@ -463,9 +464,9 @@ async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94) {
   }
 }
 
-async function scrapeAllPriceSources(query, eurToChfRate = 0.94) {
+async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources = null) {
   const links = buildVerificationLinks(query);
-  const sourceConfigs = [
+  let sourceConfigs = [
     {
       id: "ebay_de_sold",
       label: "eBay DE (Gebraucht & Beendet)",
@@ -503,6 +504,10 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94) {
       url: links.digitec_url,
     },
   ];
+
+  if (Array.isArray(enabledSources)) {
+    sourceConfigs = sourceConfigs.filter(cfg => enabledSources.includes(cfg.id));
+  }
 
   const results = await Promise.all(
     sourceConfigs.map(cfg => scrapeSourceHybrid(cfg, query, eurToChfRate))
@@ -576,7 +581,8 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
       runDeduplicatedScrape(
         request.requestId || "",
         request.query || "",
-        request.eurToChfRate || 0.94
+        request.eurToChfRate || 0.94,
+        request.enabledSources || null
       )
         .then(res => sendResponse(res))
         .catch(err => sendResponse({ ok: false, error: err.message }));

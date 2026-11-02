@@ -147,10 +147,50 @@ function updateKeyStatusUI() {
   }
 }
 
+const ALL_PRICE_SOURCES = [
+  { id: "ebay_de_sold", boxId: "source-box-ebay_de_sold", linkId: "link-ebay" },
+  { id: "kleinanzeigen", boxId: "source-box-kleinanzeigen", linkId: "link-kleinanzeigen" },
+  { id: "idealo", boxId: "source-box-idealo", linkId: "link-idealo" },
+  { id: "ricardo", boxId: "source-box-ricardo", linkId: "link-ricardo" },
+  { id: "toppreise", boxId: "source-box-toppreise", linkId: "link-toppreise" },
+  { id: "digitec", boxId: "source-box-digitec", linkId: "link-digitec" },
+];
+
+function getEnabledPriceSources() {
+  if (settings && Array.isArray(settings.enabled_price_sources)) {
+    return settings.enabled_price_sources;
+  }
+  return ["ebay_de_sold", "kleinanzeigen", "idealo", "ricardo", "toppreise", "digitec"];
+}
+
+function updatePriceSourcesVisibility() {
+  const enabled = getEnabledPriceSources();
+  ALL_PRICE_SOURCES.forEach(src => {
+    const isEnabled = enabled.includes(src.id);
+    const box = document.getElementById(src.boxId);
+    if (box) {
+      if (isEnabled) box.classList.remove("hidden");
+      else box.classList.add("hidden");
+    }
+    const link = document.getElementById(src.linkId);
+    if (link) {
+      if (isEnabled) link.classList.remove("hidden");
+      else link.classList.add("hidden");
+    }
+  });
+}
+
 function openSettingsModal() {
   if (!settingsModal) return;
   loadSystemConfig();
   if (cfgGeminiKey) cfgGeminiKey.value = "";
+  const enabled = getEnabledPriceSources();
+  ALL_PRICE_SOURCES.forEach(src => {
+    const cb = document.getElementById(`cfg-src-${src.id}`);
+    if (cb) {
+      cb.checked = enabled.includes(src.id);
+    }
+  });
   settingsModal.classList.remove("hidden");
 }
 
@@ -171,6 +211,15 @@ async function saveSystemConfig() {
     payload.gemini_api_key = newKey;
   }
 
+  // Collect enabled sources from checkboxes
+  const enabledSources = [];
+  ALL_PRICE_SOURCES.forEach(src => {
+    const cb = document.getElementById(`cfg-src-${src.id}`);
+    if (cb && cb.checked) {
+      enabledSources.push(src.id);
+    }
+  });
+
   try {
     btnSaveSettings.disabled = true;
     const res = await fetch("/api/config", {
@@ -181,6 +230,23 @@ async function saveSystemConfig() {
     if (res.ok) {
       systemConfig = await res.json();
       updateKeyStatusUI();
+
+      // Also persist enabled_price_sources in /api/settings
+      if (settings) {
+        const updatedSettings = Object.assign({}, settings, {
+          enabled_price_sources: enabledSources,
+        });
+        const putRes = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedSettings),
+        });
+        if (putRes.ok) {
+          settings = await putRes.json();
+        }
+      }
+      updatePriceSourcesVisibility();
+
       closeSettingsModal();
       alert("Einstellungen erfolgreich gespeichert!");
     } else {
@@ -199,6 +265,7 @@ async function loadSettings() {
     const res = await fetch("/api/settings");
     if (res.ok) {
       settings = await res.json();
+      updatePriceSourcesVisibility();
       shippingPresetEl.innerHTML = "";
       if (deShippingPresetEl) deShippingPresetEl.innerHTML = "";
       settings.shipping_presets.forEach(p => {
@@ -359,6 +426,7 @@ function populateForm() {
   renderSourceBox("ricardo", priceRicardoMedian, priceRicardoCount, null);
   renderSourceBox("toppreise", priceToppreiseMedian, priceToppreiseCount, null);
   renderSourceBox("digitec", priceDigitecMedian, priceDigitecCount, null);
+  updatePriceSourcesVisibility();
 
   if (extensionScrapeStatus) {
     if (pa.prices_fetched_via_extension) {
@@ -871,6 +939,7 @@ async function scrapePricesViaExtension() {
         }
       }
 
+      const enabledSources = getEnabledPriceSources();
       window.addEventListener("message", onMsg);
       window.postMessage(
         JSON.stringify({
@@ -878,6 +947,7 @@ async function scrapePricesViaExtension() {
           requestId: reqId,
           query: query,
           eurToChfRate: rate,
+          enabledSources: enabledSources,
         }),
         "*"
       );
@@ -901,6 +971,8 @@ async function scrapePricesViaExtension() {
         median_chf: eb.median_chf ?? null,
         exchange_rate: rate,
       };
+    } else {
+      currentDraft.price_analysis.ebay_stats = null;
     }
 
     if (sources.toppreise && sources.toppreise.median_price) {

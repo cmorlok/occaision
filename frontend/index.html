@@ -103,32 +103,32 @@
 
         <!-- Price Cards -->
         <div id="price-summary" class="price-grid">
-          <div class="price-box">
+          <div id="source-box-ebay_de_sold" class="price-box">
             <span class="price-label">eBay DE (Gebraucht & Beendet)</span>
             <span id="price-ebay-median" class="price-value">-</span>
             <small id="price-ebay-count">0 Treffer</small>
           </div>
-          <div class="price-box">
+          <div id="source-box-kleinanzeigen" class="price-box">
             <span class="price-label">Kleinanzeigen.de Suche</span>
             <span id="price-kleinanzeigen-median" class="price-value">-</span>
             <small id="price-kleinanzeigen-count">0 Treffer</small>
           </div>
-          <div class="price-box">
+          <div id="source-box-idealo" class="price-box">
             <span class="price-label">Idealo.de Neupreis</span>
             <span id="price-idealo-median" class="price-value">-</span>
             <small id="price-idealo-count">0 Treffer</small>
           </div>
-          <div class="price-box">
+          <div id="source-box-ricardo" class="price-box">
             <span class="price-label">Ricardo.ch Suche</span>
             <span id="price-ricardo-median" class="price-value">-</span>
             <small id="price-ricardo-count">0 Treffer</small>
           </div>
-          <div class="price-box">
+          <div id="source-box-toppreise" class="price-box">
             <span class="price-label">Toppreise.ch Neupreis</span>
             <span id="price-toppreise-median" class="price-value">-</span>
             <small id="price-toppreise-count">0 Treffer</small>
           </div>
-          <div class="price-box">
+          <div id="source-box-digitec" class="price-box">
             <span class="price-label">Digitec/Galaxus Suche</span>
             <span id="price-digitec-median" class="price-value">-</span>
             <small id="price-digitec-count">0 Treffer</small>
@@ -423,6 +423,37 @@
         </div>
 
         <div class="form-group">
+          <label><strong>Preisquellen für Marktrecherche:</strong></label>
+          <span class="field-hint">Nur aktivierte Quellen werden abgefragt, in der Übersicht angezeigt und an die KI übergeben.</span>
+          <div class="price-sources-checkboxes" style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
+            <label class="checkbox-label" for="cfg-src-ebay_de_sold">
+              <input type="checkbox" id="cfg-src-ebay_de_sold" data-source="ebay_de_sold" checked />
+              <span>eBay DE (Gebraucht & Beendet)</span>
+            </label>
+            <label class="checkbox-label" for="cfg-src-kleinanzeigen">
+              <input type="checkbox" id="cfg-src-kleinanzeigen" data-source="kleinanzeigen" checked />
+              <span>Kleinanzeigen.de Suche</span>
+            </label>
+            <label class="checkbox-label" for="cfg-src-idealo">
+              <input type="checkbox" id="cfg-src-idealo" data-source="idealo" checked />
+              <span>Idealo.de Neupreis</span>
+            </label>
+            <label class="checkbox-label" for="cfg-src-ricardo">
+              <input type="checkbox" id="cfg-src-ricardo" data-source="ricardo" checked />
+              <span>Ricardo.ch Suche</span>
+            </label>
+            <label class="checkbox-label" for="cfg-src-toppreise">
+              <input type="checkbox" id="cfg-src-toppreise" data-source="toppreise" checked />
+              <span>Toppreise.ch Neupreis</span>
+            </label>
+            <label class="checkbox-label" for="cfg-src-digitec">
+              <input type="checkbox" id="cfg-src-digitec" data-source="digitec" checked />
+              <span>Digitec/Galaxus Suche</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="form-group">
           <label>Konfigurationsdatei (.env):</label>
           <span class="field-hint">Alternativ kannst du den Key direkt in der Datei <code>.env</code> im Projektordner als <code>GEMINI_API_KEY=...</code> eintragen.</span>
         </div>
@@ -434,6 +465,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=14"></script>
+  <script src="app.js?v=15"></script>
 </body>
 </html>
