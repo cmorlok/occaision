@@ -162,7 +162,16 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
     required_ids = [
         "btn-new-draft",
         "dropzone",
+        "product-name",
+        "user-notes",
+        "btn-scrape-extension",
         "btn-analyze",
+        "price-ebay-median",
+        "price-kleinanzeigen-median",
+        "price-idealo-median",
+        "price-ricardo-median",
+        "price-toppreise-median",
+        "price-digitec-median",
         "ricardo-title",
         "tutti-title",
         "verification-links",
@@ -224,3 +233,98 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
         assert res_429.status_code == 429
         assert "Quota-Limit" in res_429.json()["detail"]
         assert "Search Grounding" in res_429.json()["detail"]
+
+
+def test_analyze_endpoint_skips_backend_ebay_when_extension_prices_present(test_app):
+    client = TestClient(test_app)
+
+    res_create = client.post(
+        "/api/drafts",
+        json={
+            "identified_product": "HP Color LaserJet Pro MFP 4302fdw",
+            "user_notes": "Fast wie neu, inkl. OVP",
+        },
+    )
+    assert res_create.status_code == 200
+    draft = res_create.json()
+    draft_id = draft["id"]
+    assert draft["identified_product"] == "HP Color LaserJet Pro MFP 4302fdw"
+    assert draft["user_notes"] == "Fast wie neu, inkl. OVP"
+
+    # Simulate Step 2: Extension saves scraped prices for all 6 sources
+    draft["price_analysis"]["prices_fetched_via_extension"] = True
+    draft["price_analysis"]["market_sources"] = {
+        "ebay_de_sold": {
+            "source_id": "ebay_de_sold",
+            "label": "eBay DE (Gebraucht & Beendet)",
+            "currency": "EUR",
+            "sample_count": 4,
+            "min_price": 240.0,
+            "max_price": 310.0,
+            "median_price": 275.0,
+            "median_chf": 258.5,
+            "url": "https://www.ebay.de/sch/i.html?_nkw=HP+4302fdw&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000",
+            "method": "fetch",
+        },
+        "kleinanzeigen": {
+            "source_id": "kleinanzeigen",
+            "label": "Kleinanzeigen.de Suche",
+            "currency": "EUR",
+            "sample_count": 6,
+            "min_price": 250.0,
+            "max_price": 340.0,
+            "median_price": 290.0,
+            "median_chf": 272.6,
+            "url": "https://www.kleinanzeigen.de/s-HP+4302fdw/k0",
+            "method": "fetch",
+        },
+        "idealo": {
+            "source_id": "idealo",
+            "label": "Idealo.de Neupreis",
+            "currency": "EUR",
+            "sample_count": 3,
+            "min_price": 439.0,
+            "max_price": 479.0,
+            "median_price": 449.0,
+            "median_chf": 422.06,
+            "url": "https://www.idealo.de",
+            "method": "tab",
+        },
+    }
+    res_put = client.put(f"/api/drafts/{draft_id}", json=draft)
+    assert res_put.status_code == 200
+
+    mock_ai_response = {
+        "identified_product": "HP Color LaserJet Pro MFP 4302fdw",
+        "missing_photo_hints": [],
+        "ch_new_price_chf": 415.0,
+        "de_new_price_eur": 449.0,
+        "ricardo_start_chf": 210.0,
+        "ricardo_buynow_chf": 270.0,
+        "tutti_vhb_chf": 280.0,
+        "ebay_start_eur": 200.0,
+        "ebay_buynow_eur": 270.0,
+        "kleinanzeigen_vb_eur": 285.0,
+        "reasoning": "Preise aus Extension-Daten abgeleitet",
+        "ricardo_title": "HP Color LaserJet Pro MFP 4302fdw Farblaser",
+        "ricardo_description": "Top Zustand.",
+        "ricardo_condition": "wie_neu",
+        "tutti_title": "HP Color LaserJet Pro MFP 4302fdw Drucker",
+        "tutti_category": "Büro",
+        "tutti_description": "Sehr guter Zustand.",
+        "tutti_condition": "wie_neu",
+    }
+
+    import json
+    with patch("backend.services.ai_service.AIService._call_gemini", new_callable=AsyncMock) as mock_gemini:
+        mock_gemini.return_value = json.dumps(mock_ai_response)
+        with patch("backend.services.ebay_service.EbayService.fetch_sold_stats", new_callable=AsyncMock) as mock_ebay:
+            res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
+            assert res_analyze.status_code == 200
+            # Backend eBay scraping MUST NOT be called when extension prices exist
+            mock_ebay.assert_not_called()
+            analyzed = res_analyze.json()
+            assert analyzed["price_analysis"]["prices_fetched_via_extension"] is True
+            assert "ebay_de_sold" in analyzed["price_analysis"]["market_sources"]
+            assert analyzed["price_analysis"]["ebay_stats"]["median_eur"] == 275.0
+

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Seller Assistant</title>
-  <link rel="stylesheet" href="styles.css?v=9">
+  <link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body>
   <div class="app-layout">
@@ -50,9 +50,16 @@
         </div>
 
         <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="product-name">Produktname / Modell (für Preisrecherche):</label>
+            <input type="text" id="product-name" placeholder="z.B. Sony WH-1000XM4 oder HP Color LaserJet Pro MFP 4302fdw">
+          </div>
+        </div>
+
+        <div class="form-row">
           <div class="form-group flex-2">
-            <label for="user-notes">Kurzbeschreibung / Stichworte des Artikels:</label>
-            <textarea id="user-notes" rows="3" placeholder="z.B. Sony WH-1000XM4 Kopfhörer, ca. 2 Jahre alt, wenig gebraucht, OVP & Ladekabel dabei, Polster intakt..."></textarea>
+            <label for="user-notes">Kurzbeschreibung / Zustand & Lieferumfang:</label>
+            <textarea id="user-notes" rows="3" placeholder="z.B. ca. 2 Jahre alt, wenig gebraucht, OVP & Ladekabel dabei, Polster intakt..."></textarea>
           </div>
         </div>
 
@@ -75,8 +82,10 @@
         </div>
 
         <div class="action-bar">
-          <button id="btn-analyze" class="btn btn-accent btn-large">⚡ KI-Analyse & Preisrecherche starten</button>
-          <span id="analyze-spinner" class="spinner hidden">Analysiere Bilder & eBay/Marktdaten...</span>
+          <button id="btn-scrape-extension" class="btn btn-secondary btn-large">🔍 1. Preisrecherche über Extension (Optional)</button>
+          <button id="btn-analyze" class="btn btn-accent btn-large">⚡ 2. KI-Analyse starten</button>
+          <span id="analyze-spinner" class="spinner hidden">Analysiere Bilder & Marktdaten...</span>
+          <span id="extension-scrape-status" class="field-hint"></span>
         </div>
       </section>
 
@@ -94,16 +103,41 @@
         <!-- Price Cards -->
         <div id="price-summary" class="price-grid">
           <div class="price-box">
-            <span class="price-label">eBay DE Sold Median</span>
+            <span class="price-label">eBay DE (Gebraucht & Beendet)</span>
             <span id="price-ebay-median" class="price-value">-</span>
-            <small id="price-ebay-count">0 Verkäufe</small>
+            <small id="price-ebay-count">0 Treffer</small>
           </div>
           <div class="price-box">
-            <span class="price-label">CH Neupreis (Digitec/Toppreise)</span>
+            <span class="price-label">Kleinanzeigen.de Suche</span>
+            <span id="price-kleinanzeigen-median" class="price-value">-</span>
+            <small id="price-kleinanzeigen-count">0 Treffer</small>
+          </div>
+          <div class="price-box">
+            <span class="price-label">Idealo.de Neupreis</span>
+            <span id="price-idealo-median" class="price-value">-</span>
+            <small id="price-idealo-count">0 Treffer</small>
+          </div>
+          <div class="price-box">
+            <span class="price-label">Ricardo.ch Suche</span>
+            <span id="price-ricardo-median" class="price-value">-</span>
+            <small id="price-ricardo-count">0 Treffer</small>
+          </div>
+          <div class="price-box">
+            <span class="price-label">Toppreise.ch Neupreis</span>
+            <span id="price-toppreise-median" class="price-value">-</span>
+            <small id="price-toppreise-count">0 Treffer</small>
+          </div>
+          <div class="price-box">
+            <span class="price-label">Digitec/Galaxus Suche</span>
+            <span id="price-digitec-median" class="price-value">-</span>
+            <small id="price-digitec-count">0 Treffer</small>
+          </div>
+          <div class="price-box">
+            <span class="price-label">CH Neupreis-Anker (KI/Ext)</span>
             <span id="price-ch-new" class="price-value">-</span>
           </div>
           <div class="price-box">
-            <span class="price-label">DE Neupreis (Idealo/Geizhals)</span>
+            <span class="price-label">DE Neupreis-Anker (KI/Ext)</span>
             <span id="price-de-new" class="price-value">-</span>
           </div>
           <div class="price-box highlight">
@@ -399,6 +433,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

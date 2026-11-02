@@ -61,6 +61,7 @@ def configure_logging(level_name: Optional[str] = None):
 
 class CreateDraftRequest(BaseModel):
     user_notes: str = ""
+    identified_product: str = ""
 
 
 class PatchImageModeRequest(BaseModel):
@@ -262,7 +263,8 @@ def create_app(
     @app.post("/api/drafts", response_model=Draft)
     def create_draft(req: Optional[CreateDraftRequest] = None):
         user_notes = req.user_notes if req else ""
-        return storage.create_draft(user_notes=user_notes)
+        identified_product = req.identified_product if req else ""
+        return storage.create_draft(user_notes=user_notes, identified_product=identified_product)
 
     @app.get("/api/drafts/{draft_id}", response_model=Draft)
     def get_draft(draft_id: str):
@@ -399,10 +401,22 @@ def create_app(
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found")
 
-        # 1. Fetch eBay stats if we have query notes/title
-        search_query = (draft.user_notes or draft.identified_product or "").strip()
+        # 1. Check if extension already fetched market prices
+        pa = draft.price_analysis
+        has_extension_prices = bool(
+            (pa and pa.prices_fetched_via_extension)
+            or (pa and pa.market_sources and any(ms.sample_count > 0 for ms in pa.market_sources.values()))
+        )
+
+        search_query = (draft.identified_product or draft.user_notes or "").strip()
         ebay_stats = None
-        if search_query:
+        if has_extension_prices:
+            logger.info(
+                f"[API] Draft {draft_id} enthält bereits Preisdaten aus der Firefox-Extension "
+                f"({len(pa.market_sources)} Quellen). Überspringe Backend-eBay-Abruf."
+            )
+            ebay_stats = pa.ebay_stats
+        elif search_query:
             logger.debug(f"[API] Starte Vorab-eBay-Abfrage mit Suchbegriff: '{search_query}'")
             ebay_stats = await ebay_svc.fetch_sold_stats(search_query)
             logger.debug(
@@ -411,7 +425,7 @@ def create_app(
             )
         else:
             logger.debug(
-                "[API] Kein Suchbegriff vor KI-Analyse vorhanden (user_notes/identified_product leer). "
+                "[API] Kein Suchbegriff vor KI-Analyse vorhanden (identified_product/user_notes leer). "
                 "eBay-Abfrage erfolgt nach der KI-Produktidentifikation."
             )
 
@@ -450,8 +464,8 @@ def create_app(
                 detail=f"Fehler bei der KI-Analyse: {err_str}",
             )
 
-        # 4. If user provided no initial text notes, fetch eBay stats using AI-identified product
-        if ebay_stats is None and analyzed_draft.identified_product:
+        # 4. If user provided no initial text notes and no extension prices, fetch eBay stats using AI-identified product
+        if not has_extension_prices and ebay_stats is None and analyzed_draft.identified_product:
             logger.debug(
                 f"[API] Starte nachträgliche eBay-Abfrage mit KI-identifiziertem Produkt: '{analyzed_draft.identified_product}'"
             )

@@ -11,18 +11,31 @@ const btnSaveDraft = document.getElementById("btn-save-draft");
 const dropzoneEl = document.getElementById("dropzone");
 const fileInputEl = document.getElementById("file-input");
 const imageGalleryEl = document.getElementById("image-gallery");
+const productNameEl = document.getElementById("product-name");
 const userNotesEl = document.getElementById("user-notes");
 const shippingPresetEl = document.getElementById("shipping-preset");
 const deShippingPresetEl = document.getElementById("de-shipping-preset");
 const offerTypeEl = document.getElementById("offer-type");
+const btnScrapeExtension = document.getElementById("btn-scrape-extension");
 const btnAnalyze = document.getElementById("btn-analyze");
 const analyzeSpinner = document.getElementById("analyze-spinner");
+const extensionScrapeStatus = document.getElementById("extension-scrape-status");
 
 // Section 2: Analysis elements
 const missingHintsBox = document.getElementById("missing-hints-box");
 const missingHintsList = document.getElementById("missing-hints-list");
 const priceEbayMedian = document.getElementById("price-ebay-median");
 const priceEbayCount = document.getElementById("price-ebay-count");
+const priceKleinanzeigenMedian = document.getElementById("price-kleinanzeigen-median");
+const priceKleinanzeigenCount = document.getElementById("price-kleinanzeigen-count");
+const priceIdealoMedian = document.getElementById("price-idealo-median");
+const priceIdealoCount = document.getElementById("price-idealo-count");
+const priceRicardoMedian = document.getElementById("price-ricardo-median");
+const priceRicardoCount = document.getElementById("price-ricardo-count");
+const priceToppreiseMedian = document.getElementById("price-toppreise-median");
+const priceToppreiseCount = document.getElementById("price-toppreise-count");
+const priceDigitecMedian = document.getElementById("price-digitec-median");
+const priceDigitecCount = document.getElementById("price-digitec-count");
 const priceChNew = document.getElementById("price-ch-new");
 const priceDeNew = document.getElementById("price-de-new");
 const priceRecStart = document.getElementById("price-rec-start");
@@ -287,6 +300,9 @@ function populateForm() {
 
   activeDraftTitleEl.textContent = currentDraft.identified_product || currentDraft.user_notes || "Entwurf bearbeiten";
   draftStatusSelect.value = currentDraft.status;
+  if (productNameEl) {
+    productNameEl.value = currentDraft.identified_product || "";
+  }
   userNotesEl.value = currentDraft.user_notes || "";
   offerTypeEl.value = currentDraft.ricardo.offer_type || "auction";
   shippingPresetEl.value = currentDraft.ricardo.shipping_preset_id || (settings ? settings.default_shipping_preset_id : "b_post_2kg");
@@ -307,12 +323,40 @@ function populateForm() {
 
   // Prices
   const pa = currentDraft.price_analysis || {};
-  if (pa.ebay_stats && pa.ebay_stats.median_eur) {
-    priceEbayMedian.textContent = `${pa.ebay_stats.median_eur} € (~${pa.ebay_stats.median_chf} CHF)`;
-    priceEbayCount.textContent = `${pa.ebay_stats.sample_count} verkaufte Artikel`;
-  } else {
-    priceEbayMedian.textContent = "-";
-    priceEbayCount.textContent = "Keine Daten";
+  const ms = pa.market_sources || {};
+
+  function renderSourceBox(srcKey, medianEl, countEl, fallbackStats) {
+    if (!medianEl || !countEl) return;
+    const src = ms[srcKey];
+    if (src && src.sample_count > 0 && src.median_price !== null && src.median_price !== undefined) {
+      const unit = src.currency === "CHF" ? "CHF" : "€";
+      const chfHint = src.currency !== "CHF" && src.median_chf ? ` (~${src.median_chf} CHF)` : "";
+      medianEl.textContent = `${src.median_price} ${unit}${chfHint}`;
+      const spanHint = src.min_price !== null && src.max_price !== null ? ` (${src.min_price}–${src.max_price} ${unit})` : "";
+      countEl.textContent = `${src.sample_count} Treffer${spanHint}`;
+    } else if (fallbackStats && fallbackStats.median_eur) {
+      medianEl.textContent = `${fallbackStats.median_eur} € (~${fallbackStats.median_chf} CHF)`;
+      countEl.textContent = `${fallbackStats.sample_count} verkaufte Artikel`;
+    } else {
+      medianEl.textContent = "-";
+      countEl.textContent = "Keine Daten";
+    }
+  }
+
+  renderSourceBox("ebay_de_sold", priceEbayMedian, priceEbayCount, pa.ebay_stats);
+  renderSourceBox("kleinanzeigen", priceKleinanzeigenMedian, priceKleinanzeigenCount, null);
+  renderSourceBox("idealo", priceIdealoMedian, priceIdealoCount, null);
+  renderSourceBox("ricardo", priceRicardoMedian, priceRicardoCount, null);
+  renderSourceBox("toppreise", priceToppreiseMedian, priceToppreiseCount, null);
+  renderSourceBox("digitec", priceDigitecMedian, priceDigitecCount, null);
+
+  if (extensionScrapeStatus) {
+    if (pa.prices_fetched_via_extension) {
+      const totalHits = Object.values(ms).reduce((acc, s) => acc + (s.sample_count || 0), 0);
+      extensionScrapeStatus.textContent = `✓ Extension-Preise aktiv (${totalHits} Treffer über ${Object.keys(ms).length} Quellen) – wird bei KI-Analyse direkt übergeben.`;
+    } else {
+      extensionScrapeStatus.textContent = "";
+    }
   }
 
   priceChNew.textContent = pa.ch_new_price_chf ? `${pa.ch_new_price_chf.toFixed(2)} CHF` : "-";
@@ -636,6 +680,10 @@ function setupEventListeners() {
     }
   };
 
+  if (btnScrapeExtension) {
+    btnScrapeExtension.onclick = scrapePricesViaExtension;
+  }
+
   btnAnalyze.onclick = async () => {
     if (!currentDraft) {
       await ensureDraft();
@@ -690,6 +738,9 @@ function setupEventListeners() {
 function syncDraftFromForm() {
   if (!currentDraft) return;
   currentDraft.status = draftStatusSelect.value;
+  if (productNameEl) {
+    currentDraft.identified_product = productNameEl.value.trim();
+  }
   currentDraft.user_notes = userNotesEl.value;
 
   currentDraft.ricardo.offer_type = offerTypeEl.value;
@@ -724,6 +775,131 @@ function syncDraftFromForm() {
   if (kleinanzeigenPriceType) currentDraft.kleinanzeigen.price_type = kleinanzeigenPriceType.value;
   if (kleinanzeigenDescription) currentDraft.kleinanzeigen.description = kleinanzeigenDescription.value;
   if (deShippingPresetEl) currentDraft.kleinanzeigen.shipping_preset_id = deShippingPresetEl.value;
+}
+
+async function scrapePricesViaExtension() {
+  if (!currentDraft) {
+    await ensureDraft();
+  }
+  if (!currentDraft) return;
+  syncDraftFromForm();
+
+  const query = (
+    (productNameEl && productNameEl.value.trim()) ||
+    currentDraft.identified_product ||
+    userNotesEl.value.trim() ||
+    ""
+  ).trim();
+
+  if (!query) {
+    alert("Bitte gib zuerst oben einen Produktnamen / Modell für die Preisrecherche ein.");
+    if (productNameEl) productNameEl.focus();
+    return;
+  }
+
+  const rate = (systemConfig && systemConfig.eur_to_chf_rate) || 0.94;
+  const reqId = `scrape_${Date.now()}`;
+
+  if (btnScrapeExtension) btnScrapeExtension.disabled = true;
+  if (analyzeSpinner) {
+    analyzeSpinner.textContent = `🔍 Frage 6 Preisquellen über Firefox-Extension ab für '${query}'...`;
+    analyzeSpinner.classList.remove("hidden");
+  }
+
+  try {
+    const extResult = await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener("message", onMsg);
+        reject(
+          new Error(
+            "Keine Antwort von der Seller Assistant Firefox-Extension erhalten. " +
+              "Bitte stelle sicher, dass die Extension in Firefox geladen ist und lade das Dashboard einmal neu (F5)."
+          )
+        );
+      }, 35000);
+
+      function onMsg(event) {
+        if (event.source !== window || !event.data) return;
+        if (
+          event.data.type === "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT" &&
+          event.data.requestId === reqId
+        ) {
+          clearTimeout(timeout);
+          window.removeEventListener("message", onMsg);
+          if (event.data.ok) {
+            resolve(event.data);
+          } else {
+            reject(new Error(event.data.error || "Extension-Fehler bei der Preisrecherche"));
+          }
+        }
+      }
+
+      window.addEventListener("message", onMsg);
+      window.postMessage(
+        {
+          type: "SELLER_ASSISTANT_SCRAPE_PRICES",
+          requestId: reqId,
+          query: query,
+          eurToChfRate: rate,
+        },
+        "*"
+      );
+    });
+
+    if (!currentDraft.price_analysis) {
+      currentDraft.price_analysis = {};
+    }
+    const sources = extResult.sources || {};
+    currentDraft.price_analysis.market_sources = sources;
+    currentDraft.price_analysis.prices_fetched_via_extension = true;
+
+    if (sources.ebay_de_sold) {
+      const eb = sources.ebay_de_sold;
+      currentDraft.price_analysis.ebay_stats = {
+        query: query,
+        sample_count: eb.sample_count || 0,
+        min_eur: eb.min_price ?? null,
+        max_eur: eb.max_price ?? null,
+        median_eur: eb.median_price ?? null,
+        median_chf: eb.median_chf ?? null,
+        exchange_rate: rate,
+      };
+    }
+
+    if (sources.toppreise && sources.toppreise.median_price) {
+      currentDraft.price_analysis.ch_new_price_chf = sources.toppreise.median_price;
+    } else if (sources.digitec && sources.digitec.median_price) {
+      currentDraft.price_analysis.ch_new_price_chf = sources.digitec.median_price;
+    }
+
+    if (sources.idealo && sources.idealo.median_price) {
+      currentDraft.price_analysis.de_new_price_eur = sources.idealo.median_price;
+    }
+
+    if (extResult.verification_links) {
+      currentDraft.price_analysis.verification_links = extResult.verification_links;
+    }
+
+    const res = await fetch(`/api/drafts/${currentDraft.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentDraft),
+    });
+    if (res.ok) {
+      currentDraft = await res.json();
+      await loadDrafts();
+      populateForm();
+    }
+  } catch (err) {
+    console.error("Extension price scrape failed", err);
+    alert(err.message);
+  } finally {
+    if (btnScrapeExtension) btnScrapeExtension.disabled = false;
+    if (analyzeSpinner) {
+      analyzeSpinner.textContent = "Analysiere Bilder & Marktdaten...";
+      analyzeSpinner.classList.add("hidden");
+    }
+  }
 }
 
 async function deleteDraft(draftId) {
