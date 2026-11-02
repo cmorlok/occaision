@@ -807,43 +807,93 @@ async function scrapePricesViaExtension() {
   }
 
   try {
+    // Queue request on Backend broker AND postMessage to Content-Script bridge simultaneously
+    // so whichever channel responds first resolves immediately.
+    await fetch("/api/extension/scrape-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_id: reqId,
+        query: query,
+        eur_to_chf_rate: rate,
+      }),
+    }).catch(() => {});
+
     const extResult = await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
+      let settled = false;
+      let pollTimer = null;
+
+      function finish(ok, dataOrErr) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        if (pollTimer) clearInterval(pollTimer);
         window.removeEventListener("message", onMsg);
-        reject(
+        if (ok) resolve(dataOrErr);
+        else reject(dataOrErr);
+      }
+
+      const timeout = setTimeout(() => {
+        finish(
+          false,
           new Error(
             "Keine Antwort von der Seller Assistant Firefox-Extension erhalten. " +
-              "Bitte stelle sicher, dass die Extension in Firefox geladen ist und lade das Dashboard einmal neu (F5)."
+              "Bitte prüfe in Firefox unter about:debugging, ob die Extension geladen ist, und klicke einmal auf das Seller Assistant Icon in der Firefox-Toolbar (um die Berechtigungen freizugeben)."
           )
         );
       }, 35000);
 
       function onMsg(event) {
-        if (event.source !== window || !event.data) return;
+        if (!event || !event.data) return;
+        let msg = event.data;
+        if (typeof msg === "string") {
+          try {
+            msg = JSON.parse(msg);
+          } catch (_) {
+            return;
+          }
+        }
         if (
-          event.data.type === "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT" &&
-          event.data.requestId === reqId
+          msg &&
+          msg.type === "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT" &&
+          msg.requestId === reqId
         ) {
-          clearTimeout(timeout);
-          window.removeEventListener("message", onMsg);
-          if (event.data.ok) {
-            resolve(event.data);
+          if (msg.ok) {
+            finish(true, msg);
           } else {
-            reject(new Error(event.data.error || "Extension-Fehler bei der Preisrecherche"));
+            finish(false, new Error(msg.error || "Extension-Fehler bei der Preisrecherche"));
           }
         }
       }
 
       window.addEventListener("message", onMsg);
       window.postMessage(
-        {
+        JSON.stringify({
           type: "SELLER_ASSISTANT_SCRAPE_PRICES",
           requestId: reqId,
           query: query,
           eurToChfRate: rate,
-        },
+        }),
         "*"
       );
+
+      // Also poll Backend broker every 1000ms in case content.js is not injected on localhost
+      pollTimer = setInterval(async () => {
+        if (settled) return;
+        try {
+          const r = await fetch(`/api/extension/result/${reqId}`);
+          if (r.ok) {
+            const d = await r.json();
+            if (d.status === "done" && d.result) {
+              if (d.result.ok) {
+                finish(true, d.result);
+              } else {
+                finish(false, new Error(d.result.error || "Extension-Fehler"));
+              }
+            }
+          }
+        } catch (_) {}
+      }, 1000);
     });
 
     if (!currentDraft.price_analysis) {

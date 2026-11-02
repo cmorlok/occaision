@@ -8,6 +8,15 @@
     "--name", "seller-devcontainer",
     "--label", "devcontainer.app=seller"
   ],
+  // Allow Antigravity CLI (agy) to create nested Linux namespaces (CLONE_NEWUSER/CLONE_NEWNS/CLONE_NEWNET)
+  // for its command sandbox inside the Docker Dev Container without failing with 'fork/exec: operation not permitted'.
+  "capAdd": [
+    "SYS_ADMIN"
+  ],
+  "securityOpt": [
+    "seccomp=unconfined",
+    "apparmor=unconfined"
+  ],
   "mounts": [
     {
       "source": "seller-devcontainer-home",

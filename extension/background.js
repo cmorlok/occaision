@@ -265,7 +265,7 @@ async function scrapeViaBackgroundTab(url, sourceId) {
       const timeout = setTimeout(() => {
         browserApi.tabs.onUpdated.removeListener(listener);
         resolve();
-      }, 9000);
+      }, 5000);
       function listener(tabId, info) {
         if (tabId === tab.id && info.status === "complete") {
           clearTimeout(timeout);
@@ -276,8 +276,8 @@ async function scrapeViaBackgroundTab(url, sourceId) {
       browserApi.tabs.onUpdated.addListener(listener);
     });
 
-    // Wait 1800ms for SPA client-side hydration (Digitec, Ricardo, Idealo, eBay)
-    await new Promise(r => setTimeout(r, 1800));
+    // Wait 1200ms for SPA client-side hydration (Digitec, Ricardo, Idealo, eBay)
+    await new Promise(r => setTimeout(r, 1200));
 
     const results = await browserApi.scripting.executeScript({
       target: { tabId: tab.id },
@@ -323,29 +323,81 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94) {
   let prices = [];
   let method = "fetch";
 
-  // Step 1: Fast background fetch()
+  console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
+
+  // Step 1: Fast background fetch() with 5s timeout
   try {
-    const resp = await fetch(url, {
-      credentials: "include",
-      headers: {
-        "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
-      },
-    });
-    if (resp.ok) {
-      const html = await resp.text();
-      prices = extractPricesFromHtml(sourceConfig.id, html);
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+    try {
+      const resp = await fetch(url, {
+        credentials: "include",
+        signal: controller ? controller.signal : undefined,
+        headers: {
+          "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
+        },
+      });
+      if (resp.ok) {
+        const html = await resp.text();
+        prices = extractPricesFromHtml(sourceConfig.id, html);
+        console.log(
+          `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
+        );
+      } else {
+        console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
+      }
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   } catch (err) {
-    console.warn(`[Seller Assistant] Direct fetch failed for ${sourceConfig.id}:`, err);
+    console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
   }
 
   // Step 2: Fallback to inactive background tab if fetch returned 0 prices
   if (prices.length === 0) {
     method = "tab";
+    console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
     prices = await scrapeViaBackgroundTab(url, sourceConfig.id);
+    console.log(`[Seller Assistant] [${sourceConfig.id}] Hintergrund-Tab Ergebnis -> ${prices.length} Preise extrahiert`);
   }
 
-  return computeSourceStats(sourceConfig, prices, url, method, eurToChfRate);
+  const stats = computeSourceStats(sourceConfig, prices, url, method, eurToChfRate);
+  console.log(
+    `[Seller Assistant] [${sourceConfig.id}] Fertig (${method}): ${stats.sample_count} Treffer, Median=${stats.median_price} ${stats.currency}`
+  );
+  return stats;
+}
+
+const activeScrapePromises = new Map();
+
+async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94) {
+  const key = requestId || `q_${query}`;
+  if (activeScrapePromises.has(key)) {
+    return activeScrapePromises.get(key);
+  }
+
+  const p = (async () => {
+    console.log(`[Seller Assistant] === Starte 6-Quellen-Preisrecherche (${key}) für '${query}' ===`);
+    const result = await scrapeAllPriceSources(query, eurToChfRate);
+    console.log(`[Seller Assistant] === 6-Quellen-Preisrecherche abgeschlossen (${key}) ===`, result);
+    if (requestId) {
+      fetch(`${BACKEND_BASE}/api/extension/result`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          Object.assign({ request_id: requestId }, result)
+        ),
+      }).catch(() => {});
+    }
+    return result;
+  })();
+
+  activeScrapePromises.set(key, p);
+  try {
+    return await p;
+  } finally {
+    setTimeout(() => activeScrapePromises.delete(key), 15000);
+  }
 }
 
 async function scrapeAllPriceSources(query, eurToChfRate = 0.94) {
@@ -458,7 +510,11 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
     }
 
     if (request.action === "SCRAPE_ALL_PRICE_SOURCES") {
-      scrapeAllPriceSources(request.query || "", request.eurToChfRate || 0.94)
+      runDeduplicatedScrape(
+        request.requestId || "",
+        request.query || "",
+        request.eurToChfRate || 0.94
+      )
         .then(res => sendResponse(res))
         .catch(err => sendResponse({ ok: false, error: err.message }));
       return true;
@@ -466,6 +522,27 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
 
     return false;
   });
+
+  // Poll Backend broker every 1500ms so Dashboard requests work even without content.js injection
+  setInterval(async () => {
+    try {
+      const res = await fetch(`${BACKEND_BASE}/api/extension/pending`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const pending = data.pending || [];
+      for (const item of pending) {
+        runDeduplicatedScrape(
+          item.request_id,
+          item.query || "",
+          item.eur_to_chf_rate || 0.94
+        ).catch(err => {
+          console.error("[Seller Assistant] Broker scrape error:", err);
+        });
+      }
+    } catch (_) {
+      // Backend offline or unreachable, ignore silently
+    }
+  }, 1500);
 }
 
 if (typeof module !== "undefined" && module.exports) {

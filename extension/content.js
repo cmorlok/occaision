@@ -457,28 +457,53 @@ function executeStep2(draft) {
 }
 
 // Setup Dashboard Bridge on http://127.0.0.1:8000 / http://localhost:8000
+function sendToPage(payloadObj) {
+  if (typeof window === "undefined") return;
+  try {
+    // Send as JSON string to bypass Firefox Xray compartment restrictions on Object properties
+    window.postMessage(JSON.stringify(payloadObj), "*");
+  } catch (e) {
+    console.warn("[Seller Assistant] postMessage warning:", e);
+  }
+}
+
 function setupDashboardBridge() {
   if (typeof document !== "undefined" && document.documentElement) {
     document.documentElement.dataset.sellerAssistantExtension = "installed";
   }
   if (typeof window === "undefined") return;
 
-  window.addEventListener("message", event => {
-    if (event.source !== window || !event.data) return;
+  console.log("[Seller Assistant] Dashboard Content-Script Bridge aktiv auf", location.href);
 
-    if (event.data.type === "SELLER_ASSISTANT_PING") {
-      window.postMessage({ type: "SELLER_ASSISTANT_PONG" }, "*");
+  window.addEventListener("message", event => {
+    if (!event || !event.data) return;
+
+    let msg = event.data;
+    if (typeof msg === "string") {
+      try {
+        msg = JSON.parse(msg);
+      } catch (_) {
+        return;
+      }
+    }
+    if (!msg || typeof msg !== "object") return;
+
+    if (msg.type === "SELLER_ASSISTANT_PING") {
+      sendToPage({ type: "SELLER_ASSISTANT_PONG" });
       return;
     }
 
-    if (event.data.type === "SELLER_ASSISTANT_SCRAPE_PRICES") {
-      const reqId = event.data.requestId;
-      const query = event.data.query || "";
-      const eurToChfRate = event.data.eurToChfRate || 0.94;
+    if (msg.type === "SELLER_ASSISTANT_SCRAPE_PRICES") {
+      const reqId = msg.requestId;
+      const query = msg.query || "";
+      const eurToChfRate = msg.eurToChfRate || 0.94;
+
+      console.log(`[Seller Assistant] Content-Script empfängt Scrape-Anfrage (${reqId}) für '${query}'`);
 
       browserApi.runtime.sendMessage(
         {
           action: "SCRAPE_ALL_PRICE_SOURCES",
+          requestId: reqId,
           query: query,
           eurToChfRate: eurToChfRate,
         },
@@ -490,7 +515,7 @@ function setupDashboardBridge() {
             },
             response || { ok: false, error: "Keine Antwort vom Extension Background-Worker" }
           );
-          window.postMessage(payload, "*");
+          sendToPage(payload);
         }
       );
     }
