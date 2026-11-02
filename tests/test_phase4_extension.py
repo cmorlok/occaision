@@ -162,6 +162,20 @@ def test_extension_price_parser_and_stats_via_node():
       throw new Error('Expected exactly [499] in idealoPrices: ' + JSON.stringify(idealoPrices));
     }
 
+    // Test real Idealo HTML with window.csr.initialData (no background tab DOM rendering required)
+    const realIdealoHtml = fs.readFileSync('temp/idealo.html', 'utf8');
+    const realIdealoItems = bg.extractIdealoItems(realIdealoHtml);
+    if (!realIdealoItems || realIdealoItems.length !== 1) {
+      throw new Error('Expected 1 idealo item from temp/idealo.html via window.csr, got: ' + JSON.stringify(realIdealoItems));
+    }
+    if (realIdealoItems[0].price !== 499 || !realIdealoItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+      throw new Error('Unexpected real idealo item: ' + JSON.stringify(realIdealoItems[0]));
+    }
+    const realIdealoPrices = bg.extractPricesFromHtml('idealo', realIdealoHtml);
+    if (realIdealoPrices.length !== 1 || realIdealoPrices[0] !== 499) {
+      throw new Error('Expected [499] from extractPricesFromHtml for real idealo HTML, got: ' + JSON.stringify(realIdealoPrices));
+    }
+
     // Test Toppreise extraction for single product page and search result list (first entry only)
     const tpSingleHtml = fs.readFileSync('temp/toppreise-SONY Alpha 7 V Body (ILCE7M5B) ab CHF 2\\'173.45 bei Toppreise.ch.html', 'utf8');
     const tpSingleItems = bg.extractToppreiseItems(tpSingleHtml);

@@ -643,6 +643,38 @@ if (typeof browserApi !== "undefined" && browserApi.runtime && browserApi.runtim
           rawPrice: firstPriceEl.textContent.trim(),
         });
       }
+      if (idealoCards.length === 0) {
+        const scripts = document.querySelectorAll("script");
+        for (const s of scripts) {
+          const txt = s.textContent || "";
+          if (txt.includes("window.csr") && txt.includes("searchResult")) {
+            const m = txt.match(/window\.csr\.initialData\[.searchResult.\]\s*=\s*['"]([^'"]+)['"]/);
+            if (m) {
+              try {
+                const binary = atob(m[1]);
+                const bytes = new Uint8Array(binary.length);
+                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                const jsonStr = new TextDecoder("utf-8").decode(bytes);
+                const data = JSON.parse(jsonStr);
+                if (data && Array.isArray(data.items) && data.items.length > 0) {
+                  const first = data.items[0];
+                  const title = first.title || "Idealo Produkt";
+                  const price = typeof first.rawPrice === "number" ? first.rawPrice : null;
+                  const rawPrice = first.offerInfo?.formattedPrice || (price ? `${price} €` : "");
+                  if (rawPrice) {
+                    idealoCards.push({
+                      title,
+                      rawPrice,
+                      url: first.href || "",
+                    });
+                  }
+                }
+              } catch (_) {}
+            }
+            break;
+          }
+        }
+      }
 
       const toppreiseCards = [];
       let tpSingleTitle = "";

@@ -704,8 +704,42 @@ function extractIdealoItems(html, priceNodes = [], idealoCards = []) {
     }
   }
 
-  // 2. HTML regex for .sr-resultList_* and .sr-detailedPriceInfo__price_*
+  // 2. Extract from window.csr.initialData in HTML string
   if (html && typeof html === "string") {
+    const csrMatch = html.match(/window\.csr\.initialData\[.searchResult.\]\s*=\s*[\x22\x27]([^\x22\x27]+)[\x22\x27]/);
+    if (csrMatch) {
+      try {
+        let jsonStr = "";
+        if (typeof Buffer !== "undefined") {
+          jsonStr = Buffer.from(csrMatch[1], "base64").toString("utf-8");
+        } else if (typeof atob === "function") {
+          const binary = atob(csrMatch[1]);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          jsonStr = new TextDecoder("utf-8").decode(bytes);
+        }
+        if (jsonStr) {
+          const data = JSON.parse(jsonStr);
+          if (data && Array.isArray(data.items) && data.items.length > 0) {
+            const first = data.items[0];
+            const title = first.title || "Idealo Produkt";
+            const price = typeof first.rawPrice === "number" ? first.rawPrice : parsePriceText(first.offerInfo && first.offerInfo.formattedPrice ? first.offerInfo.formattedPrice : "");
+            const rawPrice = (first.offerInfo && first.offerInfo.formattedPrice) ? first.offerInfo.formattedPrice : (price ? `${price} €` : "");
+            if (price !== null && price > 0) {
+              items.push({
+                title,
+                condition: "Neu (Bestpreis)",
+                price,
+                rawPrice,
+                url: first.href || "",
+              });
+              return items;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
     // Extract first product summary title
     let title = "";
     const titleMatch = html.match(/class=["'][^"']*(?:productSummary__title|sr-productSummary__title)[^"']*["'][^>]*>([\s\S]*?)<\/(?:div|span|h2|h3|a)>/i);
@@ -1322,6 +1356,38 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
               rawPrice: firstPriceEl.textContent.trim(),
             });
           }
+          if (idealoCards.length === 0) {
+            const scripts = document.querySelectorAll("script");
+            for (const s of scripts) {
+              const txt = s.textContent || "";
+              if (txt.includes("window.csr") && txt.includes("searchResult")) {
+                const m = txt.match(/window\.csr\.initialData\[.searchResult.\]\s*=\s*['"]([^'"]+)['"]/);
+                if (m) {
+                  try {
+                    const binary = atob(m[1]);
+                    const bytes = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+                    const jsonStr = new TextDecoder("utf-8").decode(bytes);
+                    const data = JSON.parse(jsonStr);
+                    if (data && Array.isArray(data.items) && data.items.length > 0) {
+                      const first = data.items[0];
+                      const title = first.title || "Idealo Produkt";
+                      const price = typeof first.rawPrice === "number" ? first.rawPrice : null;
+                      const rawPrice = first.offerInfo?.formattedPrice || (price ? `${price} €` : "");
+                      if (rawPrice) {
+                        idealoCards.push({
+                          title,
+                          rawPrice,
+                          url: first.href || "",
+                        });
+                      }
+                    }
+                  } catch (_) {}
+                }
+                break;
+              }
+            }
+          }
 
           const toppreiseCards = [];
           let tpSingleTitle = "";
@@ -1723,7 +1789,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let ricardoItems = [];
   let tuttiItems = [];
 
-  const TAB_ONLY_SOURCES = new Set(["idealo", "digitec", "ricardo", "tutti"]);
+  const TAB_ONLY_SOURCES = new Set(["digitec", "ricardo", "tutti"]);
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
   // Step 1: Fast background fetch() with 5s timeout (skipped for client-rendered SPA sources like Idealo)
@@ -1753,6 +1819,9 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
             } else if (sourceConfig.id === "kleinanzeigen") {
               kleinanzeigenItems = extractKleinanzeigenItems(html);
               prices = kleinanzeigenItems.map(it => it.price);
+            } else if (sourceConfig.id === "idealo") {
+              idealoItems = extractIdealoItems(html);
+              prices = idealoItems.map(it => it.price);
             } else if (sourceConfig.id === "toppreise") {
               toppreiseItems = extractToppreiseItems(html);
               prices = toppreiseItems.map(it => it.price);
