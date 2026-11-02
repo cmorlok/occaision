@@ -93,13 +93,39 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "SCRAPE_ALL_PRICE_SOURCES" in bg_js_code
     assert "scrapeSourceHybrid" in bg_js_code
     assert "LH_ItemCondition=3000" in bg_js_code
+    assert "global.zustand:alright%2Clike_new%2Cok" in bg_js_code
+    assert "anbieter:privat" in bg_js_code
     assert "isLocalDashboard" in content_js_code
     assert "SELLER_ASSISTANT_SCRAPE_PRICES" in content_js_code
 
 
 def test_extension_price_parser_and_stats_via_node():
     node_script = """
+    const fs = require('fs');
     const bg = require('./extension/background.js');
+
+    // Test Kleinanzeigen verification URL structure
+    const links = bg.buildVerificationLinks('HP Color LaserJet');
+    if (!links.kleinanzeigen_search_url.includes('anbieter:privat') || !links.kleinanzeigen_search_url.includes('global.zustand:alright%2Clike_new%2Cok')) {
+      throw new Error('Kleinanzeigen search url missing condition or private filter: ' + links.kleinanzeigen_search_url);
+    }
+
+    // Test Kleinanzeigen JSON parsing
+    const kaJsonContent = fs.readFileSync('temp/kleinanzeigen.json', 'utf8');
+    const kaItems = bg.extractKleinanzeigenItems(kaJsonContent);
+    if (!Array.isArray(kaItems) || kaItems.length !== 25) {
+      throw new Error('Expected 25 kleinanzeigen items from temp/kleinanzeigen.json, got: ' + (kaItems ? kaItems.length : 0));
+    }
+    for (const item of kaItems) {
+      if (!item.title || typeof item.price !== 'number' || item.posterType !== 'PRIVATE') {
+        throw new Error('Invalid kleinanzeigen item: ' + JSON.stringify(item));
+      }
+    }
+    const kaPrices = bg.extractPricesFromHtml('kleinanzeigen', kaJsonContent);
+    if (kaPrices.length !== 25 || kaPrices[0] !== 50) {
+      throw new Error('Unexpected extractPricesFromHtml for kleinanzeigen: ' + JSON.stringify(kaPrices));
+    }
+
     const ebayHtml = `
       <div class="s-item"><div class="s-item__title">Shop on eBay</div><span class="s-item__price">EUR 19,99</span></div>
       <div class="s-item"><div class="s-item__title">HP 4302fdw</div><span class="s-item__price">EUR 250,00</span></div>

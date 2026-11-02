@@ -52,7 +52,7 @@ function buildVerificationLinks(query) {
   const q = encodeURIComponent((query || "").trim()).replace(/%20/g, "+");
   return {
     ebay_sold_url: `https://www.ebay.de/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`,
-    kleinanzeigen_search_url: `https://www.kleinanzeigen.de/s-${q}/k0`,
+    kleinanzeigen_search_url: `https://www.kleinanzeigen.de/anbieter:privat/s-${q}/k0+global.zustand:alright%2Clike_new%2Cok`,
     idealo_url: `https://www.idealo.de/preisvergleich/MainSearchProductCategory.html?q=${q}`,
     ricardo_search_url: `https://www.ricardo.ch/de/s/${q}`,
     toppreise_url: `https://www.toppreise.ch/produktsuche?q=${q}`,
@@ -253,6 +253,165 @@ function logEbayExtractedItems(items) {
   }
 }
 
+function extractKleinanzeigenItems(content) {
+  if (!content) return [];
+
+  let data = null;
+  if (typeof content === "object") {
+    data = content;
+  } else if (typeof content === "string") {
+    let trimmed = content.trim();
+    if (trimmed.includes("<pre") && trimmed.includes("</pre>")) {
+      const m = trimmed.match(/<pre[^>]*>([\s\S]*?)<\/pre>/i);
+      if (m) trimmed = m[1].trim();
+    }
+    if (trimmed.startsWith("{") || trimmed.includes('"resultList"')) {
+      try {
+        const start = trimmed.indexOf("{");
+        const end = trimmed.lastIndexOf("}");
+        if (start !== -1 && end > start) {
+          data = JSON.parse(trimmed.slice(start, end + 1));
+        } else {
+          data = JSON.parse(trimmed);
+        }
+      } catch (_) {}
+    }
+  }
+
+  // 1. Kleinanzeigen JSON API parsing
+  if (data && data.result && Array.isArray(data.result.resultList)) {
+    const items = [];
+    for (const entry of data.result.resultList) {
+      const ad = entry.organicAdPreview || entry.adPreview;
+      if (!ad) continue;
+      // Filter for private sellers only
+      if (ad.posterType && ad.posterType !== "PRIVATE") continue;
+
+      const rawPrice = (ad.price || "").trim();
+      const price = parsePriceText(rawPrice);
+      if (price === null) continue;
+
+      let condition = "Gebraucht";
+      if (ad.condition && typeof ad.condition === "string") {
+        condition = ad.condition.trim();
+      } else if (ad.attributes && Array.isArray(ad.attributes)) {
+        const condAttr = ad.attributes.find(a =>
+          typeof a === "string" && /neu|wie neu|sehr gut|gut|in ordnung|defekt/i.test(a)
+        );
+        if (condAttr) condition = condAttr.trim();
+      }
+      if (condition === "Gebraucht" && ad.description && typeof ad.description === "string") {
+        const m = ad.description.match(/(?:Zustand|Condition)\s*[:\-]\s*([^\n.,;]+)/i);
+        if (m && m[1]) {
+          condition = m[1].trim();
+        }
+      }
+
+      items.push({
+        id: ad.id,
+        title: (ad.title || "").trim(),
+        condition,
+        price,
+        rawPrice,
+        posterType: ad.posterType || "PRIVATE",
+      });
+    }
+    return items.slice(0, 30);
+  }
+
+  // 2. Kleinanzeigen HTML fallback parsing
+  if (typeof content === "string") {
+    const items = [];
+    const articleRegex = /<article[^>]*class=["'][^"']*aditem[^"']*["'][\s\S]*?<\/article>/gi;
+    let m;
+    while ((m = articleRegex.exec(content)) !== null) {
+      const block = m[0];
+      if (/class=["'][^"']*(?:badge-commercial|is-topad)[^"']*["']/i.test(block) && !block.includes("badge-private")) {
+        continue;
+      }
+      let title = "";
+      const titleMatch = block.match(/<a[^>]*class=["'][^"']*(?:ellipsis|text-module-begin)[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+      if (titleMatch) {
+        title = titleMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      }
+      const priceMatch = block.match(/class=["'][^"']*aditem-main--middle--price-shipping--price[^"']*["'][^>]*>([\s\S]*?)<\/p>/i);
+      if (!priceMatch) continue;
+      const rawPrice = priceMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      const price = parsePriceText(rawPrice);
+      if (price === null) continue;
+
+      let condition = "Gebraucht";
+      const condMatch = block.match(/class=["'][^"']*(?:aditem-main--middle--attribute|condition)[^"']*["'][^>]*>([\s\S]*?)<\/(?:span|div|p)>/i);
+      if (condMatch) {
+        condition = condMatch[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      } else {
+        const descMatch = block.match(/class=["'][^"']*aditem-main--middle--description[^"']*["'][^>]*>([\s\S]*?)<\/p>/i);
+        if (descMatch) {
+          const descText = descMatch[1].replace(/<[^>]+>/g, " ");
+          const cm = descText.match(/(?:Zustand|Condition)\s*[:\-]\s*([^\n.,;]+)/i);
+          if (cm && cm[1]) condition = cm[1].trim();
+        }
+      }
+
+      items.push({
+        title: title || "Kleinanzeigen Anzeige",
+        condition,
+        price,
+        rawPrice,
+        posterType: "PRIVATE",
+      });
+    }
+    if (items.length > 0) {
+      return items.slice(0, 30);
+    }
+
+    const kaRegex = /aditem-main--middle--price-shipping--price[^>]*>([\s\S]*?)<\/p>/gi;
+    while ((m = kaRegex.exec(content)) !== null) {
+      const rawText = m[1].replace(/<[^>]+>/g, " ").trim();
+      const val = parsePriceText(rawText);
+      if (val !== null) {
+        items.push({
+          title: "Kleinanzeigen Anzeige",
+          condition: "Gebraucht",
+          price: val,
+          rawPrice: rawText,
+          posterType: "PRIVATE",
+        });
+      }
+    }
+    return items.slice(0, 30);
+  }
+
+  return [];
+}
+
+function logKleinanzeigenExtractedItems(items) {
+  if (!items || items.length === 0) {
+    console.log("[Seller Assistant] [kleinanzeigen] Keine Kleinanzeigen-Artikel extrahiert (0 Treffer).");
+    return;
+  }
+  console.group(`[Seller Assistant] [kleinanzeigen] Extrahierte Kleinanzeigen-Artikel (${items.length} Treffer):`);
+  items.forEach((it, idx) => {
+    console.log(
+      `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Gebraucht"}] | Titel: "${it.title}"`
+    );
+  });
+  console.groupEnd();
+
+  if (typeof console.table === "function") {
+    try {
+      console.table(
+        items.map((it, idx) => ({
+          "#": idx + 1,
+          "Preis (€)": it.price,
+          "Zustand": it.condition || "Gebraucht",
+          "Titel": it.title,
+        }))
+      );
+    } catch (_) {}
+  }
+}
+
 function extractPricesFromHtml(sourceId, html) {
   if (!html || typeof html !== "string") return [];
 
@@ -273,19 +432,16 @@ function extractPricesFromHtml(sourceId, html) {
     return items.map(it => it.price);
   }
 
+  if (sourceId === "kleinanzeigen") {
+    const items = extractKleinanzeigenItems(html);
+    return items.map(it => it.price);
+  }
+
   // Try JSON-LD structured product/offer data first
   const ldPrices = extractJsonLdPrices(html);
   prices.push(...ldPrices);
 
-  if (sourceId === "kleinanzeigen") {
-    const kaRegex = /aditem-main--middle--price-shipping--price[^>]*>([\s\S]*?)<\/p>/gi;
-    let m;
-    while ((m = kaRegex.exec(html)) !== null) {
-      const rawText = m[1].replace(/<[^>]+>/g, " ").trim();
-      const val = parsePriceText(rawText);
-      if (val !== null) prices.push(val);
-    }
-  } else if (sourceId === "idealo") {
+  if (sourceId === "idealo") {
     const idealoRegex = /(?:ab\s*)?(\d{1,5}(?:[.,]\d{2}))\s*€/gi;
     let m;
     while ((m = idealoRegex.exec(html)) !== null) {
@@ -414,25 +570,38 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
     // Wait 1200ms for SPA client-side hydration (Digitec, Ricardo, Idealo, eBay)
     await new Promise(r => setTimeout(r, 1200));
 
-    const results = await api.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        const html = document.documentElement ? document.documentElement.outerHTML : "";
-        const currentUrl = location.href || "";
-        const priceNodes = Array.from(
-          document.querySelectorAll(
-            '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="price" i], [data-testid*="price" i]'
+    let pageData = null;
+    try {
+      const results = await api.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const html = document.documentElement ? document.documentElement.outerHTML : (document.body ? document.body.innerText : "");
+          const currentUrl = location.href || "";
+          const priceNodes = Array.from(
+            document.querySelectorAll(
+              '.s-item__price, .s-card__price, .aditem-main--middle--price-shipping--price, [class*="price" i], [data-testid*="price" i]'
+            )
           )
-        )
-          .slice(0, 40)
-          .map(el => (el.textContent || "").trim())
-          .filter(Boolean);
-        return { html, currentUrl, priceNodes };
-      },
-    });
+            .slice(0, 40)
+            .map(el => (el.textContent || "").trim())
+            .filter(Boolean);
+          return { html, currentUrl, priceNodes };
+        },
+      });
+      if (results && results[0] && results[0].result) {
+        pageData = results[0].result;
+      }
+    } catch (scriptErr) {
+      console.warn(`[Seller Assistant] Tab-Scripting fehlgeschlagen (${scriptErr.message}). Versuche content.js Message-Fallback...`);
+      if (api.tabs && api.tabs.sendMessage) {
+        try {
+          pageData = await api.tabs.sendMessage(tab.id, { action: "EXTRACT_PAGE_DATA" });
+        } catch (_) {}
+      }
+    }
 
-    if (results && results[0] && results[0].result) {
-      const { html, currentUrl, priceNodes } = results[0].result;
+    if (pageData) {
+      const { html, currentUrl, priceNodes } = pageData;
       if (sourceId === "ebay_de_sold" && isEbayLoginRequired(html, currentUrl)) {
         return { prices: [], loginRequired: true };
       }
@@ -440,6 +609,12 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false) {
         const ebayItems = extractEbayItemsFromHtml(html);
         if (ebayItems.length > 0) {
           return { prices: ebayItems.map(it => it.price), ebayItems, loginRequired: false };
+        }
+      }
+      if (sourceId === "kleinanzeigen") {
+        const kaItems = extractKleinanzeigenItems(html);
+        if (kaItems.length > 0) {
+          return { prices: kaItems.map(it => it.price), kleinanzeigenItems: kaItems, loginRequired: false };
         }
       }
       const extracted = extractPricesFromHtml(sourceId, html);
@@ -480,54 +655,54 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let method = "fetch";
   let loginRequired = false;
   let ebayItems = [];
+  let kleinanzeigenItems = [];
 
   console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
-  // Step 1: Fast background fetch() with 5s timeout (unless keepTabsOpen is requested, which forces tabs to stay open)
-  if (!keepTabsOpen) {
+  // Step 1: Fast background fetch() with 5s timeout
+  try {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
     try {
-      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-      const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
-      try {
-        const resp = await fetch(url, {
-          credentials: "include",
-          signal: controller ? controller.signal : undefined,
-          headers: {
-            "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
-          },
-        });
-        if (resp.ok) {
-          const html = await resp.text();
-          if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
-            loginRequired = true;
-            console.warn(
-              `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
-            );
-          } else {
-            if (sourceConfig.id === "ebay_de_sold") {
-              ebayItems = extractEbayItemsFromHtml(html);
-              prices = ebayItems.map(it => it.price);
-            } else {
-              prices = extractPricesFromHtml(sourceConfig.id, html);
-            }
-            console.log(
-              `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
-            );
-          }
+      const resp = await fetch(url, {
+        credentials: "include",
+        signal: controller ? controller.signal : undefined,
+        headers: {
+          "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8",
+        },
+      });
+      if (resp.ok) {
+        const html = await resp.text();
+        if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
+          loginRequired = true;
+          console.warn(
+            `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
+          );
         } else {
-          console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
+          if (sourceConfig.id === "ebay_de_sold") {
+            ebayItems = extractEbayItemsFromHtml(html);
+            prices = ebayItems.map(it => it.price);
+          } else if (sourceConfig.id === "kleinanzeigen") {
+            kleinanzeigenItems = extractKleinanzeigenItems(html);
+            prices = kleinanzeigenItems.map(it => it.price);
+          } else {
+            prices = extractPricesFromHtml(sourceConfig.id, html);
+          }
+          console.log(
+            `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
+          );
         }
-      } finally {
-        if (timer) clearTimeout(timer);
+      } else {
+        console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
       }
-    } catch (err) {
-      console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
-  } else {
-    console.log(`[Seller Assistant] [${sourceConfig.id}] Debug: keepTabsOpen aktiv -> öffne Browser-Tab zur Inspektion...`);
+  } catch (err) {
+    console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
   }
 
-  // Step 2: Fallback to inactive background tab if fetch returned 0 prices (or in keepTabsOpen mode)
+  // Step 2: Fallback to inactive background tab if fetch returned 0 prices
   if (prices.length === 0) {
     method = "tab";
     console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
@@ -536,10 +711,24 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     if (tabRes.ebayItems && tabRes.ebayItems.length > 0) {
       ebayItems = tabRes.ebayItems;
     }
+    if (tabRes.kleinanzeigenItems && tabRes.kleinanzeigenItems.length > 0) {
+      kleinanzeigenItems = tabRes.kleinanzeigenItems;
+    }
     if (tabRes.loginRequired) {
       loginRequired = true;
     }
     console.log(`[Seller Assistant] [${sourceConfig.id}] Hintergrund-Tab Ergebnis -> ${prices.length} Preise extrahiert (loginRequired=${loginRequired})`);
+  } else if (keepTabsOpen) {
+    // If keepTabsOpen is active and fetch succeeded, open the tab for inspection
+    const api = getBrowserApi();
+    if (api && api.tabs && api.tabs.create) {
+      try {
+        const tab = await api.tabs.create({ url, active: false });
+        console.log(`[Seller Assistant] [Debug] Tab #${tab.id} für ${sourceConfig.id} geöffnet zur Inspektion (${url})`);
+      } catch (e) {
+        console.warn(`[Seller Assistant] Konnte Debug-Tab für ${sourceConfig.id} nicht öffnen:`, e);
+      }
+    }
   }
 
   const extra = {};
@@ -555,6 +744,11 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     if (ebayItems && ebayItems.length > 0) {
       extra.items = ebayItems;
       logEbayExtractedItems(ebayItems);
+    }
+  } else if (sourceConfig.id === "kleinanzeigen") {
+    if (kleinanzeigenItems && kleinanzeigenItems.length > 0) {
+      extra.items = kleinanzeigenItems;
+      logKleinanzeigenExtractedItems(kleinanzeigenItems);
     }
   }
 
@@ -728,6 +922,8 @@ if (typeof module !== "undefined" && module.exports) {
     extractPricesFromHtml,
     extractEbayItemsFromHtml,
     logEbayExtractedItems,
+    extractKleinanzeigenItems,
+    logKleinanzeigenExtractedItems,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,

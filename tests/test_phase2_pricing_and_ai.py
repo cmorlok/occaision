@@ -35,6 +35,8 @@ def test_verification_links_generation():
     assert "Sony" in links.ebay_sold_url
     
     assert "kleinanzeigen.de" in links.kleinanzeigen_search_url
+    assert "anbieter:privat" in links.kleinanzeigen_search_url
+    assert "global.zustand:alright%2Clike_new%2Cok" in links.kleinanzeigen_search_url
     assert "Sony" in links.kleinanzeigen_search_url
     
     assert "idealo.de" in links.idealo_url

@@ -1005,6 +1005,27 @@ async function scrapePricesViaExtension() {
       currentDraft.price_analysis.ebay_stats = null;
     }
 
+    if (sources.kleinanzeigen && sources.kleinanzeigen.items && sources.kleinanzeigen.items.length > 0) {
+      const ka = sources.kleinanzeigen;
+      console.group(`[Seller Assistant] [Dashboard] Kleinanzeigen extrahierte Artikel (${ka.items.length} Treffer):`);
+      ka.items.forEach((it, idx) => {
+        console.log(`  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Gebraucht"}] | "${it.title}"`);
+      });
+      console.groupEnd();
+      if (typeof console.table === "function") {
+        try {
+          console.table(
+            ka.items.map((it, idx) => ({
+              "#": idx + 1,
+              "Preis (€)": it.price,
+              "Zustand": it.condition || "Gebraucht",
+              "Titel": it.title,
+            }))
+          );
+        } catch (_) {}
+      }
+    }
+
     if (sources.toppreise && sources.toppreise.median_price) {
       currentDraft.price_analysis.ch_new_price_chf = sources.toppreise.median_price;
     } else if (sources.digitec && sources.digitec.median_price) {
