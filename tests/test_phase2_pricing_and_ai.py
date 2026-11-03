@@ -253,7 +253,7 @@ async def test_ai_prompt_debug_logging(temp_data_dir: Path, caplog):
         "tutti_vhb_chf": 500.0,
     }
 
-    with caplog.at_level(logging.DEBUG, logger="seller.ai"):
+    with caplog.at_level(logging.DEBUG, logger="occaision.ai"):
         with patch.object(ai_service, "_call_gemini", new_callable=AsyncMock) as mock_call:
             mock_call.return_value = json.dumps(mock_resp)
             await ai_service.analyze_draft(draft=draft, image_paths=[])

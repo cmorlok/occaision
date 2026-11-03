@@ -2,7 +2,7 @@
 set -e
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGE_NAME="seller-assistant"
+IMAGE_NAME="occaision"
 TAG="${1:-latest}"
 FULL_IMAGE="${IMAGE_NAME}:${TAG}"
 
@@ -38,7 +38,7 @@ echo -e "${BOLD}🚀 CONTAINER STARTEN (HOST):${NC}"
 echo -e "--------------------------------------------------------------------------------"
 echo -e "1. ${YELLOW}Container im Hintergrund starten:${NC}"
 echo -e "   ${BOLD}docker run -d \\${NC}"
-echo -e "     ${BOLD}--name seller-assistant \\${NC}"
+echo -e "     ${BOLD}--name occaision \\${NC}"
 echo -e "     ${BOLD}-p 8000:8000 \\${NC}"
 echo -e "     ${BOLD}-v \"\$(pwd)/data:/app/data\" \\${NC}"
 echo -e "     ${BOLD}--env-file .env \\${NC}"
@@ -46,12 +46,12 @@ echo -e "     ${BOLD}--restart unless-stopped \\${NC}"
 echo -e "     ${BOLD}${FULL_IMAGE}${NC}\n"
 
 echo -e "2. ${YELLOW}Status & Logs überprüfen:${NC}"
-echo -e "   docker ps --filter \"name=seller-assistant\""
-echo -e "   docker logs -f seller-assistant\n"
+echo -e "   docker ps --filter \"name=occaision\""
+echo -e "   docker logs -f occaision\n"
 
 echo -e "3. ${YELLOW}Web-Dashboard öffnen:${NC}"
 echo -e "   ${BLUE}http://127.0.0.1:8000/${NC}\n"
 
 echo -e "4. ${YELLOW}Container stoppen / entfernen:${NC}"
-echo -e "   docker stop seller-assistant && docker rm seller-assistant"
+echo -e "   docker stop occaision && docker rm occaision"
 echo -e "--------------------------------------------------------------------------------\n"

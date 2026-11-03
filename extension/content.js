@@ -1,4 +1,4 @@
-// Content Script for Seller Assistant Smart-Panel
+// Content Script for OccAIsion Smart-Panel
 // Injected into ricardo.ch and tutti.ch listing creation wizards.
 
 const browserApi = typeof browser !== "undefined" ? browser : chrome;
@@ -71,7 +71,7 @@ async function fillMuiSelect(comboboxEl, matchFn) {
     // Fallback: close popover if not selected
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
   } catch (e) {
-    console.warn("[Seller Assistant] Error in fillMuiSelect:", e);
+    console.warn("[OccAIsion] Error in fillMuiSelect:", e);
   }
   return false;
 }
@@ -165,12 +165,12 @@ async function autoSelectTuttiCategory(suggestion, productTitle) {
     }
 
     if (matchedItem) {
-      console.log("[Seller Assistant] Tutti Kategorie-Klick:", matchedItem.textContent.trim());
+      console.log("[OccAIsion] Tutti Kategorie-Klick:", matchedItem.textContent.trim());
       matchedItem.click();
       await new Promise(r => setTimeout(r, 220));
     } else {
       // Recommended category does not exist at this level: keep dropdown open for user!
-      console.log("[Seller Assistant] Empfohlene Kategorie nicht gefunden, Dropdown bleibt offen für manuelle Auswahl.");
+      console.log("[OccAIsion] Empfohlene Kategorie nicht gefunden, Dropdown bleibt offen für manuelle Auswahl.");
       return { ok: false, status: "manual_selection_required" };
     }
   }
@@ -202,7 +202,7 @@ function injectFilesIntoInput(fileInput, imagePayloads) {
       try {
         targetInput.files = dt.files;
       } catch (e2) {
-        console.warn("[Seller Assistant] Direct fileInput.files assignment failed:", e2);
+        console.warn("[OccAIsion] Direct fileInput.files assignment failed:", e2);
       }
     }
 
@@ -226,12 +226,12 @@ function injectFilesIntoInput(fileInput, imagePayloads) {
         });
         dropzone.dispatchEvent(dropEvent);
       } catch (e) {
-        console.warn("[Seller Assistant] Drop event trigger warning:", e);
+        console.warn("[OccAIsion] Drop event trigger warning:", e);
       }
     }
-    console.log(`[Seller Assistant] Injected ${imagePayloads.length} files successfully.`);
+    console.log(`[OccAIsion] Injected ${imagePayloads.length} files successfully.`);
   } catch (err) {
-    console.error("[Seller Assistant] Error injecting files:", err);
+    console.error("[OccAIsion] Error injecting files:", err);
   }
 }
 
@@ -394,7 +394,7 @@ function createSmartPanel() {
 
   panelElement.innerHTML = `
     <div class="ai-panel-header">
-      <span class="ai-panel-title">🤖 Seller Assistant</span>
+      <span class="ai-panel-title">🤖 OccAIsion</span>
       <div class="ai-panel-header-buttons">
         <button id="ai-ext-collapse-btn" class="ai-btn-icon" title="Minimieren">_</button>
       </div>
@@ -594,7 +594,7 @@ async function executeStep1(draft) {
       }
     }
   } catch (err) {
-    console.warn("[Seller Assistant] Error fetching/injecting images in Step 1:", err);
+    console.warn("[OccAIsion] Error fetching/injecting images in Step 1:", err);
   }
 
   // 2. Platform specific assistance in Step 1: Category on Tutti
@@ -602,7 +602,7 @@ async function executeStep1(draft) {
     try {
       await autoSelectTuttiCategory(data.category, draft.identified_product || data.title);
     } catch (err) {
-      console.warn("[Seller Assistant] Tutti category selection error:", err);
+      console.warn("[OccAIsion] Tutti category selection error:", err);
     }
   }
 
@@ -630,7 +630,7 @@ async function executeStep2(draft) {
         injectFilesIntoInput(fileInput, imagesResponse.images);
       }
     } catch (e) {
-      console.warn("[Seller Assistant] Step 2 image injection warning:", e);
+      console.warn("[OccAIsion] Step 2 image injection warning:", e);
     }
   }
 
@@ -753,17 +753,17 @@ function sendToPage(payloadObj) {
     // Send as JSON string to bypass Firefox Xray compartment restrictions on Object properties
     window.postMessage(JSON.stringify(payloadObj), "*");
   } catch (e) {
-    console.warn("[Seller Assistant] postMessage warning:", e);
+    console.warn("[OccAIsion] postMessage warning:", e);
   }
 }
 
 function setupDashboardBridge() {
   if (typeof document !== "undefined" && document.documentElement) {
-    document.documentElement.dataset.sellerAssistantExtension = "installed";
+    document.documentElement.dataset.occaisionExtension = "installed";
   }
   if (typeof window === "undefined") return;
 
-  console.log("[Seller Assistant] Dashboard Content-Script Bridge aktiv auf", location.href);
+  console.log("[OccAIsion] Dashboard Content-Script Bridge aktiv auf", location.href);
 
   window.addEventListener("message", event => {
     if (!event || !event.data) return;
@@ -778,19 +778,19 @@ function setupDashboardBridge() {
     }
     if (!msg || typeof msg !== "object") return;
 
-    if (msg.type === "SELLER_ASSISTANT_PING") {
-      sendToPage({ type: "SELLER_ASSISTANT_PONG" });
+    if (msg.type === "OCCAISION_PING") {
+      sendToPage({ type: "OCCAISION_PONG" });
       return;
     }
 
-    if (msg.type === "SELLER_ASSISTANT_SCRAPE_PRICES") {
+    if (msg.type === "OCCAISION_SCRAPE_PRICES") {
       const reqId = msg.requestId;
       const query = msg.query || "";
       const eurToChfRate = msg.eurToChfRate || 0.94;
       const enabledSources = Array.isArray(msg.enabledSources) ? msg.enabledSources : null;
       const keepTabsOpen = Boolean(msg.keepTabsOpen);
 
-      console.log(`[Seller Assistant] Content-Script empfängt Scrape-Anfrage (${reqId}) für '${query}' (enabled: ${enabledSources ? enabledSources.join(',') : 'all'}, keepTabsOpen: ${keepTabsOpen})`);
+      console.log(`[OccAIsion] Content-Script empfängt Scrape-Anfrage (${reqId}) für '${query}' (enabled: ${enabledSources ? enabledSources.join(',') : 'all'}, keepTabsOpen: ${keepTabsOpen})`);
 
       browserApi.runtime.sendMessage(
         {
@@ -804,7 +804,7 @@ function setupDashboardBridge() {
         response => {
           if (response && response.sources && response.sources.ebay_de_sold && response.sources.ebay_de_sold.items) {
             const items = response.sources.ebay_de_sold.items;
-            console.group(`[Seller Assistant] [Content-Bridge] eBay DE verkaufte Artikel (${items.length} Treffer):`);
+            console.group(`[OccAIsion] [Content-Bridge] eBay DE verkaufte Artikel (${items.length} Treffer):`);
             items.forEach((it, idx) => {
               console.log(`  [#${idx + 1}] ${it.price} € | Zustand: [${it.condition}] | "${it.title}"`);
             });
@@ -824,7 +824,7 @@ function setupDashboardBridge() {
           }
           if (response && response.sources && response.sources.kleinanzeigen && response.sources.kleinanzeigen.items) {
             const kaItems = response.sources.kleinanzeigen.items;
-            console.group(`[Seller Assistant] [Content-Bridge] Kleinanzeigen Artikel (${kaItems.length} Treffer):`);
+            console.group(`[OccAIsion] [Content-Bridge] Kleinanzeigen Artikel (${kaItems.length} Treffer):`);
             kaItems.forEach((it, idx) => {
               console.log(`  [#${idx + 1}] ${it.price} € | Zustand: [${it.condition || "Gebraucht"}] | "${it.title}"`);
             });
@@ -844,7 +844,7 @@ function setupDashboardBridge() {
           }
           if (response && response.sources && response.sources.idealo && response.sources.idealo.items) {
             const idealoItems = response.sources.idealo.items;
-            console.group(`[Seller Assistant] [Content-Bridge] Idealo Neupreise (${idealoItems.length} Treffer):`);
+            console.group(`[OccAIsion] [Content-Bridge] Idealo Neupreise (${idealoItems.length} Treffer):`);
             idealoItems.forEach((it, idx) => {
               console.log(`  [#${idx + 1}] ${it.price} € | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
             });
@@ -864,7 +864,7 @@ function setupDashboardBridge() {
           }
           if (response && response.sources && response.sources.toppreise && response.sources.toppreise.items) {
             const toppreiseItems = response.sources.toppreise.items;
-            console.group(`[Seller Assistant] [Content-Bridge] Toppreise Neupreise (${toppreiseItems.length} Treffer):`);
+            console.group(`[OccAIsion] [Content-Bridge] Toppreise Neupreise (${toppreiseItems.length} Treffer):`);
             toppreiseItems.forEach((it, idx) => {
               console.log(`  [#${idx + 1}] ${it.price} CHF | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
             });
@@ -884,7 +884,7 @@ function setupDashboardBridge() {
           }
           if (response && response.sources && response.sources.digitec && response.sources.digitec.items) {
             const digitecItems = response.sources.digitec.items;
-            console.group(`[Seller Assistant] [Content-Bridge] Galaxus/Digitec Neupreise (${digitecItems.length} Treffer):`);
+            console.group(`[OccAIsion] [Content-Bridge] Galaxus/Digitec Neupreise (${digitecItems.length} Treffer):`);
             digitecItems.forEach((it, idx) => {
               console.log(`  [#${idx + 1}] ${it.price} CHF | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
             });
@@ -904,7 +904,7 @@ function setupDashboardBridge() {
           }
           const payload = Object.assign(
             {
-              type: "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT",
+              type: "OCCAISION_SCRAPE_PRICES_RESULT",
               requestId: reqId,
             },
             response || { ok: false, error: "Keine Antwort vom Extension Background-Worker" }

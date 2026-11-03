@@ -21,7 +21,7 @@ from backend.models import (
     VerificationLinks,
 )
 
-logger = logging.getLogger("seller.ai")
+logger = logging.getLogger("occaision.ai")
 if not logger.handlers:
     _handler = logging.StreamHandler(sys.stdout)
     _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))

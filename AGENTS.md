@@ -1,6 +1,6 @@
 # Agent Engineering Guidelines & Development Workflow (`AGENTS.md`)
 
-You are an autonomous software engineering agent implementing the **Seller Assistant**.  
+You are an autonomous software engineering agent implementing the **OccAIsion**.  
 Before writing any code, read `REQUIREMENTS.md` and `IMPLEMENTATION_PLAN.md` completely.
 
 Follow these mandatory engineering rules at all times.
@@ -90,7 +90,7 @@ If a test fails more than twice in a row:
   - Project names
   - Extension titles or action names (e.g., in `manifest.json`)
   - Web dashboard titles or UI headers
-  - ZIP archives or build artifacts (always use `dist/seller-assistant.zip`)
+  - ZIP archives or build artifacts (always use `dist/occaision.zip`)
   - Repository / package names
-* **The canonical, mandatory project and extension name is:** **`Seller Assistant`** (slug: `seller-assistant`).
+* **The canonical, mandatory project and extension name is:** **`OccAIsion`** (slug: `occaision`).
 * Third-party platform names are strictly confined to internal integration code where platform-specific logic, selectors, or API URLs inherently require them (e.g. `isRicardo()`, domain host permissions, `ricardo_title`). All visible user-facing titles, build outputs, and extension metadata must remain strictly neutral.

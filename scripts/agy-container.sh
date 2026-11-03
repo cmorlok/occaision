@@ -5,8 +5,8 @@
 
 set -e
 
-CONTAINER_NAME="seller-devcontainer"
-LABEL_FILTER="devcontainer.app=seller"
+CONTAINER_NAME="occaision-devcontainer"
+LABEL_FILTER="devcontainer.app=occaision"
 
 # Determine workspace directory (root of the repo), resolving symlinks if invoked via symlink
 SOURCE="${BASH_SOURCE[0]}"
@@ -71,6 +71,6 @@ echo "Dev Container '${CONTAINER_NAME}' is not running."
 echo "Please start the Dev Container in VS Code ('Dev Containers: Reopen in Container')."
 echo ""
 echo "Alternatively, you can build and run a one-off instance with:"
-echo "  docker build -f \"$WORKSPACE_DIR/.devcontainer/Dockerfile\" -t seller-devcontainer \"$WORKSPACE_DIR\""
-echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":\"$TARGET_WORKDIR\" -v seller-devcontainer-home:/home/developer -w \"$TARGET_WORKDIR\" -u developer seller-devcontainer agy \"$@\""
+echo "  docker build -f \"$WORKSPACE_DIR/.devcontainer/Dockerfile\" -t occaision-devcontainer \"$WORKSPACE_DIR\""
+echo "  docker run $DOCKER_FLAGS --rm -v \"$WORKSPACE_DIR\":\"$TARGET_WORKDIR\" -v occaision-devcontainer-home:/home/developer -w \"$TARGET_WORKDIR\" -u developer occaision-devcontainer agy \"$@\""
 exit 1

@@ -1,7 +1,7 @@
 # Anforderungsdokument (Requirements Document)
-## KI-gestützter Inserate-Generator (Seller Assistant)
+## KI-gestützter Inserate-Generator (OccAIsion)
 
-* **Projekt:** Seller Assistant (`seller-assistant`)
+* **Projekt:** OccAIsion (`occaision`)
 * **Einsatzbereich:** Persönlicher Gebrauch (Single-User, lokaler Desktop-Betrieb, kein externes Deployment nötig)
 * **Unterstützte Marktplätze:**
   * **Schweiz (CH):** Ricardo (`ricardo.ch`) & Tutti (`tutti.ch`)
@@ -23,7 +23,7 @@ Beim regelmässigen Einstellen von Gebrauchtartikeln auf Schweizer (**Ricardo.ch
 * Suboptimale Smartphone-Fotos (schlechte Ausleuchtung, unruhige Hintergründe, inkompatible Formate wie HEIC, verräterische EXIF/GPS-Metadaten).
 * Schwierige länderübergreifende Preisfindung: Wunschpreise auf Kleinanzeigen/Tutti reflektieren oft nicht den tatsächlichen Marktwert, und zwischen dem deutschen Markt (EUR, 19 % MwSt.) und dem Schweizer Markt (CHF, 8.1 % MwSt., oft tieferes Neupreis-Niveau bei Elektronik) bestehen signifikante Preisunterschiede.
 
-**Lösung:** Eine lokale Hybrid-Lösung (**Seller Assistant**) aus einem **FastAPI/Python-Backend mit Web-Dashboard** (für Desktop-Upload, persistente Entwurfs-Verwaltung, Bildoptimierung, hybride CH/DE-Preisfindung und plattformspezifische Textgenerierung) und einer **Firefox-Browsererweiterung (Manifest V3)** mit Smart-Panel zum schrittweisen Befüllen der Inserate-Formulare auf allen vier Zielplattformen (inkl. Bild-Upload und 1-Klick-Copy-Fallbacks).
+**Lösung:** Eine lokale Hybrid-Lösung (**OccAIsion**) aus einem **FastAPI/Python-Backend mit Web-Dashboard** (für Desktop-Upload, persistente Entwurfs-Verwaltung, Bildoptimierung, hybride CH/DE-Preisfindung und plattformspezifische Textgenerierung) und einer **Firefox-Browsererweiterung (Manifest V3)** mit Smart-Panel zum schrittweisen Befüllen der Inserate-Formulare auf allen vier Zielplattformen (inkl. Bild-Upload und 1-Klick-Copy-Fallbacks).
 
 ---
 
@@ -31,7 +31,7 @@ Beim regelmässigen Einstellen von Gebrauchtartikeln auf Schweizer (**Ricardo.ch
 
 ```mermaid
 flowchart TD
-    User["Benutzer (Desktop)"] -->|1. Produktname, Kurzbeschreibung & Fotos| Dashboard["Lokales Web-Dashboard (Seller Assistant - FastAPI + HTML/JS)"]
+    User["Benutzer (Desktop)"] -->|1. Produktname, Kurzbeschreibung & Fotos| Dashboard["Lokales Web-Dashboard (OccAIsion - FastAPI + HTML/JS)"]
     
     subgraph Browser ["Firefox Browser & Extension"]
         DashBridge["Dashboard Content-Script Bridge (postMessage <-> runtime.sendMessage)"]
@@ -152,7 +152,7 @@ Da Server-/Backend-Requests häufig durch Anti-Bot-Systeme (z.B. eBay Captchas, 
 
 ### 3.5 Firefox-Erweiterung (Smart-Panel & Auto-Fill Integration für CH & DE)
 * **Neutrale Benennung:**
-  * Die Erweiterung und das Dashboard tragen den plattformneutralen Namen **`Seller Assistant`** (Paket-/Build-Slug `seller-assistant`).
+  * Die Erweiterung und das Dashboard tragen den plattformneutralen Namen **`OccAIsion`** (Paket-/Build-Slug `occaision`).
 * **Architektur & CORS/CSP-Schutz:**
   * Firefox WebExtension (Manifest V3).
   * Sämtliche Requests an `http://127.0.0.1:8000/api/...` laufen zwingend über das **Background-Script (Service Worker)** der Erweiterung und werden per Message-Passing (`browser.runtime.sendMessage`) an das Content Script übergeben, um CORS-, Mixed-Content- und CSP-Blockaden von `ricardo.ch`, `tutti.ch`, `ebay.de` und `kleinanzeigen.de` zu umgehen.
@@ -193,6 +193,6 @@ Da Server-/Backend-Requests häufig durch Anti-Bot-Systeme (z.B. eBay Captchas, 
 | :--- | :--- | :--- |
 | **Phase 1** | **Backend, Persistenz & Bild-Pipeline** | FastAPI Backend, Multi-Draft-Speicher (CH & DE Datenmodelle, Versand-Presets) & Bildverarbeitung (HEIC, EXIF-Strip, Auto-Enhance, opt. `rembg` & Blur) |
 | **Phase 2** | **Hybride Preis-Engine & KI-Logik** | eBay-DE Sold-Parser + Gemini Service (konfigurierbares Modell, 1024px-Upload, CH- & DE-Neupreis Grounding, Prompts & Validierung für Ricardo, Tutti, eBay.de & Kleinanzeigen.de) |
-| **Phase 3** | **Web-Dashboard UI** | Neutrale lokale Weboberfläche (`Seller Assistant`) für Entwurfs-Liste, Upload, Bild-Toggles, CH/DE-Plattform-Vorschaukarten & Prüflinks |
-| **Phase 4** | **Firefox WebExtension (Smart-Panel)** | Neutral benanntes Add-on (`Seller Assistant`) mit Background-Worker (CORS-frei), Plattform-Erkennung (`ricardo.ch`, `tutti.ch`, `ebay.de`, `kleinanzeigen.de`), Wizard-Auto-Fill & 1-Klick-Copy-Fallbacks |
+| **Phase 3** | **Web-Dashboard UI** | Neutrale lokale Weboberfläche (`OccAIsion`) für Entwurfs-Liste, Upload, Bild-Toggles, CH/DE-Plattform-Vorschaukarten & Prüflinks |
+| **Phase 4** | **Firefox WebExtension (Smart-Panel)** | Neutral benanntes Add-on (`OccAIsion`) mit Background-Worker (CORS-frei), Plattform-Erkennung (`ricardo.ch`, `tutti.ch`, `ebay.de`, `kleinanzeigen.de`), Wizard-Auto-Fill & 1-Klick-Copy-Fallbacks |
 | **Phase 5** | **Testing & Feinschliff** | End-to-End-Tests der Pipeline, API-Endpunkte, sprach-/rechtsspezifischen Safeguards und Extension-Injektion |

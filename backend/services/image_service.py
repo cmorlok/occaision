@@ -12,7 +12,7 @@ from backend.models import DraftImage, ImageVariantMode
 
 pillow_heif.register_heif_opener()
 
-logger = logging.getLogger("seller.image")
+logger = logging.getLogger("occaision.image")
 if not logger.handlers:
     _handler = logging.StreamHandler(sys.stdout)
     _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))

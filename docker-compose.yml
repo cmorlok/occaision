@@ -1,10 +1,10 @@
 services:
-  seller-assistant:
+  occaision:
     build:
       context: .
       dockerfile: Dockerfile
-    image: seller-assistant:latest
-    container_name: seller-assistant
+    image: occaision:latest
+    container_name: occaision
     restart: unless-stopped
     ports:
       - "8000:8000"

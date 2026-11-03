@@ -935,8 +935,8 @@ async function scrapePricesViaExtension() {
         finish(
           false,
           new Error(
-            "Keine Antwort von der Seller Assistant Firefox-Extension erhalten. " +
-              "Bitte stelle sicher, dass die Extension in Firefox geladen ist, klicke einmal auf das Seller Assistant Icon in der Firefox-Toolbar (um die Berechtigungen freizugeben) und lade das Dashboard neu (F5)."
+            "Keine Antwort von der OccAIsion Firefox-Extension erhalten. " +
+              "Bitte stelle sicher, dass die Extension in Firefox geladen ist, klicke einmal auf das OccAIsion Icon in der Firefox-Toolbar (um die Berechtigungen freizugeben) und lade das Dashboard neu (F5)."
           )
         );
       }, 35000);
@@ -953,7 +953,7 @@ async function scrapePricesViaExtension() {
         }
         if (
           msg &&
-          msg.type === "SELLER_ASSISTANT_SCRAPE_PRICES_RESULT" &&
+          msg.type === "OCCAISION_SCRAPE_PRICES_RESULT" &&
           msg.requestId === reqId
         ) {
           if (msg.ok) {
@@ -969,7 +969,7 @@ async function scrapePricesViaExtension() {
       window.addEventListener("message", onMsg);
       window.postMessage(
         JSON.stringify({
-          type: "SELLER_ASSISTANT_SCRAPE_PRICES",
+          type: "OCCAISION_SCRAPE_PRICES",
           requestId: reqId,
           query: query,
           eurToChfRate: rate,
@@ -1000,7 +1000,7 @@ async function scrapePricesViaExtension() {
       };
 
       if (eb.items && eb.items.length > 0) {
-        console.group(`[Seller Assistant] [Dashboard] eBay DE extrahierte Artikel (${eb.items.length} Treffer):`);
+        console.group(`[OccAIsion] [Dashboard] eBay DE extrahierte Artikel (${eb.items.length} Treffer):`);
         eb.items.forEach((it, idx) => {
           console.log(`  #${idx + 1}: ${it.price} € | [${it.condition}] | "${it.title}"`);
         });
@@ -1024,7 +1024,7 @@ async function scrapePricesViaExtension() {
 
     if (sources.kleinanzeigen && sources.kleinanzeigen.items && sources.kleinanzeigen.items.length > 0) {
       const ka = sources.kleinanzeigen;
-      console.group(`[Seller Assistant] [Dashboard] Kleinanzeigen extrahierte Artikel (${ka.items.length} Treffer):`);
+      console.group(`[OccAIsion] [Dashboard] Kleinanzeigen extrahierte Artikel (${ka.items.length} Treffer):`);
       ka.items.forEach((it, idx) => {
         console.log(`  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Gebraucht"}] | "${it.title}"`);
       });
@@ -1045,7 +1045,7 @@ async function scrapePricesViaExtension() {
 
     if (sources.idealo && sources.idealo.items && sources.idealo.items.length > 0) {
       const idl = sources.idealo;
-      console.group(`[Seller Assistant] [Dashboard] Idealo extrahierte Neupreise (${idl.items.length} Treffer):`);
+      console.group(`[OccAIsion] [Dashboard] Idealo extrahierte Neupreise (${idl.items.length} Treffer):`);
       idl.items.forEach((it, idx) => {
         console.log(`  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
       });
@@ -1066,7 +1066,7 @@ async function scrapePricesViaExtension() {
 
     if (sources.toppreise && sources.toppreise.items && sources.toppreise.items.length > 0) {
       const tp = sources.toppreise;
-      console.group(`[Seller Assistant] [Dashboard] Toppreise extrahierte Neupreise (${tp.items.length} Treffer):`);
+      console.group(`[OccAIsion] [Dashboard] Toppreise extrahierte Neupreise (${tp.items.length} Treffer):`);
       tp.items.forEach((it, idx) => {
         console.log(`  #${idx + 1}: ${it.price} CHF | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
       });
@@ -1087,7 +1087,7 @@ async function scrapePricesViaExtension() {
 
     if (sources.digitec && sources.digitec.items && sources.digitec.items.length > 0) {
       const dg = sources.digitec;
-      console.group(`[Seller Assistant] [Dashboard] Galaxus/Digitec extrahierte Neupreise (${dg.items.length} Treffer):`);
+      console.group(`[OccAIsion] [Dashboard] Galaxus/Digitec extrahierte Neupreise (${dg.items.length} Treffer):`);
       dg.items.forEach((it, idx) => {
         console.log(`  #${idx + 1}: ${it.price} CHF | Zustand: [${it.condition || "Neu"}] | "${it.title}"`);
       });
@@ -1108,7 +1108,7 @@ async function scrapePricesViaExtension() {
 
     if (sources.tutti && sources.tutti.items && sources.tutti.items.length > 0) {
       const tut = sources.tutti;
-      console.group(`[Seller Assistant] [Dashboard] Tutti.ch extrahierte Inserate (${tut.items.length} Treffer):`);
+      console.group(`[OccAIsion] [Dashboard] Tutti.ch extrahierte Inserate (${tut.items.length} Treffer):`);
       tut.items.forEach((it, idx) => {
         console.log(`  #${idx + 1}: ${it.price} CHF | "${it.title}"`);
       });

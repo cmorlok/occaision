@@ -1,4 +1,4 @@
-# Implementation Plan & Specification: Seller Assistant (DE-Erweiterung: eBay.de & Kleinanzeigen.de)
+# Implementation Plan & Specification: OccAIsion (DE-Erweiterung: eBay.de & Kleinanzeigen.de)
 
 > **Target Audience:** Autonomous Software Engineering Agent / Implementing Developer  
 > **Reference Requirements:** `REQUIREMENTS.md`  
@@ -37,7 +37,7 @@
      4. **Gesamte Test-Suite ausführen:** Führe `.venv/bin/pytest -v` über **alle** 4 Testdateien aus, bis **0 Failures, 0 Errors** erreicht sind.
      5. **Git Commit:** Erstelle nach jedem grünen Schritt einen atomaren Conventional Commit.
 3. **Neutrale Benennung (`AGENTS.md` Rule 6):**
-   * Der Name in `manifest.json` (`"name": "Seller Assistant"`), im Dashboard-`<title>` und im Smart-Panel-Header muss strikt **`Seller Assistant`** bleiben. Plattformnamen (`Ricardo`, `Tutti`, `eBay`, `Kleinanzeigen`) dürfen niemals im App-/Extension-Namen auftauchen.
+   * Der Name in `manifest.json` (`"name": "OccAIsion"`), im Dashboard-`<title>` und im Smart-Panel-Header muss strikt **`OccAIsion`** bleiben. Plattformnamen (`Ricardo`, `Tutti`, `eBay`, `Kleinanzeigen`) dürfen niemals im App-/Extension-Namen auftauchen.
 
 ---
 
@@ -294,7 +294,7 @@ def build_verification_links(self, query: str) -> VerificationLinks:
 ### STEP 4: Firefox WebExtension (`extension/manifest.json`, `background.js`, `content.js`)
 
 #### 4.1 Änderungen in `extension/manifest.json`
-* Behalte `"name": "Seller Assistant"` und `"default_title": "Seller Assistant (Berechtigungen prüfen)"` strikt neutral bei.
+* Behalte `"name": "OccAIsion"` und `"default_title": "OccAIsion (Berechtigungen prüfen)"` strikt neutral bei.
 * Erweitere `host_permissions` und `content_scripts[0].matches` um:
   * `"*://*.ebay.de/*"`
   * `"*://*.kleinanzeigen.de/*"`
@@ -348,7 +348,7 @@ def build_verification_links(self, query: str) -> VerificationLinks:
 
 #### 4.4 Tests für Step 4 (`tests/test_phase4_extension.py`)
 * Erweitere `test_manifest_v3_validity`:
-  * Prüfe `manifest["name"] == "Seller Assistant"`.
+  * Prüfe `manifest["name"] == "OccAIsion"`.
   * Prüfe, dass `"ebay.de"` und `"kleinanzeigen.de"` sowohl in `host_permissions` als auch in `content_scripts[0]["matches"]` enthalten sind.
 * Erweitere `test_extension_js_syntax_and_xray_and_cors_safeguards`:
   * Prüfe `node --check` für `background.js` und `content.js`.
@@ -420,7 +420,7 @@ Da Backend-Scraping häufig durch Captchas/Anti-Bot-Systeme blockiert wird und G
 * `extension/background.js`:
   * Implementiert `SCRAPE_ALL_PRICE_SOURCES` für alle 6 Quellen (`ebay_de_sold`, `kleinanzeigen`, `idealo`, `ricardo`, `toppreise`, `digitec`) mit `scrapeSourceHybrid()` (`fetch()` $\rightarrow$ Fallback auf inaktiven Tab via `tabs.create({ url, active: false })` + `scripting.executeScript` + `tabs.remove`) und 10%-getrimmter Median-Berechnung.
 * `extension/content.js`:
-  * Erkennt das lokale Dashboard (`isLocalDashboard(hostname)`), rendert dort kein Smart-Panel, sondern stellt eine `window.postMessage`-Bridge (`SELLER_ASSISTANT_PING` / `SELLER_ASSISTANT_SCRAPE_PRICES`) bereit.
+  * Erkennt das lokale Dashboard (`isLocalDashboard(hostname)`), rendert dort kein Smart-Panel, sondern stellt eine `window.postMessage`-Bridge (`OCCAISION_PING` / `OCCAISION_SCRAPE_PRICES`) bereit.
 
 ### STEP 8: Dashboard UI (`frontend/index.html` & `frontend/app.js`)
 * `frontend/index.html`:

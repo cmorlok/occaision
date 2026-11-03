@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Seller Assistant",
+  "name": "OccAIsion",
   "version": "1.1.0",
   "description": "Smart-Panel und Auto-Fill Assistent für Verkaufsplattformen",
   "permissions": ["storage", "activeTab", "tabs", "scripting"],
@@ -19,7 +19,7 @@
     "*://*.galaxus.ch/*"
   ],
   "action": {
-    "default_title": "Seller Assistant (Berechtigungen prüfen)"
+    "default_title": "OccAIsion (Berechtigungen prüfen)"
   },
   "background": {
     "scripts": ["background.js"]

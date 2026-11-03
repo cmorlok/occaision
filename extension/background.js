@@ -1,4 +1,4 @@
-// Background Service Worker for Seller Assistant
+// Background Service Worker for OccAIsion
 // Bypasses CORS and CSP by executing HTTP calls and hybrid price scraping inside the WebExtension privileged context.
 
 function getBrowserApi() {
@@ -176,7 +176,7 @@ function extractEbayItemsFromHtml(html) {
   );
   if (fewerWordsMatch && fewerWordsMatch.index !== undefined) {
     console.log(
-      `[Seller Assistant] [ebay_de_sold] 'Ergebnisse für weniger Suchbegriffe' an Position ${fewerWordsMatch.index} erkannt – filtere alle nachfolgenden ungenauen Treffer heraus.`
+      `[OccAIsion] [ebay_de_sold] 'Ergebnisse für weniger Suchbegriffe' an Position ${fewerWordsMatch.index} erkannt – filtere alle nachfolgenden ungenauen Treffer heraus.`
     );
     html = html.substring(0, fewerWordsMatch.index);
   }
@@ -240,10 +240,10 @@ function extractEbayItemsFromHtml(html) {
 
 function logEbayExtractedItems(items) {
   if (!items || items.length === 0) {
-    console.log("[Seller Assistant] [ebay_de_sold] Keine verkauften Artikel extrahiert (0 Treffer).");
+    console.log("[OccAIsion] [ebay_de_sold] Keine verkauften Artikel extrahiert (0 Treffer).");
     return;
   }
-  console.group(`[Seller Assistant] [ebay_de_sold] Extrahierte verkaufte Artikel (${items.length} Treffer):`);
+  console.group(`[OccAIsion] [ebay_de_sold] Extrahierte verkaufte Artikel (${items.length} Treffer):`);
   items.forEach((it, idx) => {
     console.log(
       `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition}] | Titel: "${it.title}"`
@@ -399,10 +399,10 @@ function extractKleinanzeigenItems(content) {
 
 function logKleinanzeigenExtractedItems(items) {
   if (!items || items.length === 0) {
-    console.log("[Seller Assistant] [kleinanzeigen] Keine Kleinanzeigen-Artikel extrahiert (0 Treffer).");
+    console.log("[OccAIsion] [kleinanzeigen] Keine Kleinanzeigen-Artikel extrahiert (0 Treffer).");
     return;
   }
-  console.group(`[Seller Assistant] [kleinanzeigen] Extrahierte Kleinanzeigen-Artikel (${items.length} Treffer):`);
+  console.group(`[OccAIsion] [kleinanzeigen] Extrahierte Kleinanzeigen-Artikel (${items.length} Treffer):`);
   items.forEach((it, idx) => {
     console.log(
       `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Gebraucht"}] | Titel: "${it.title}"`
@@ -526,10 +526,10 @@ function extractRicardoItems(html, priceNodes = [], ricardoCards = []) {
 
 function logRicardoExtractedItems(items) {
   if (!items || items.length === 0) {
-    console.log("[Seller Assistant] [ricardo] Keine Ricardo-Angebote extrahiert (0 Treffer).");
+    console.log("[OccAIsion] [ricardo] Keine Ricardo-Angebote extrahiert (0 Treffer).");
     return;
   }
-  console.group(`[Seller Assistant] [ricardo] Extrahierte Ricardo-Angebote (${items.length} Treffer):`);
+  console.group(`[OccAIsion] [ricardo] Extrahierte Ricardo-Angebote (${items.length} Treffer):`);
   items.forEach((it, idx) => {
     console.log(
       `  #${idx + 1}: ${it.price} CHF | [${it.bidType || "Angebot"}] | Titel: "${it.title}"`
@@ -629,10 +629,10 @@ function extractTuttiItems(html, priceNodes = [], tuttiCards = []) {
 
 function logTuttiExtractedItems(items) {
   if (!items || items.length === 0) {
-    console.log("[Seller Assistant] [tutti] Keine Tutti-Preise extrahiert (0 Treffer).");
+    console.log("[OccAIsion] [tutti] Keine Tutti-Preise extrahiert (0 Treffer).");
     return;
   }
-  console.group(`[Seller Assistant] [tutti] Extrahierte Tutti.ch Inserate (${items.length} Treffer):`);
+  console.group(`[OccAIsion] [tutti] Extrahierte Tutti.ch Inserate (${items.length} Treffer):`);
   items.forEach((it, idx) => {
     console.log(
       `  #${idx + 1}: ${it.price} CHF | Titel: "${it.title}"`
@@ -796,11 +796,11 @@ function extractIdealoItems(html, priceNodes = [], idealoCards = []) {
 
 function logIdealoExtractedItems(items) {
   if (!items || items.length === 0) {
-    console.log("[Seller Assistant] [idealo] Kein Idealo-Neupreis extrahiert (0 Treffer).");
+    console.log("[OccAIsion] [idealo] Kein Idealo-Neupreis extrahiert (0 Treffer).");
     return;
   }
   const top = items[0];
-  console.group(`[Seller Assistant] [idealo] Idealo Neupreis (Bestpreis des ersten Produkts):`);
+  console.group(`[OccAIsion] [idealo] Idealo Neupreis (Bestpreis des ersten Produkts):`);
   console.log(`  Top-Treffer: ${top.price} € | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
   console.groupEnd();
 
@@ -917,11 +917,11 @@ function extractToppreiseItems(html, priceNodes = [], toppreiseCards = []) {
 
 function logToppreiseExtractedItems(items) {
   if (!items || items.length === 0) {
-    console.log("[Seller Assistant] [toppreise] Kein Toppreise-Neupreis extrahiert (0 Treffer).");
+    console.log("[OccAIsion] [toppreise] Kein Toppreise-Neupreis extrahiert (0 Treffer).");
     return;
   }
   const top = items[0];
-  console.group(`[Seller Assistant] [toppreise] Toppreise Neupreis (Bestpreis des ersten Produkts):`);
+  console.group(`[OccAIsion] [toppreise] Toppreise Neupreis (Bestpreis des ersten Produkts):`);
   console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
   console.groupEnd();
 
@@ -1040,11 +1040,11 @@ function extractDigitecItems(html, priceNodes = [], digitecCards = []) {
 
 function logDigitecExtractedItems(items) {
   if (!items || items.length === 0) {
-    console.log("[Seller Assistant] [digitec] Kein Galaxus/Digitec-Neupreis extrahiert (0 Treffer).");
+    console.log("[OccAIsion] [digitec] Kein Galaxus/Digitec-Neupreis extrahiert (0 Treffer).");
     return;
   }
   const top = items[0];
-  console.group(`[Seller Assistant] [digitec] Galaxus/Digitec Neupreis (Bestpreis des ersten Produkts):`);
+  console.group(`[OccAIsion] [digitec] Galaxus/Digitec Neupreis (Bestpreis des ersten Produkts):`);
   console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
   console.groupEnd();
 
@@ -1239,7 +1239,7 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
 
     if (sourceId === "tutti" && query) {
       try {
-        console.log(`[Seller Assistant] [tutti] Fülle Suchmaske für '${query}' auf ${url} aus...`);
+        console.log(`[OccAIsion] [tutti] Fülle Suchmaske für '${query}' auf ${url} aus...`);
         const searchAction = await api.scripting.executeScript({
           target: { tabId: tab.id },
           args: [query],
@@ -1300,7 +1300,7 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
           },
         });
 
-        console.log("[Seller Assistant] [tutti] Suchmaske-Aktion Ergebnis:", searchAction?.[0]?.result);
+        console.log("[OccAIsion] [tutti] Suchmaske-Aktion Ergebnis:", searchAction?.[0]?.result);
 
         // Wait for results to render or navigate (poll up to 8s)
         const startWait = Date.now();
@@ -1321,7 +1321,7 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
             if (checkRes && checkRes[0] && checkRes[0].result) {
               const res = checkRes[0].result;
               if (res.isSearch) {
-                console.log(`[Seller Assistant] [tutti] Suchergebnisseite erfolgreich geladen: ${res.url} (${res.count} Treffer, keineTreffer=${res.hasNoResults})`);
+                console.log(`[OccAIsion] [tutti] Suchergebnisseite erfolgreich geladen: ${res.url} (${res.count} Treffer, keineTreffer=${res.hasNoResults})`);
                 navigatedToSearch = true;
                 if (res.count === 0 && !res.hasNoResults) {
                   await new Promise(r => setTimeout(r, 600));
@@ -1332,10 +1332,10 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
           } catch (_) {}
         }
         if (!navigatedToSearch) {
-          console.warn("[Seller Assistant] [tutti] Konnte Suchergebnisseite nach 8s nicht erreichen (Tab verbleibt möglicherweise auf Startseite).");
+          console.warn("[OccAIsion] [tutti] Konnte Suchergebnisseite nach 8s nicht erreichen (Tab verbleibt möglicherweise auf Startseite).");
         }
       } catch (tuttiSearchErr) {
-        console.warn("[Seller Assistant] [tutti] Fehler beim Ausfüllen der Suchmaske:", tuttiSearchErr);
+        console.warn("[OccAIsion] [tutti] Fehler beim Ausfüllen der Suchmaske:", tuttiSearchErr);
       }
     }
 
@@ -1623,7 +1623,7 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
         pageData = results[0].result;
       }
     } catch (scriptErr) {
-      console.warn(`[Seller Assistant] Tab-Scripting fehlgeschlagen (${scriptErr.message}). Versuche content.js Message-Fallback...`);
+      console.warn(`[OccAIsion] Tab-Scripting fehlgeschlagen (${scriptErr.message}). Versuche content.js Message-Fallback...`);
       if (api.tabs && api.tabs.sendMessage) {
         try {
           pageData = await api.tabs.sendMessage(tab.id, { action: "EXTRACT_PAGE_DATA" });
@@ -1725,7 +1725,7 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
       if (sourceId === "tutti") {
         const isSearchPage = (currentUrl || "").includes("/q/") || (currentUrl || "").includes("/suche");
         if (!isSearchPage) {
-          console.warn(`[Seller Assistant] [tutti] Nicht auf Suchergebnisseite (${currentUrl}), ignoriere Startseiten-Karten.`);
+          console.warn(`[OccAIsion] [tutti] Nicht auf Suchergebnisseite (${currentUrl}), ignoriere Startseiten-Karten.`);
           return { prices: [], tuttiItems: [], finalUrl: currentUrl, loginRequired: false };
         }
         const tuttiItems = extractTuttiItems(html, priceNodes, pageData.tuttiCards || []);
@@ -1763,14 +1763,14 @@ async function scrapeViaBackgroundTab(url, sourceId, keepTabsOpen = false, query
       return { prices: domPrices.slice(0, 30), loginRequired: false };
     }
   } catch (err) {
-    console.warn(`[Seller Assistant] Tab fallback failed for ${sourceId}:`, err);
+    console.warn(`[OccAIsion] Tab fallback failed for ${sourceId}:`, err);
   } finally {
     if (!keepTabsOpen && tab && tab.id !== undefined) {
       try {
         await api.tabs.remove(tab.id);
       } catch (_) {}
     } else if (keepTabsOpen && tab && tab.id !== undefined) {
-      console.log(`[Seller Assistant] [Debug] Tab #${tab.id} für ${sourceId} bleibt geöffnet (${url})`);
+      console.log(`[OccAIsion] [Debug] Tab #${tab.id} für ${sourceId} bleibt geöffnet (${url})`);
     }
   }
   return { prices: [], loginRequired: false };
@@ -1790,7 +1790,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
   let tuttiItems = [];
 
   const TAB_ONLY_SOURCES = new Set(["digitec", "ricardo", "tutti"]);
-  console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Abfrage: ${url}`);
+  console.log(`[OccAIsion] [${sourceConfig.id}] Starte Abfrage: ${url}`);
 
   // Step 1: Fast background fetch() with 5s timeout (skipped for client-rendered SPA sources like Idealo)
   if (!TAB_ONLY_SOURCES.has(sourceConfig.id)) {
@@ -1810,7 +1810,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
           if (sourceConfig.id === "ebay_de_sold" && isEbayLoginRequired(html, resp.url)) {
             loginRequired = true;
             console.warn(
-              `[Seller Assistant] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
+              `[OccAIsion] [${sourceConfig.id}] fetch() wurde auf eBay-Login umgeleitet (${resp.url}). Prüfe Tab-Fallback...`
             );
           } else {
             if (sourceConfig.id === "ebay_de_sold") {
@@ -1829,26 +1829,26 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
               prices = extractPricesFromHtml(sourceConfig.id, html);
             }
             console.log(
-              `[Seller Assistant] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
+              `[OccAIsion] [${sourceConfig.id}] fetch() HTTP ${resp.status} (${html.length} Zeichen) -> ${prices.length} Preise extrahiert`
             );
           }
         } else {
-          console.warn(`[Seller Assistant] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
+          console.warn(`[OccAIsion] [${sourceConfig.id}] fetch() lieferte HTTP ${resp.status}`);
         }
       } finally {
         if (timer) clearTimeout(timer);
       }
     } catch (err) {
-      console.warn(`[Seller Assistant] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
+      console.warn(`[OccAIsion] [${sourceConfig.id}] Direct fetch fehlgeschlagen (${err.message}), nutze Tab-Fallback...`);
     }
   } else {
-    console.log(`[Seller Assistant] [${sourceConfig.id}] Überspringe fetch() (Client-SPA / Tab-Only Modus) -> nutze Browser-Tab...`);
+    console.log(`[OccAIsion] [${sourceConfig.id}] Überspringe fetch() (Client-SPA / Tab-Only Modus) -> nutze Browser-Tab...`);
   }
 
   // Step 2: Fallback to inactive background tab if fetch returned 0 prices (or for tab-only sources)
   if (prices.length === 0) {
     method = "tab";
-    console.log(`[Seller Assistant] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
+    console.log(`[OccAIsion] [${sourceConfig.id}] Starte Hintergrund-Tab Fallback...`);
     const tabRes = await scrapeViaBackgroundTab(url, sourceConfig.id, keepTabsOpen, query);
     prices = tabRes.prices || [];
     if (tabRes.ebayItems && tabRes.ebayItems.length > 0) {
@@ -1878,16 +1878,16 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     if (tabRes.loginRequired) {
       loginRequired = true;
     }
-    console.log(`[Seller Assistant] [${sourceConfig.id}] Hintergrund-Tab Ergebnis -> ${prices.length} Preise extrahiert (loginRequired=${loginRequired})`);
+    console.log(`[OccAIsion] [${sourceConfig.id}] Hintergrund-Tab Ergebnis -> ${prices.length} Preise extrahiert (loginRequired=${loginRequired})`);
   } else if (keepTabsOpen) {
     // If keepTabsOpen is active and fetch succeeded, open the tab for inspection
     const api = getBrowserApi();
     if (api && api.tabs && api.tabs.create) {
       try {
         const tab = await api.tabs.create({ url, active: false });
-        console.log(`[Seller Assistant] [Debug] Tab #${tab.id} für ${sourceConfig.id} geöffnet zur Inspektion (${url})`);
+        console.log(`[OccAIsion] [Debug] Tab #${tab.id} für ${sourceConfig.id} geöffnet zur Inspektion (${url})`);
       } catch (e) {
-        console.warn(`[Seller Assistant] Konnte Debug-Tab für ${sourceConfig.id} nicht öffnen:`, e);
+        console.warn(`[OccAIsion] Konnte Debug-Tab für ${sourceConfig.id} nicht öffnen:`, e);
       }
     }
   }
@@ -1897,7 +1897,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
     extra.login_required = true;
     extra.error = "Login auf ebay.de erforderlich (bitte in Firefox auf ebay.de einloggen)";
     console.warn(
-      `⚠️ [Seller Assistant] [${sourceConfig.id}] eBay erfordert einen Login für verkaufte Artikel! Bitte in Firefox auf https://www.ebay.de einloggen.`
+      `⚠️ [OccAIsion] [${sourceConfig.id}] eBay erfordert einen Login für verkaufte Artikel! Bitte in Firefox auf https://www.ebay.de einloggen.`
     );
   }
 
@@ -1946,7 +1946,7 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
 
   const stats = computeSourceStats(sourceConfig, prices, url, method, eurToChfRate, extra);
   console.log(
-    `[Seller Assistant] [${sourceConfig.id}] Fertig (${method}): ${stats.sample_count} Treffer, Median=${stats.median_price} ${stats.currency}` +
+    `[OccAIsion] [${sourceConfig.id}] Fertig (${method}): ${stats.sample_count} Treffer, Median=${stats.median_price} ${stats.currency}` +
       (stats.login_required ? " [LOGIN ERFORDERLICH]" : "")
   );
   return stats;
@@ -1962,9 +1962,9 @@ async function runDeduplicatedScrape(requestId, query, eurToChfRate = 0.94, enab
   }
 
   const p = (async () => {
-    console.log(`[Seller Assistant] === Starte Preisrecherche (${key}) für '${query}' (enabled: ${sourcesKey}, keepTabs: ${keepTabsOpen}) ===`);
+    console.log(`[OccAIsion] === Starte Preisrecherche (${key}) für '${query}' (enabled: ${sourcesKey}, keepTabs: ${keepTabsOpen}) ===`);
     const result = await scrapeAllPriceSources(query, eurToChfRate, enabledSources, keepTabsOpen);
-    console.log(`[Seller Assistant] === Preisrecherche abgeschlossen (${key}) ===`, result);
+    console.log(`[OccAIsion] === Preisrecherche abgeschlossen (${key}) ===`, result);
     return result;
   })();
 

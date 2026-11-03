@@ -4,7 +4,7 @@ set -e
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${WORKSPACE_DIR}/dist"
 EXTENSION_DIR="${WORKSPACE_DIR}/extension"
-ZIP_FILE="${DIST_DIR}/seller-assistant.zip"
+ZIP_FILE="${DIST_DIR}/occaision.zip"
 
 mkdir -p "${DIST_DIR}"
 rm -f "${ZIP_FILE}"
@@ -20,7 +20,7 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 echo -e "\n${GREEN}================================================================================${NC}"
-echo -e "${GREEN}🎉 Firefox Extension erfolgreich gebaut: ${BOLD}dist/seller-assistant.zip${NC}"
+echo -e "${GREEN}🎉 Firefox Extension erfolgreich gebaut: ${BOLD}dist/occaision.zip${NC}"
 echo -e "${GREEN}================================================================================${NC}\n"
 
 echo -e "${BOLD}📦 INSTALLATION & AKTUALISIERUNG IN FIREFOX:${NC}"

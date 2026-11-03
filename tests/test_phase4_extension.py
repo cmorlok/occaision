@@ -12,7 +12,7 @@ def test_manifest_v3_validity():
         manifest = json.load(f)
         
     assert manifest.get("manifest_version") == 3
-    assert manifest.get("name") == "Seller Assistant"
+    assert manifest.get("name") == "OccAIsion"
     assert "background" in manifest
     assert "scripts" in manifest["background"]
     assert "background.js" in manifest["background"]["scripts"]
@@ -109,7 +109,7 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "global.zustand:alright%2Clike_new%2Cok" in bg_js_code
     assert "anbieter:privat" in bg_js_code
     assert "isLocalDashboard" in content_js_code
-    assert "SELLER_ASSISTANT_SCRAPE_PRICES" in content_js_code
+    assert "OCCAISION_SCRAPE_PRICES" in content_js_code
 
 
 def test_extension_price_parser_and_stats_via_node():

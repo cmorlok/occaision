@@ -1,12 +1,12 @@
 {
-  "name": "Seller AI Listing Assistant",
+  "name": "OccAIsion",
   "build": {
     "dockerfile": "Dockerfile",
     "context": ".."
   },
   "runArgs": [
-    "--name", "seller-devcontainer",
-    "--label", "devcontainer.app=seller"
+    "--name", "occaision-devcontainer",
+    "--label", "devcontainer.app=occaision"
   ],
   // Allow Antigravity CLI (agy) to create nested Linux namespaces (CLONE_NEWUSER/CLONE_NEWNS/CLONE_NEWNET)
   // for its command sandbox inside the Docker Dev Container without failing with 'fork/exec: operation not permitted'.
@@ -19,7 +19,7 @@
   ],
   "mounts": [
     {
-      "source": "seller-devcontainer-home",
+      "source": "occaision-devcontainer-home",
       "target": "/home/developer",
       "type": "volume"
     }

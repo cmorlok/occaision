@@ -22,7 +22,7 @@ from backend.services.ai_service import AIService
 from backend.services.image_service import ImageService
 from backend.storage import StorageService
 
-logger = logging.getLogger("seller.api")
+logger = logging.getLogger("occaision.api")
 if not logger.handlers:
     _api_handler = logging.StreamHandler(sys.stdout)
     _api_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
@@ -32,7 +32,7 @@ logger.propagate = False
 
 
 def configure_logging(level_name: Optional[str] = None):
-    """Set log level on all seller.* loggers based on CLI args, env var, or config."""
+    """Set log level on all occaision.* loggers based on CLI args, env var, or config."""
     cli_level = None
     for i, arg in enumerate(sys.argv):
         if arg in ("--log-level", "-l") and i + 1 < len(sys.argv):
@@ -51,7 +51,7 @@ def configure_logging(level_name: Optional[str] = None):
 
     level = getattr(logging, effective_name, logging.INFO)
 
-    for name in ["seller", "seller.api", "seller.image", "seller.ai", "seller.ebay"]:
+    for name in ["occaision", "occaision.api", "occaision.image", "occaision.ai", "occaision.ebay"]:
         l = logging.getLogger(name)
         l.setLevel(level)
 
@@ -95,7 +95,7 @@ def create_app(
     )
 
     app = FastAPI(
-        title="Seller Assistant",
+        title="OccAIsion",
         version="1.0.0",
     )
 
