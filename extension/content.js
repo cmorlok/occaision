@@ -43,46 +43,195 @@ function setNativeValue(element, value) {
   target.dispatchEvent(new Event("blur", { bubbles: true }));
 }
 
+// Helper: Select an option in a Material-UI Select (combobox + popover)
+async function fillMuiSelect(comboboxEl, matchFn) {
+  if (!comboboxEl) return false;
+  try {
+    comboboxEl.focus();
+    comboboxEl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+    comboboxEl.click();
+
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await new Promise(r => setTimeout(r, 60));
+      const options = Array.from(
+        document.querySelectorAll(
+          '[role="listbox"] [role="option"], .MuiPopover-root [role="option"], .MuiPopover-root li[role="menuitem"], .MuiMenu-list li, .MuiMenuItem-root'
+        )
+      );
+      if (options.length > 0) {
+        const match = options.find(matchFn) || options[0];
+        if (match) {
+          match.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+          match.click();
+          return true;
+        }
+      }
+    }
+
+    // Fallback: close popover if not selected
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true }));
+  } catch (e) {
+    console.warn("[Seller Assistant] Error in fillMuiSelect:", e);
+  }
+  return false;
+}
+
+// Helper: Navigate and auto-select category on Tutti if match exists, otherwise keep dropdown open for user
+async function autoSelectTuttiCategory(suggestion, productTitle) {
+  const listingTypeInput = document.querySelector('input[name="listingType"]');
+  if (listingTypeInput && listingTypeInput.value && listingTypeInput.value.trim() !== "") {
+    return { ok: true, status: "already_selected" };
+  }
+
+  // 1. Open category picker if not open
+  let popover = document.querySelector('.MuiPopover-root:not(.MuiModal-hidden)');
+  if (!popover) {
+    const catBtn = Array.from(document.querySelectorAll("button")).find(b =>
+      /kategorie\s*wählen/i.test(b.textContent || "")
+    );
+    if (!catBtn) return { ok: false, status: "button_not_found" };
+    catBtn.click();
+    await new Promise(r => setTimeout(r, 220));
+    popover = document.querySelector('.MuiPopover-root');
+  }
+
+  if (!popover) return { ok: false, status: "popover_not_found" };
+
+  const searchText = `${suggestion || ""} ${productTitle || ""}`.toLowerCase();
+
+  function getMenuItems() {
+    return Array.from(
+      document.querySelectorAll(
+        '.MuiPopover-root [role="menuitem"], .MuiPopover-root li, .MuiMenuItem-root'
+      )
+    ).filter(el => {
+      const t = (el.textContent || "").trim();
+      return t && t !== "Zurück";
+    });
+  }
+
+  const TOP_CAT_KEYWORDS = [
+    { name: "Elektronik", words: ["elektronik", "computer", "drucker", "scanner", "handy", "telefon", "tv", "audio", "hifi", "foto", "kamera", "tablet", "software", "laserjet"] },
+    { name: "Fahrzeuge", words: ["fahrzeug", "auto", "motorrad", "roller", "nutzfahrzeug", "wohnmobil", "boot", "autozubehör", "pkw"] },
+    { name: "Immobilien", words: ["immobilie", "wohnung", "haus", "grundstück", "wg", "parkplatz"] },
+    { name: "Mode", words: ["mode", "kleidung", "damen", "herren", "schuhe", "uhr", "schmuck", "tasche"] },
+    { name: "Zuhause", words: ["zuhause", "haushalt", "möbel", "beleuchtung", "lampe", "deko", "küche", "garten", "handwerk", "werkzeug", "baumaterial"] },
+    { name: "Hobbys", words: ["hobby", "tier", "hund", "katze", "sport", "velo", "fahrrad", "ski", "buch", "spiel", "game", "konsole", "musik", "instrument", "film", "sammeln"] },
+    { name: "Dienstleistungen", words: ["dienstleistung", "service", "reparatur", "unterricht", "reinigung", "umzug", "job", "stelle"] },
+    { name: "Familie", words: ["familie", "baby", "kind", "kinderwagen", "kinderzimmer"] }
+  ];
+
+  for (let step = 0; step < 3; step++) {
+    if (listingTypeInput && listingTypeInput.value && listingTypeInput.value.trim() !== "") {
+      return { ok: true, status: "selected" };
+    }
+
+    const items = getMenuItems();
+    if (items.length === 0) break;
+
+    const itemTexts = items.map(i => (i.textContent || "").trim());
+    const isTopLevel = itemTexts.includes("Elektronik") || itemTexts.includes("Fahrzeuge") || itemTexts.includes("Mode");
+
+    let matchedItem = null;
+
+    if (isTopLevel) {
+      for (const cat of TOP_CAT_KEYWORDS) {
+        if (cat.words.some(w => searchText.includes(w))) {
+          matchedItem = items.find(i => (i.textContent || "").trim() === cat.name);
+          if (matchedItem) break;
+        }
+      }
+    } else {
+      const parts = (suggestion || "")
+        .split(/[>/,]/)
+        .map(p => p.trim().toLowerCase())
+        .filter(Boolean);
+
+      for (const part of parts) {
+        matchedItem = items.find(i => {
+          const t = (i.textContent || "").trim().toLowerCase();
+          return t === part || t.includes(part) || part.includes(t);
+        });
+        if (matchedItem) break;
+      }
+
+      if (!matchedItem) {
+        if (/drucker|scanner|laserjet|toner|patrone|tintenstrahl/i.test(searchText)) {
+          matchedItem = items.find(i => /komponenten|zubehör|drucker/i.test(i.textContent || ""));
+        } else if (/computer|pc|laptop/i.test(searchText)) {
+          matchedItem = items.find(i => /^computer$/i.test((i.textContent || "").trim()));
+        }
+      }
+    }
+
+    if (matchedItem) {
+      console.log("[Seller Assistant] Tutti Kategorie-Klick:", matchedItem.textContent.trim());
+      matchedItem.click();
+      await new Promise(r => setTimeout(r, 220));
+    } else {
+      // Recommended category does not exist at this level: keep dropdown open for user!
+      console.log("[Seller Assistant] Empfohlene Kategorie nicht gefunden, Dropdown bleibt offen für manuelle Auswahl.");
+      return { ok: false, status: "manual_selection_required" };
+    }
+  }
+
+  const finalCheck = listingTypeInput && listingTypeInput.value && listingTypeInput.value.trim() !== "";
+  return { ok: finalCheck, status: finalCheck ? "selected" : "manual_selection_required" };
+}
+
 // Firefox Xray-Safe File Injector for HTMLInputElement and react-dropzone
 function injectFilesIntoInput(fileInput, imagePayloads) {
   if (!fileInput || !imagePayloads || imagePayloads.length === 0) return;
 
-  const pageWin = typeof window !== "undefined" && window.wrappedJSObject ? window.wrappedJSObject : window;
-  const DataTransferCtor = pageWin.DataTransfer || DataTransfer;
-  const FileCtor = pageWin.File || File;
-  const dt = new DataTransferCtor();
-
-  for (const img of imagePayloads) {
-    const bytes = dataUrlToUint8Array(img.dataUrl);
-    const pageBytes = typeof cloneInto === "function" ? cloneInto(bytes, pageWin) : bytes;
-    const opts = typeof cloneInto === "function" ? cloneInto({ type: img.mimeType }, pageWin) : { type: img.mimeType };
-    const file = new FileCtor([pageBytes], img.filename, opts);
-    dt.items.add(file);
-  }
-
-  const targetInput = fileInput.wrappedJSObject || fileInput;
   try {
-    targetInput.files = dt.files;
-  } catch (err) {
-    console.warn("Direct input.files assignment warning:", err);
-  }
+    const dt = new DataTransfer();
 
-  fileInput.dispatchEvent(new Event("input", { bubbles: true }));
-  fileInput.dispatchEvent(new Event("change", { bubbles: true }));
-
-  // Also dispatch synthetic drop event on dropzone container if available
-  const dropzone = fileInput.closest("[class*='dropzone'], [class*='upload'], [data-testid*='upload']") || fileInput.parentElement;
-  if (dropzone && typeof DragEvent !== "undefined") {
-    try {
-      const dropEvent = new DragEvent("drop", {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer: dt
+    for (const img of imagePayloads) {
+      const bytes = dataUrlToUint8Array(img.dataUrl);
+      const file = new File([bytes], img.filename || "image.jpg", {
+        type: img.mimeType || "image/jpeg",
+        lastModified: Date.now()
       });
-      dropzone.dispatchEvent(dropEvent);
-    } catch (e) {
-      console.warn("Drop event trigger warning:", e);
+      dt.items.add(file);
     }
+
+    const targetInput = fileInput.wrappedJSObject || fileInput;
+    try {
+      fileInput.files = dt.files;
+    } catch (e1) {
+      try {
+        targetInput.files = dt.files;
+      } catch (e2) {
+        console.warn("[Seller Assistant] Direct fileInput.files assignment failed:", e2);
+      }
+    }
+
+    fileInput.dispatchEvent(new Event("input", { bubbles: true }));
+    fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    if (targetInput !== fileInput) {
+      try {
+        targetInput.dispatchEvent(new Event("input", { bubbles: true }));
+        targetInput.dispatchEvent(new Event("change", { bubbles: true }));
+      } catch (_) {}
+    }
+
+    // Also dispatch synthetic drop event on dropzone container if available
+    const dropzone = fileInput.closest("[class*='dropzone'], [class*='upload'], [data-testid*='upload'], [role='presentation']") || fileInput.parentElement;
+    if (dropzone && typeof DragEvent !== "undefined") {
+      try {
+        const dropEvent = new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: dt
+        });
+        dropzone.dispatchEvent(dropEvent);
+      } catch (e) {
+        console.warn("[Seller Assistant] Drop event trigger warning:", e);
+      }
+    }
+    console.log(`[Seller Assistant] Injected ${imagePayloads.length} files successfully.`);
+  } catch (err) {
+    console.error("[Seller Assistant] Error injecting files:", err);
   }
 }
 
@@ -137,8 +286,9 @@ function getPlatformData(draft, platform) {
   } else if (p === "tutti") {
     return {
       title: draft.tutti ? draft.tutti.title : "",
+      category: draft.tutti ? draft.tutti.category_suggestion : "",
       description: draft.tutti ? draft.tutti.description : "",
-      condition: draft.tutti ? draft.tutti.condition : "",
+      condition: draft.tutti ? draft.tutti.condition : "gebraucht",
       startPrice: null,
       buyNowPrice: draft.tutti ? draft.tutti.price_vhb_chf : 10.0,
       currency: "CHF",
@@ -234,6 +384,10 @@ function createSmartPanel() {
   if (!isRicardo() && !isTutti() && !isEbayDE() && !isKleinanzeigen()) return;
   if (document.getElementById("ai-listing-smart-panel")) return;
 
+  const platform = detectPlatform();
+  const step1BtnText = platform === "tutti" ? "▶ Schritt 1: Kategorie & Bilder" : "▶ Schritt 1: Bilder & Titel einfügen";
+  const step2BtnText = platform === "tutti" ? "▶ Schritt 2: Alle Textfelder einfügen" : "▶ Schritt 2: Beschreibung, Zustand & Preis";
+
   panelElement = document.createElement("div");
   panelElement.id = "ai-listing-smart-panel";
   panelElement.className = "ai-smart-panel";
@@ -256,15 +410,19 @@ function createSmartPanel() {
 
       <div class="ai-wizard-actions">
         <button id="ai-ext-step1-btn" class="ai-btn ai-btn-primary">
-          ▶ Schritt 1: Bilder & Titel einfügen
+          ${step1BtnText}
         </button>
         <button id="ai-ext-step2-btn" class="ai-btn ai-btn-secondary">
-          ▶ Schritt 2: Beschreibung, Zustand & Preis
+          ${step2BtnText}
         </button>
       </div>
 
       <div class="ai-copy-fallbacks">
         <span class="ai-fallback-title">📋 1-Klick-Kopieren (Fallback):</span>
+        <div class="ai-fallback-row">
+          <span>Kategorie:</span>
+          <button id="ai-copy-cat-btn" class="ai-btn-copy">Kopieren</button>
+        </div>
         <div class="ai-fallback-row">
           <span>Titel:</span>
           <button id="ai-copy-title-btn" class="ai-btn-copy">Kopieren</button>
@@ -307,34 +465,67 @@ function bindPanelEvents() {
     activeDraft = currentDrafts.find(d => d.id === selectedId) || null;
   };
 
-  // Step 1: Images & Title
+  // Step 1: Category & Images
   const step1Btn = document.getElementById("ai-ext-step1-btn");
   step1Btn.onclick = async () => {
     if (!activeDraft) {
       alert("Bitte wähle zuerst einen Entwurf aus.");
       return;
     }
+    const platform = detectPlatform();
     step1Btn.disabled = true;
-    step1Btn.textContent = "⏳ Lade Bilder & fülle Titel...";
+    step1Btn.textContent = platform === "tutti" ? "⏳ Wähle Kategorie & lade Bilder..." : "⏳ Lade Bilder & fülle Titel...";
     try {
       await executeStep1(activeDraft);
+      if (platform === "tutti") {
+        const listingTypeInput = document.querySelector('input[name="listingType"]');
+        if (listingTypeInput && listingTypeInput.value && listingTypeInput.value.trim() !== "") {
+          step1Btn.textContent = "✓ Kategorie & Bilder eingefügt";
+        } else {
+          step1Btn.textContent = "⚠ Bitte Kategorie manuell wählen";
+        }
+      } else {
+        step1Btn.textContent = "✓ Bilder & Titel eingefügt";
+      }
     } finally {
       step1Btn.disabled = false;
-      step1Btn.textContent = "▶ Schritt 1: Bilder & Titel einfügen";
+      setTimeout(() => {
+        step1Btn.textContent = platform === "tutti" ? "▶ Schritt 1: Kategorie & Bilder" : "▶ Schritt 1: Bilder & Titel einfügen";
+      }, 4000);
     }
   };
 
-  // Step 2: Description & Price
+  // Step 2: Description & Price & all other fields
   const step2Btn = document.getElementById("ai-ext-step2-btn");
-  step2Btn.onclick = () => {
+  step2Btn.onclick = async () => {
     if (!activeDraft) {
       alert("Bitte wähle zuerst einen Entwurf aus.");
       return;
     }
-    executeStep2(activeDraft);
+    const platform = detectPlatform();
+    step2Btn.disabled = true;
+    step2Btn.textContent = "⏳ Fülle Textfelder aus...";
+    try {
+      await executeStep2(activeDraft);
+      step2Btn.textContent = "✓ Textfelder eingefügt";
+    } finally {
+      step2Btn.disabled = false;
+      setTimeout(() => {
+        step2Btn.textContent = platform === "tutti" ? "▶ Schritt 2: Alle Textfelder einfügen" : "▶ Schritt 2: Beschreibung, Zustand & Preis";
+      }, 4000);
+    }
   };
 
   // 1-Click Copy fallbacks (navigator.clipboard)
+  const copyCatBtn = document.getElementById("ai-copy-cat-btn");
+  if (copyCatBtn) {
+    copyCatBtn.onclick = () => {
+      if (!activeDraft) return;
+      const data = getPlatformData(activeDraft);
+      navigator.clipboard.writeText(data.category || "");
+    };
+  }
+
   document.getElementById("ai-copy-title-btn").onclick = () => {
     if (!activeDraft) return;
     const data = getPlatformData(activeDraft);
@@ -387,46 +578,133 @@ function fetchDraftsList() {
 }
 
 async function executeStep1(draft) {
-  // 1. Fetch images through background worker (bypassing CORS)
-  const imagesResponse = await new Promise(resolve => {
-    browserApi.runtime.sendMessage({ action: "FETCH_DRAFT_IMAGES", draftId: draft.id }, resolve);
-  });
+  const platform = detectPlatform();
+  const data = getPlatformData(draft);
 
-  if (imagesResponse && imagesResponse.ok && imagesResponse.images && imagesResponse.images.length > 0) {
-    const fileInput = document.querySelector('input[type="file"]');
-    if (fileInput) {
-      injectFilesIntoInput(fileInput, imagesResponse.images);
+  // 1. Fetch images through background worker (bypassing CORS)
+  try {
+    const imagesResponse = await new Promise(resolve => {
+      browserApi.runtime.sendMessage({ action: "FETCH_DRAFT_IMAGES", draftId: draft.id }, resolve);
+    });
+
+    if (imagesResponse && imagesResponse.ok && imagesResponse.images && imagesResponse.images.length > 0) {
+      const fileInput = document.querySelector('input[type="file"]');
+      if (fileInput) {
+        injectFilesIntoInput(fileInput, imagesResponse.images);
+      }
+    }
+  } catch (err) {
+    console.warn("[Seller Assistant] Error fetching/injecting images in Step 1:", err);
+  }
+
+  // 2. Platform specific assistance in Step 1: Category on Tutti
+  if (platform === "tutti") {
+    try {
+      await autoSelectTuttiCategory(data.category, draft.identified_product || data.title);
+    } catch (err) {
+      console.warn("[Seller Assistant] Tutti category selection error:", err);
     }
   }
 
-  // 2. Inject Title
-  const data = getPlatformData(draft);
+  // 3. Inject Title (if present in DOM)
   const titleInput = document.querySelector(
-    '#postad-title, #pstad-title, input[name="title"], input[name="pstad-title"], input[name="subject"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
+    'input[name="subject"], #postad-title, #pstad-title, input[name="title"], input[name="pstad-title"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
   );
   if (titleInput && data.title) {
     setNativeValue(titleInput, data.title);
   }
 }
 
-function executeStep2(draft) {
+async function executeStep2(draft) {
   const data = getPlatformData(draft);
   const platform = detectPlatform();
 
-  // Description
+  // 1. Photos: If file input is present and has no files, inject images automatically
+  const fileInput = document.querySelector('input[type="file"]');
+  if (fileInput && (!fileInput.files || fileInput.files.length === 0)) {
+    try {
+      const imagesResponse = await new Promise(resolve => {
+        browserApi.runtime.sendMessage({ action: "FETCH_DRAFT_IMAGES", draftId: draft.id }, resolve);
+      });
+      if (imagesResponse && imagesResponse.ok && imagesResponse.images && imagesResponse.images.length > 0) {
+        injectFilesIntoInput(fileInput, imagesResponse.images);
+      }
+    } catch (e) {
+      console.warn("[Seller Assistant] Step 2 image injection warning:", e);
+    }
+  }
+
+  // 2. Title: Fill if title input exists and is empty (crucial for Tutti where title is revealed after category selection)
+  const titleInput = document.querySelector(
+    'input[name="subject"], #postad-title, #pstad-title, input[name="title"], input[name="pstad-title"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
+  );
+  if (titleInput && data.title && (!titleInput.value || titleInput.value.trim() === "")) {
+    setNativeValue(titleInput, data.title);
+  }
+
+  // 3. Description
   if (data.description) {
     setDescriptionValue(data.description);
   }
 
-  // Condition
-  const condEl = document.querySelector(
-    'select[name*="condition" i], select[id*="condition" i], select[data-testid*="condition" i], input[name*="condition" i]'
-  );
-  if (condEl && data.condition) {
-    setNativeValue(condEl, data.condition);
+  // 4. Condition (Zustand)
+  if (platform === "tutti") {
+    const condInput = document.querySelector('input[name="field:itemCondition"], input[name*="itemCondition" i]');
+    let condCombobox = condInput ? (condInput.parentElement?.querySelector('[role="combobox"]') || condInput.previousElementSibling) : null;
+    if (!condCombobox) {
+      const condLabel = Array.from(document.querySelectorAll("label")).find(l => /zustand/i.test(l.textContent || ""));
+      if (condLabel && condLabel.htmlFor) condCombobox = document.getElementById(condLabel.htmlFor);
+      if (!condCombobox && condLabel) condCombobox = condLabel.closest(".MuiFormControl-root")?.querySelector('[role="combobox"]');
+    }
+    if (condCombobox) {
+      const condVal = (data.condition || "gebraucht").toLowerCase();
+      await fillMuiSelect(condCombobox, opt => {
+        const txt = (opt.textContent || "").toLowerCase().trim();
+        if (condVal.includes("neu") && !condVal.includes("neuwertig")) {
+          return txt === "neu" || /neu\b/i.test(txt);
+        } else if (condVal.includes("neuwertig")) {
+          return /neuwertig|wie neu/i.test(txt);
+        } else if (condVal.includes("defekt")) {
+          return /defekt/i.test(txt);
+        } else {
+          return /gebraucht/i.test(txt);
+        }
+      });
+      await new Promise(r => setTimeout(r, 120));
+    }
+  } else {
+    const condEl = document.querySelector(
+      'select[name*="condition" i], select[id*="condition" i], select[data-testid*="condition" i], input[name*="condition" i]'
+    );
+    if (condEl && data.condition) {
+      setNativeValue(condEl, data.condition);
+    }
   }
 
-  // Prices
+  // 5. Shipping (Versand verfügbar on Tutti)
+  if (platform === "tutti") {
+    const shipInput = document.querySelector('input[name="field:shippingAvailable"], input[name*="shipping" i]');
+    let shipCombobox = shipInput ? (shipInput.parentElement?.querySelector('[role="combobox"]') || shipInput.previousElementSibling) : null;
+    if (!shipCombobox) {
+      const shipLabel = Array.from(document.querySelectorAll("label")).find(l => /versand/i.test(l.textContent || ""));
+      if (shipLabel && shipLabel.htmlFor) shipCombobox = document.getElementById(shipLabel.htmlFor);
+      if (!shipCombobox && shipLabel) shipCombobox = shipLabel.closest(".MuiFormControl-root")?.querySelector('[role="combobox"]');
+    }
+    if (shipCombobox) {
+      const isPickupOnly = draft.ricardo?.shipping_preset_id === "pickup_only";
+      await fillMuiSelect(shipCombobox, opt => {
+        const txt = (opt.textContent || "").toLowerCase().trim();
+        if (isPickupOnly) {
+          return /^(nein|nur\s*abholung|abholung)$/i.test(txt) || /nein/i.test(txt);
+        } else {
+          return /^(ja|versand\s*möglich|versand)$/i.test(txt) || /ja/i.test(txt);
+        }
+      });
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }
+
+  // 6. Prices
   if (platform === "ricardo" || platform === "ebay_de") {
     const startPriceInput = document.querySelector(
       'input[name*="startPrice" i], input[id*="start-price" i], input[aria-label*="Startpreis" i], input[data-testid*="start-price" i]'
@@ -452,6 +730,17 @@ function executeStep2(draft) {
       const priceTypeEl = document.querySelector('select[name="priceType"], input[name="priceType"], select[id*="price-type" i]');
       if (priceTypeEl && data.priceType) {
         setNativeValue(priceTypeEl, data.priceType);
+      }
+    }
+  }
+
+  // 7. Postal Code (PLZ) on Tutti if currently empty
+  if (platform === "tutti") {
+    const postalCodeInput = document.querySelector('input[name="postalCode"], input[id*="postalCode" i]');
+    if (postalCodeInput && (!postalCodeInput.value || postalCodeInput.value.trim() === "")) {
+      const m = (draft.user_notes || "").match(/\b([1-9]\d{3})\b/);
+      if (m) {
+        setNativeValue(postalCodeInput, m[1]);
       }
     }
   }

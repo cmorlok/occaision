@@ -94,6 +94,14 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "isKleinanzeigen" in content_js_code
     assert "setDescriptionValue" in content_js_code
 
+    # 5b. Tutti specific autofill & MUI combobox support
+    assert "field:itemCondition" in content_js_code
+    assert "field:shippingAvailable" in content_js_code
+    assert "fillMuiSelect" in content_js_code
+    assert "autoSelectTuttiCategory" in content_js_code
+    assert 'input[name="subject"]' in content_js_code
+    assert "listingType" in content_js_code
+
     # 6. 6-source hybrid price scraper & dashboard bridge
     assert "SCRAPE_ALL_PRICE_SOURCES" in bg_js_code
     assert "scrapeSourceHybrid" in bg_js_code
