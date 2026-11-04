@@ -415,10 +415,10 @@ Da Backend-Scraping häufig durch Captchas/Anti-Bot-Systeme blockiert wird und G
 ### STEP 7: Firefox-Extension Hybrid-Scraper (`extension/manifest.json`, `background.js`, `content.js`)
 * `extension/manifest.json`:
   * Ergänzt `"tabs"` und `"scripting"` in `permissions`.
-  * Ergänzt `"*://*.idealo.de/*"`, `"*://*.toppreise.ch/*"`, `"*://*.digitec.ch/*"` in `host_permissions`.
+  * Ergänzt `"*://*.idealo.de/*"`, `"*://*.toppreise.ch/*"`, `"*://*.digitec.ch/*"`, `"*://*.tutti.ch/*"` in `host_permissions`.
   * Ergänzt `"http://127.0.0.1:8000/*"` und `"http://localhost:8000/*"` in `content_scripts[0].matches`.
 * `extension/background.js`:
-  * Implementiert `SCRAPE_ALL_PRICE_SOURCES` für alle 6 Quellen (`ebay_de_sold`, `kleinanzeigen`, `idealo`, `ricardo`, `toppreise`, `digitec`) mit `scrapeSourceHybrid()` (`fetch()` $\rightarrow$ Fallback auf inaktiven Tab via `tabs.create({ url, active: false })` + `scripting.executeScript` + `tabs.remove`) und 10%-getrimmter Median-Berechnung.
+  * Implementiert `SCRAPE_ALL_PRICE_SOURCES` für alle 7 Quellen (`ebay_de_sold`, `kleinanzeigen`, `idealo`, `ricardo`, `toppreise`, `digitec`, `tutti`) mit `scrapeSourceHybrid()` (`fetch()` $\rightarrow$ Fallback auf inaktiven Tab via `tabs.create({ url, active: false })` + `scripting.executeScript` + `tabs.remove`) und 10%-getrimmter Median-Berechnung.
 * `extension/content.js`:
   * Erkennt das lokale Dashboard (`isLocalDashboard(hostname)`), rendert dort kein Smart-Panel, sondern stellt eine `window.postMessage`-Bridge (`OCCAISION_PING` / `OCCAISION_SCRAPE_PRICES`) bereit.
 
@@ -426,7 +426,57 @@ Da Backend-Scraping häufig durch Captchas/Anti-Bot-Systeme blockiert wird und G
 * `frontend/index.html`:
   * Spaltet die Eingabe in `#product-name` (*Produktname / Modell*) und `#user-notes` (*Kurzbeschreibung / Zustand & Lieferumfang*) auf.
   * Ergänzt den Button `#btn-scrape-extension` (*🔍 1. Preisrecherche über Extension (Optional)*) vor `#btn-analyze` (*⚡ 2. KI-Analyse starten*).
-  * Zeigt in Section 2 die ermittelten Werte aller 6 Preisquellen (`#price-ebay-median`, `#price-kleinanzeigen-median`, `#price-idealo-median`, `#price-ricardo-median`, `#price-toppreise-median`, `#price-digitec-median`) an.
+  * Zeigt in Section 2 die ermittelten Werte aller 7 Preisquellen (`#price-ebay-median`, `#price-kleinanzeigen-median`, `#price-idealo-median`, `#price-ricardo-median`, `#price-toppreise-median`, `#price-digitec-median`, `#price-tutti-median`) an.
+  * Einstellungen (`⚙️ Einstellungen`): Einzelne Checkboxen zum Aktivieren/Deaktivieren jeder Preisquelle sowie Toggle `keep_tabs_open_after_search` zum Offenhalten der Recherche-Tabs zu Debug-Zwecken.
+
+### STEP 9: Erweiterung der Preis-Extraktion & Anti-Bot-Robustheit
+* **Tutti.ch Preisextraktion:** Automatisches Ausfüllen der Suchmaske auf `tutti.ch` im Hintergrund-Tab, Warten auf Weiterleitung zur Suchergebnisseite, Karten-Parsing mit Bereinigung von Account-Logo-Badges (SVG/Image-Overlays) und Ausschluss von Ricardo-Crosspostings.
+* **Idealo.de Neupreise:** Direkte Extraktion des Bestpreises über eingebettete CSR-Initialdaten (`window.csr.initialData['searchResult']`) via Background-`fetch()`, wodurch Probleme mit unhydrierten Hintergrund-Tabs gelöst wurden.
+* **Ricardo.ch Suche:** Präzise URL-Filter (`item_condition=used&seller_type=individual`), strikte Begrenzung auf `data-testid="regular-results"` (Herausfiltern ungenauer Treffer unterhalb von "Ergebnisse für weniger Suchbegriffe").
+* **eBay.de Beendet/Verkauft:** Cutoff ungenauer Treffer ab `fewerWordsMatch` ("Ergebnisse für weniger Suchbegriffe") sowie Login-Erkennung.
+
+### STEP 10: Schweizer & Deutsche Versandtarif-Aktualisierung
+* **Schweiz (CHF, B-Post):**
+  * Kleinsendung bis 100 g (3.00 CHF)
+  * Kleinsendung bis 500 g (3.40 CHF)
+  * Paket bis 2 kg (9.00 CHF, Default `b_post_2kg`)
+  * Paket bis 10 kg (12.00 CHF)
+  * Paket bis 30 kg (21.00 CHF)
+  * Nur Abholung vor Ort (0.00 CHF)
+* **Deutschland (EUR, Deutsche Post & DHL):**
+  * Großbrief bis 500 g (1.80 EUR)
+  * Warensendung bis 1.000 g (2.70 EUR)
+  * Warensendung bis 2.000 g (3.55 EUR)
+  * Maxibrief bis 1.000 g (2.90 EUR)
+  * DHL Päckchen S bis 2 kg (4.19 EUR)
+  * DHL Päckchen M bis 2 kg (5.19 EUR)
+  * DHL Paket bis 2 kg versichert (6.19 EUR, Default `dhl_2kg`)
+  * DHL Paket bis 5 kg versichert (7.69 EUR)
+  * DHL Paket bis 10 kg versichert (10.49 EUR)
+  * DHL Paket bis 20 kg versichert (18.99 EUR)
+  * DHL Paket bis 31.5 kg versichert (23.99 EUR)
+  * Nur Abholung vor Ort DE (0.00 EUR)
+
+### STEP 11: Tutti.ch Listing-Creation Smart-Panel Automation
+* **Problem:** Auf `tutti.ch/de/listings/new` existieren vor der Kategorieauswahl weder Titelfeld noch Beschreibungs-/Preis-Inputs (nur Upload & Kategorie-Button).
+* **Schritt 1 (Kategorie & Bilder):**
+  * `autoSelectTuttiCategory`: Öffnet das Tutti-Kategoriemenü (`.MuiPopover-root`) und navigiert anhand des KI-Kategorievorschlags (`draft.tutti.category_suggestion`) durch die Ebenen.
+  * Falls der Vorschlag nicht existiert, **bleibt das Dropdown für den Benutzer offen**, damit dieser die Kategorie mit einem Klick wählen kann.
+  * `injectFilesIntoInput`: Robuster Bild-Upload über native `DataTransfer`- und `File`-Instanzen ohne Firefox-Xray-`cloneInto`-Fehler auf TypedArrays.
+* **Schritt 2 (Alle Textfelder):**
+  * Befüllt nach Erscheinen des Hauptformulars alle Felder:
+    * Titel: `input[name="subject"]`
+    * Beschreibung: `textarea[name="body"]`
+    * Preis: `input[name="price"]`
+    * Zustand: MUI Combobox `field:itemCondition` via `fillMuiSelect`
+    * Versand verfügbar: MUI Combobox `field:shippingAvailable` via `fillMuiSelect`
+    * PLZ: `input[name="postalCode"]`
+    * Fallback-Bilder-Upload, falls Schritt 1 übersprungen wurde.
+
+### STEP 12: Konsistentes Rebranding auf OccAIsion
+* Vollständige Umbenennung aller Module, Skripte, Container und Dokumente auf den kanonischen Namen **`OccAIsion`** (slug: `occaision`).
+* Bereinigung aller alten Build-Artefakte (`dist/seller-assistant.zip` entfernt, ausschließlich `dist/occaision.zip`).
+* Anpassung der internen Message-Bridge auf `OCCAISION_PING`, `OCCAISION_SCRAPE_PRICES`, etc.
 
 ---
 

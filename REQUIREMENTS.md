@@ -37,7 +37,7 @@ flowchart TD
         DashBridge["Dashboard Content-Script Bridge (postMessage <-> runtime.sendMessage)"]
         BgScript["Extension Background Worker (Hybrid-Scraper: fetch + Tab-DOM-Fallback)"]
         ContentScript["Smart-Panel Content Script (ricardo.ch / tutti.ch / ebay.de / kleinanzeigen.de)"]
-        PriceSites["6 Preisquellen (eBay DE Gebraucht/Beendet, Kleinanzeigen, Idealo, Ricardo, Toppreise, Digitec)"]
+        PriceSites["7 Preisquellen (eBay DE Gebraucht/Beendet, Kleinanzeigen, Idealo, Ricardo, Toppreise, Digitec, Tutti)"]
         
         Dashboard <-->|2. Optionale Preisrecherche| DashBridge
         DashBridge <--> BgScript
@@ -70,8 +70,26 @@ flowchart TD
   * **Kurzbeschreibung / Zustand & Lieferumfang:** Separates Freitextfeld für Zustand, Alter, Mängel und Zubehör (z.B. *"ca. 2 Jahre alt, wenig gebraucht, OVP & Ladekabel dabei, Polster intakt"*).
 * **Konfigurierbare Voreinstellungen (Presets für CH & DE):**
   * Bevorzugte Verkaufsart bei Auktionsplattformen (Auktion vs. Sofortkauf für Ricardo.ch und eBay.de) bzw. Preistyp bei Kleinanzeigen (Verhandlungsbasis/VB vs. Festpreis).
-  * **Schweizer Versand-Presets (CHF):** Nach aktuellen Schweizer Post-Tarifen (z.B. B-Post Paket bis 2 kg, B-Post bis 10 kg, Grossbrief, Abholung vor Ort).
-  * **Deutsche Versand-Presets (EUR):** Nach aktuellen Tarifen in Deutschland (z.B. DHL Paket bis 2 kg versichert, DHL Paket bis 5 kg, Hermes Päckchen/Paket, Deutsche Post Bücher-/Warensendung, Nur Abholung vor Ort).
+  * **Schweizer Versand-Presets (CHF):** Nach aktuellen Schweizer Post B-Post-Tarifen:
+    * Kleinsendung bis 100 g: 3.00 CHF
+    * Kleinsendung bis 500 g: 3.40 CHF
+    * Paket bis 2 kg: 9.00 CHF *(Standard)*
+    * Paket bis 10 kg: 12.00 CHF
+    * Paket bis 30 kg: 21.00 CHF
+    * Nur Abholung vor Ort: 0.00 CHF
+  * **Deutsche Versand-Presets (EUR):** Nach aktuellen Tarifen der Deutschen Post & DHL:
+    * Großbrief bis 500 g: 1.80 EUR
+    * Warensendung bis 1.000 g: 2.70 EUR
+    * Warensendung bis 2.000 g: 3.55 EUR
+    * Maxibrief bis 1.000 g: 2.90 EUR
+    * DHL Päckchen S bis 2 kg: 4.19 EUR
+    * DHL Päckchen M bis 2 kg: 5.19 EUR
+    * DHL Paket bis 2 kg (versichert & Sendungsverfolgung): 6.19 EUR *(Standard)*
+    * DHL Paket bis 5 kg: 7.69 EUR
+    * DHL Paket bis 10 kg: 10.49 EUR
+    * DHL Paket bis 20 kg: 18.99 EUR
+    * DHL Paket bis 31.5 kg: 23.99 EUR
+    * Nur Abholung vor Ort DE: 0.00 EUR
 
 ### 3.2 Bildanalyse & Optimierung
 * **Standard-Bildoptimierung (Default für authentischen Privatverkauf-Look):**
@@ -95,17 +113,21 @@ Da Server-/Backend-Requests häufig durch Anti-Bot-Systeme (z.B. eBay Captchas, 
 * **Schritt 1: Eingabe (Produktname & Kurzbeschreibung):**
   * Der Benutzer erfasst den **Produktnamen** sowie die **Kurzbeschreibung** (und lädt Fotos hoch).
 * **Schritt 2 (Optional, manuell ausgelöst): Preisrecherche über die Firefox-Extension:**
-  * Über den Button *"🔍 1. Preisrecherche über Extension (Optional)"* im Dashboard befragt die Firefox-Extension direkt im Browser des Nutzers **alle 6 Preisquellen** mittels **Hybrid-Scraping** (zuerst schneller `fetch()`, bei SPA/Bot-Schutz oder 0 Treffern automatischer Fallback auf einen temporären inaktiven Hintergrund-Tab mit DOM-Extraktion nach JS-Rendering):
-    1. **eBay DE (Gebraucht und Beendet):** Verkaufte Gebraucht-Artikel (`LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`) in EUR (inkl. Umrechnung in CHF).
-    2. **Kleinanzeigen.de Suche:** Aktuelle Gebraucht-Angebote auf `kleinanzeigen.de` in EUR.
-    3. **Idealo.de Neupreis:** Aktueller deutscher Strassen-/Neupreis auf `idealo.de` in EUR.
-    4. **Ricardo.ch Suche:** Aktuelle Angebote auf `ricardo.ch` in CHF.
+  * Über den Button *"🔍 1. Preisrecherche über Extension (Optional)"* im Dashboard befragt die Firefox-Extension direkt im Browser des Nutzers **alle 7 Preisquellen** mittels **Hybrid-Scraping** (zuerst schneller `fetch()`, bei SPA/Bot-Schutz oder 0 Treffern automatischer Fallback auf einen temporären inaktiven Hintergrund-Tab mit DOM-Extraktion nach JS-Rendering):
+    1. **eBay DE (Gebraucht und Beendet):** Verkaufte Gebraucht-Artikel (`LH_Sold=1&LH_Complete=1&LH_ItemCondition=3000`) in EUR (inkl. Umrechnung in CHF, Filterung ungenauer Treffer ab "Ergebnisse für weniger Suchbegriffe", Login-Erkennung).
+    2. **Kleinanzeigen.de Suche:** Aktuelle Gebraucht-Angebote auf `kleinanzeigen.de` in EUR (Privatanbieter-Filter `anbieter:privat`, Zustand alright/like_new/ok).
+    3. **Idealo.de Neupreis:** Aktueller deutscher Strassen-/Neupreis auf `idealo.de` in EUR (direkte CSR-InitialData-Extraktion via Background-`fetch()`).
+    4. **Ricardo.ch Suche:** Aktuelle Angebote auf `ricardo.ch` in CHF (`item_condition=used&seller_type=individual`, strikte Begrenzung auf `data-testid="regular-results"`).
     5. **Toppreise.ch Neupreis:** Aktueller Schweizer Neupreisvergleich auf `toppreise.ch` in CHF.
     6. **Digitec/Galaxus Suche:** Aktueller Schweizer Neupreis auf `digitec.ch` in CHF.
+    7. **Tutti.ch Suche:** Aktuelle Gebraucht-Angebote auf `tutti.ch` in CHF (Suchmasken-Automation via Tab, robuste Preisextraktion inkl. Bereinigung von Account-Logo-Badges, Ausschluss von Ricardo-Crosspostings).
   * Für jede Quelle werden **Median** (mit 10%-Outlier-Trimming ab 4 Treffern), **Preisspanne (Min–Max)** und **Anzahl Treffer** berechnet, im Dashboard angezeigt und im Entwurf gespeichert.
+  * **Flexible Quellenauswahl & Debugging:**
+    * In den Dashboard-Einstellungen (`⚙️ Einstellungen`) können Preisquellen einzeln aktiviert/deaktiviert werden. Nur aktivierte Quellen werden abgefragt und an die KI übergeben.
+    * Option *"Tabs offen lassen nach Preissuche"*, um die im Hintergrund geöffneten Recherche-Tabs zur manuellen Inspektion nicht automatisch zu schliessen.
 * **Schritt 3: KI-Analyse & Preisfindung (`⚡ 2. KI-Analyse starten`):**
   * **Fall A – Preise wurden in Schritt 2 über die Extension ermittelt:**
-    * Alle 6 ermittelten Preisstatistiken werden strukturiert im Prompt an Gemini übergeben.
+    * Alle ermittelten Preisstatistiken der aktiven Quellen werden strukturiert im Prompt an Gemini übergeben.
     * **Google Search Grounding wird für diesen Aufruf automatisch deaktiviert** (schont das API-Quota und verhindert 429-Fehler); die KI bestimmt die optimalen Plattformpreise und generiert die Inseratetexte direkt auf Basis der echten Marktdaten.
   * **Fall B – Schritt 2 wurde übersprungen (keine Extension-Preise vorhanden):**
     * Das System überlässt die Preisrecherche der KI (je nach Einstellung in `⚙️ Einstellungen` mit oder ohne Google Search Grounding sowie Backend-eBay-Fallback).
@@ -161,13 +183,18 @@ Da Server-/Backend-Requests häufig durch Anti-Bot-Systeme (z.B. eBay Captchas, 
   * **Automatische Plattform-Erkennung:** Erkennt anhand der aktuellen Domain (`ricardo.ch`, `tutti.ch`, `ebay.de`, `kleinanzeigen.de`), welche plattformspezifischen Texte, Preise (CHF vs. EUR) und Formular-Selektoren verwendet werden müssen.
   * **Entwurfs-Dropdown:** Auswahl des gewünschten Artikels direkt aus der lokalen Entwurfs-Liste.
   * **Schritt-für-Schritt Auto-Fill (Wizard-kompatibel):**
-    * Unterstützt sowohl mehrstufige Formulare (Ricardo.ch, eBay.de) als auch einseitige Inserate-Formulare (Tutti.ch, Kleinanzeigen.de):
-      * *Schritt 1: Bilder & Titel einfügen* (injiziert die optimierten Bilder in den Datei-Upload/Dropzone und trägt den plattformspezifischen Titel ein).
-      * *Schritt 2: Beschreibung, Zustand & Preis einfügen* (befüllt das Beschreibungsfeld, inkl. allfälligem Rich-Text/`contenteditable`-Editor oder `iframe` bei eBay.de, wählt nach Möglichkeit den Zustand und trägt Start-/Sofortkauf-/VB-Preis in der jeweiligen Landeswährung ein).
+    * Unterstützt sowohl mehrstufige Formulare (Ricardo.ch, eBay.de) als auch dynamische einseitige Inserate-Formulare (Tutti.ch, Kleinanzeigen.de):
+      * **Ricardo.ch & eBay.de:**
+        * *Schritt 1: Bilder & Titel einfügen* (injiziert die optimierten Bilder in den Datei-Upload/Dropzone und trägt den plattformspezifischen Titel ein).
+        * *Schritt 2: Beschreibung, Zustand & Preis einfügen* (befüllt das Beschreibungsfeld, inkl. allfälligem Rich-Text/`contenteditable`-Editor oder `iframe` bei eBay.de, wählt den Zustand und trägt Start-/Sofortkauf-/Auktions-Preis ein).
+      * **Tutti.ch (`/de/listings/new`):**
+        * *Schritt 1: Kategorie & Bilder* (lädt die Bilder in die Dropzone und wählt automatisch die Kategorie über Tutti's MUI-Kategoriemenü; existiert der KI-Vorschlag nicht, bleibt das Dropdown für die manuelle Auswahl offen, damit das Formular geladen werden kann).
+        * *Schritt 2: Alle Textfelder einfügen* (befüllt nach der Kategorieauswahl Titel `name="subject"`, Beschreibung `name="body"`, Preis `name="price"`, Zustand über die MUI-Combobox `name="field:itemCondition"`, Versandoption über `name="field:shippingAvailable"`, PLZ `name="postalCode"` und sichert den Bild-Upload ab).
   * **1-Klick-Copy-Buttons (Fallback):** Neben jedem Feld im Smart-Panel (Titel, Beschreibung, Preise, Kategorie) gibt es einen direkten Kopier-Button für die gerade aktive Plattform, falls eine Plattform ihre DOM-Selektoren kurzfristig ändert.
 * **Technische Feld-Befüllung:**
   * Text- & Nummernfelder über native Value-Setter (`HTMLInputElement.prototype.value` / `HTMLTextAreaElement.prototype.value`) inkl. Dispatch von `input`-, `change`- und `blur`-Events für React/Marko/Next.js-State-Synchronisation (sowie Unterstützung für `contenteditable`-Editoren auf `ebay.de`).
-  * **Automatischer Bild-Upload:** Abruf der optimierten Bilder über das Background-Script, Bündelung in einem Firefox-Xray-kompatiblen `DataTransfer`-Objekt und Übergabe an das `<input type="file">`-Element bzw. Dropzone-Event der jeweiligen Plattform.
+  * **Material-UI (MUI) Combobox-Unterstützung:** Spezialisierter Handler (`fillMuiSelect`) für MUI-v5-Selects, der das Dropdown per MouseEvent öffnet, auf asynchrone Popover-Optionen wartet und den gewünschten Zustand bzw. Versandwert auswählt.
+  * **Automatischer Bild-Upload:** Abruf der optimierten Bilder über das Background-Script, Bündelung in einem Firefox-Xray-kompatiblen `DataTransfer`-Objekt (ohne fehleranfälliges `cloneInto` auf TypedArrays) und Übergabe an das `<input type="file">`-Element bzw. Dropzone-Event der jeweiligen Plattform.
 
 ---
 
