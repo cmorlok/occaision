@@ -92,17 +92,31 @@ async function fillRicardoPrices(draft, data) {
   }
 
   // 2. Sofort-Kaufpreis (Fixed Price / Buy Now)
-  let buynowPriceInput = document.getElementById("SellingUI.buy_now_price")
+  // Check if Sofort-Kauf toggle is present
+  const fixedPriceSwitch = document.querySelector('input[type="checkbox"][value="FixedPrice"]');
+  const isSwitchChecked = Boolean(
+    fixedPriceSwitch && (
+      fixedPriceSwitch.checked ||
+      (fixedPriceSwitch.closest && fixedPriceSwitch.closest('.MuiSwitch-switchBase')?.classList?.contains('Mui-checked')) ||
+      fixedPriceSwitch.parentElement?.classList?.contains('Mui-checked')
+    )
+  );
+
+  // If Sofort-Kauf is desired and switch is not checked, activate the toggle
+  if (fixedPriceSwitch && !isSwitchChecked && data.buyNowPrice && Number(data.buyNowPrice) > 0) {
+    fixedPriceSwitch.click();
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  // Find Sofort-Kaufpreis input: on Ricardo this has id="price"
+  let buynowPriceInput = document.getElementById("price")
+    || document.querySelector('input[id="price"], input[aria-describedby*="price-helper-text"]')
+    || document.getElementById("SellingUI.buy_now_price")
     || document.getElementById("SellingUI.fixed_price")
     || document.getElementById("SellingUI.buy_now")
     || document.getElementById("SellingUI.buynow_price")
     || document.getElementById("SellingUI.buyItNowPrice");
 
-  if (!buynowPriceInput) {
-    buynowPriceInput = document.querySelector(
-      'input[id="SellingUI.buy_now_price"], input[id="SellingUI.fixed_price"], input[id*="buy_now" i], input[id*="buynow" i], input[id*="fixed_price" i], input[id*="buy-now" i], input[name*="buyNow" i], input[name*="buy_now" i], input[name*="fixed_price" i], input[name*="buyItNow" i], input[aria-describedby*="buy_now" i], input[aria-describedby*="fixed_price" i], input[aria-label*="sofort" i], input[data-testid*="buy-now" i], input[data-testid*="fixed-price" i]'
-    );
-  }
   if (!buynowPriceInput) {
     const buyNowLabel = Array.from(document.querySelectorAll("label")).find(l =>
       /sofort-?kauf/i.test(l.textContent || "")
@@ -115,19 +129,171 @@ async function fillRicardoPrices(draft, data) {
     }
   }
 
-  // If Sofort-Kauf switch exists but is unchecked, and the draft specifies fixed_price, toggle it
-  const fixedPriceSwitch = document.querySelector('input[type="checkbox"][value="FixedPrice"]');
-  if (!buynowPriceInput && fixedPriceSwitch && !fixedPriceSwitch.checked && (draft.ricardo?.offer_type === "fixed_price")) {
-    fixedPriceSwitch.click();
-    await new Promise(r => setTimeout(r, 150));
-    buynowPriceInput = document.getElementById("SellingUI.buy_now_price")
-      || document.getElementById("SellingUI.fixed_price")
-      || document.querySelector('input[id*="buy_now" i], input[id*="fixed_price" i]');
+  if (!buynowPriceInput) {
+    buynowPriceInput = document.querySelector(
+      'input[id="SellingUI.buy_now_price"], input[id="SellingUI.fixed_price"], input[id*="buy_now" i], input[id*="buynow" i], input[id*="fixed_price" i], input[id*="buy-now" i], input[name*="buyNow" i], input[name*="buy_now" i], input[name*="fixed_price" i], input[name*="buyItNow" i], input[aria-describedby*="buy_now" i], input[aria-describedby*="fixed_price" i], input[aria-label*="sofort" i], input[data-testid*="buy-now" i], input[data-testid*="fixed-price" i]'
+    );
   }
 
   if (buynowPriceInput && data.buyNowPrice !== null && data.buyNowPrice !== undefined) {
     setNativeValue(buynowPriceInput, formatPrice(data.buyNowPrice));
   }
+}
+
+// Helper: Configure Ricardo shipping options (Versand & Abholung)
+async function fillRicardoShipping(draft) {
+  function formatPrice(val) {
+    if (val === null || val === undefined || val === "") return "";
+    const n = Number(val);
+    if (isNaN(n)) return String(val);
+    return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  }
+
+  const presetId = draft?.ricardo?.shipping_preset_id || "b_post_2kg";
+  const isPickupOnly = presetId === "pickup_only";
+
+  const shippingSwitch = document.querySelector('input[type="checkbox"][value="Shipping"]');
+  const pickupSwitch = document.querySelector('input[type="checkbox"][value="Pickup"]');
+
+  const isShippingChecked = () => Boolean(
+    shippingSwitch && (
+      shippingSwitch.checked ||
+      (shippingSwitch.closest && shippingSwitch.closest('.MuiSwitch-switchBase')?.classList?.contains('Mui-checked')) ||
+      shippingSwitch.parentElement?.classList?.contains('Mui-checked')
+    )
+  );
+
+  const isPickupChecked = () => Boolean(
+    pickupSwitch && (
+      pickupSwitch.checked ||
+      (pickupSwitch.closest && pickupSwitch.closest('.MuiSwitch-switchBase')?.classList?.contains('Mui-checked')) ||
+      pickupSwitch.parentElement?.classList?.contains('Mui-checked')
+    )
+  );
+
+  // 1. Handle Pickup Only
+  if (isPickupOnly) {
+    if (shippingSwitch && isShippingChecked()) {
+      shippingSwitch.click();
+      await new Promise(r => setTimeout(r, 150));
+    }
+    if (pickupSwitch && !isPickupChecked()) {
+      pickupSwitch.click();
+      await new Promise(r => setTimeout(r, 150));
+    }
+    return true;
+  }
+
+  // 2. Enable Shipping switch if not enabled
+  if (shippingSwitch && !isShippingChecked()) {
+    shippingSwitch.click();
+    await new Promise(r => setTimeout(r, 250));
+  }
+
+  // Ensure Pickup is also enabled if pickup is allowed (standard for Ricardo)
+  if (pickupSwitch && !isPickupChecked()) {
+    pickupSwitch.click();
+    await new Promise(r => setTimeout(r, 100));
+  }
+
+  // 3. Check if standard default (Paket bis 2kg, Economy, 9.00 CHF) is what we need
+  const needsNonDefault = presetId !== "b_post_2kg";
+  if (!needsNonDefault) {
+    // Ricardo's default shipping package is already "Paket, 2kg, Economy, CHF 9.00"
+    return true;
+  }
+
+  // 4. If we need a non-default preset (e.g. b_post_10kg, b_post_30kg, kleinsendung_100g, kleinsendung_500g):
+  // Find and click the "Bearbeiten" button in the shipping section
+  const deliverySection = (document.querySelector('.forBloomreach_DeliverySectionTitle')?.closest ? document.querySelector('.forBloomreach_DeliverySectionTitle').closest('.MuiBox-root') : null)
+    || (shippingSwitch?.closest ? shippingSwitch.closest('.MuiBox-root')?.parentElement : null);
+
+  const editBtn = Array.from((deliverySection || document).querySelectorAll("button")).find(b =>
+    /bearbeiten/i.test(b.textContent || "")
+  );
+
+  if (!editBtn) {
+    return false;
+  }
+
+  editBtn.click();
+  await new Promise(r => setTimeout(r, 300));
+
+  // 5. In Dialog 1 ("Versand"): choose "Brief" or "Paket"
+  let dialog = document.querySelector('[role="dialog"]');
+  if (!dialog) return false;
+
+  const isBrief = presetId.includes("100g") || presetId.includes("500g") || presetId.includes("brief");
+
+  const categoryBtn = Array.from(dialog.querySelectorAll('button[role="checkbox"], button')).find(b => {
+    const txt = (b.textContent || "").toLowerCase();
+    return isBrief ? txt.includes("brief") : txt.includes("paket");
+  });
+
+  if (categoryBtn) {
+    categoryBtn.click();
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // 6. In Dialog 2 ("Paket" or "Brief"): choose weight chip & verify cost
+  dialog = document.querySelector('[role="dialog"]');
+  if (dialog) {
+    let targetWeightRegex = null;
+    let targetCost = null;
+
+    if (presetId.includes("10kg")) {
+      targetWeightRegex = /10\s*kg/i;
+      targetCost = 12.00;
+    } else if (presetId.includes("30kg")) {
+      targetWeightRegex = /30\s*kg/i;
+      targetCost = 21.00;
+    } else if (presetId.includes("100g")) {
+      targetWeightRegex = /100\s*g/i;
+      targetCost = 3.00;
+    } else if (presetId.includes("500g")) {
+      targetWeightRegex = /500\s*g/i;
+      targetCost = 3.40;
+    } else {
+      targetWeightRegex = /2\s*kg/i;
+      targetCost = 9.00;
+    }
+
+    if (targetWeightRegex) {
+      const weightChip = Array.from(dialog.querySelectorAll('[role="radio"], .MuiChip-root')).find(c =>
+        targetWeightRegex.test(c.textContent || "")
+      );
+      if (weightChip) {
+        weightChip.click();
+        await new Promise(r => setTimeout(r, 150));
+      }
+    }
+
+    // Ensure Economy is selected
+    const economyChip = Array.from(dialog.querySelectorAll('[role="radio"], .MuiChip-root')).find(c =>
+      /economy/i.test(c.textContent || "")
+    );
+    if (economyChip && economyChip.getAttribute('aria-checked') === 'false') {
+      economyChip.click();
+      await new Promise(r => setTimeout(r, 100));
+    }
+
+    // Set cost input if present
+    const costInput = dialog.querySelector('input#shipping-cost-input, input[id*="shipping-cost" i]');
+    if (costInput && targetCost !== null) {
+      setNativeValue(costInput, formatPrice(targetCost));
+    }
+
+    // Click "Speichern" button
+    const saveBtn = Array.from(dialog.querySelectorAll("button")).find(b =>
+      /speichern/i.test(b.textContent || "") && !b.disabled
+    );
+    if (saveBtn) {
+      saveBtn.click();
+      await new Promise(r => setTimeout(r, 250));
+    }
+  }
+
+  return true;
 }
 
 // Helper: Select an option in a Material-UI Select (combobox + popover)
@@ -701,12 +867,13 @@ async function executeStep1(draft) {
     setNativeValue(titleInput, data.title);
   }
 
-  // 4. On Ricardo, if price fields are already present in DOM during Step 1, fill them as well
+  // 4. On Ricardo, if price/shipping fields are already present in DOM during Step 1, fill them as well
   if (platform === "ricardo") {
     try {
       await fillRicardoPrices(draft, data);
+      await fillRicardoShipping(draft);
     } catch (e) {
-      console.warn("[OccAIsion] Step 1 Ricardo price fill warning:", e);
+      console.warn("[OccAIsion] Step 1 Ricardo price/shipping fill warning:", e);
     }
   }
 }
@@ -777,7 +944,7 @@ async function executeStep2(draft) {
     }
   }
 
-  // 5. Shipping (Versand verfügbar on Tutti)
+  // 5. Shipping (Versand)
   if (platform === "tutti") {
     const shipInput = document.querySelector('input[name="field:shippingAvailable"], input[name*="shipping" i]');
     let shipCombobox = shipInput ? (shipInput.parentElement?.querySelector('[role="combobox"]') || shipInput.previousElementSibling) : null;
@@ -797,6 +964,12 @@ async function executeStep2(draft) {
         }
       });
       await new Promise(r => setTimeout(r, 120));
+    }
+  } else if (platform === "ricardo") {
+    try {
+      await fillRicardoShipping(draft);
+    } catch (e) {
+      console.warn("[OccAIsion] Ricardo shipping config warning:", e);
     }
   }
 
@@ -1329,5 +1502,6 @@ if (typeof module !== "undefined" && module.exports) {
     detectPlatform,
     getPlatformData,
     fillRicardoPrices,
+    fillRicardoShipping,
   };
 }

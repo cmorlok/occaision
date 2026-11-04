@@ -103,6 +103,8 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "listingType" in content_js_code
     assert "fillRicardoPrices" in content_js_code
     assert "SellingUI.start_price" in content_js_code
+    assert "fillRicardoShipping" in content_js_code
+    assert "shipping-cost-input" in content_js_code
 
     # 6. 6-source hybrid price scraper & dashboard bridge
     assert "SCRAPE_ALL_PRICE_SOURCES" in bg_js_code
@@ -413,18 +415,39 @@ def test_extension_ricardo_price_autofill_via_node():
       let events = [];
       const startPriceMock = {
         value: '',
-        dispatchEvent: (ev) => events.push(ev.type)
+        dispatchEvent: (ev) => events.push('start:' + ev.type)
+      };
+
+      const buyNowPriceMock = {
+        value: '',
+        dispatchEvent: (ev) => events.push('buynow:' + ev.type)
+      };
+
+      let fixedPriceToggled = false;
+      const fixedPriceSwitchMock = {
+        checked: false,
+        click: () => {
+          fixedPriceToggled = true;
+          fixedPriceSwitchMock.checked = true;
+        }
       };
 
       global.Event = function(type) { this.type = type; };
       global.document = {
         getElementById: (id) => {
           if (id === 'SellingUI.start_price') return startPriceMock;
+          if (id === 'price') return fixedPriceToggled ? buyNowPriceMock : null;
           return null;
         },
         querySelector: (selector) => {
           if (selector.includes('SellingUI.start_price') || selector.includes('start_price')) {
             return startPriceMock;
+          }
+          if (selector.includes('FixedPrice')) {
+            return fixedPriceSwitchMock;
+          }
+          if (selector.includes('price')) {
+            return fixedPriceToggled ? buyNowPriceMock : null;
           }
           return null;
         },
@@ -450,9 +473,143 @@ def test_extension_ricardo_price_autofill_via_node():
       if (startPriceMock.value !== '50') {
         throw new Error('Expected startPriceMock.value to be "50", got: ' + startPriceMock.value);
       }
-      if (!events.includes('input') || !events.includes('change')) {
-        throw new Error('Expected input and change events to be dispatched, got: ' + JSON.stringify(events));
+      if (!fixedPriceToggled) {
+        throw new Error('Expected FixedPrice toggle switch to have been clicked');
       }
+      if (buyNowPriceMock.value !== '120') {
+        throw new Error('Expected buyNowPriceMock.value to be "120", got: ' + buyNowPriceMock.value);
+      }
+      if (!events.includes('start:input') || !events.includes('buynow:input')) {
+        throw new Error('Expected input events to be dispatched, got: ' + JSON.stringify(events));
+      }
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+    assert res.returncode == 0, f"Node test failed: {res.stderr}"
+
+
+def test_extension_ricardo_shipping_autofill_via_node():
+    node_script = """
+    const content = require('./extension/content.js');
+
+    (async () => {
+      // 1. Test standard default shipping (b_post_2kg): turns on shipping switch
+      let shippingToggled = false;
+      const shippingSwitch = {
+        checked: false,
+        click: () => {
+          shippingToggled = true;
+          shippingSwitch.checked = true;
+        }
+      };
+
+      const pickupSwitch = {
+        checked: true,
+        click: () => { pickupSwitch.checked = !pickupSwitch.checked; }
+      };
+
+      global.Event = function(type) { this.type = type; };
+      global.document = {
+        querySelector: (selector) => {
+          if (selector.includes('Shipping')) return shippingSwitch;
+          if (selector.includes('Pickup')) return pickupSwitch;
+          return null;
+        },
+        querySelectorAll: () => []
+      };
+
+      const draft2kg = {
+        ricardo: { shipping_preset_id: 'b_post_2kg' }
+      };
+
+      await content.fillRicardoShipping(draft2kg);
+
+      if (!shippingToggled) {
+        throw new Error('Expected Shipping switch to be activated for b_post_2kg');
+      }
+
+      // 2. Test non-default shipping (b_post_10kg): clicks Bearbeiten, Dialog 1 Paket, Dialog 2 10kg, Speichern
+      let editClicked = false;
+      let paketCategoryClicked = false;
+      let chip10kgClicked = false;
+      let saveClicked = false;
+      let costInputValue = '';
+
+      const editBtn = {
+        textContent: 'Bearbeiten',
+        click: () => { editClicked = true; }
+      };
+
+      const paketCatBtn = {
+        textContent: 'Paket',
+        click: () => { paketCategoryClicked = true; }
+      };
+
+      const chip10kg = {
+        textContent: 'bis 10kg',
+        click: () => { chip10kgClicked = true; }
+      };
+
+      const costInput = {
+        value: '',
+        dispatchEvent: () => {}
+      };
+
+      const saveBtn = {
+        textContent: 'Speichern',
+        disabled: false,
+        click: () => { saveClicked = true; }
+      };
+
+      let dialogStep = 1;
+      const dialogMock = {
+        querySelectorAll: (sel) => {
+          if (dialogStep === 1) {
+            return [paketCatBtn];
+          } else {
+            return [chip10kg, saveBtn];
+          }
+        },
+        querySelector: (sel) => {
+          if (sel.includes('shipping-cost-input')) return costInput;
+          return null;
+        }
+      };
+
+      // Wrap click on paket to advance dialog step
+      paketCatBtn.click = () => {
+        paketCategoryClicked = true;
+        dialogStep = 2;
+      };
+
+      global.document = {
+        querySelector: (selector) => {
+          if (selector.includes('Shipping')) return { checked: true, click: () => {} };
+          if (selector.includes('Pickup')) return { checked: true, click: () => {} };
+          if (selector.includes('dialog')) return dialogMock;
+          return null;
+        },
+        querySelectorAll: (selector) => {
+          if (selector.includes('button')) return [editBtn];
+          return [];
+        }
+      };
+
+      const draft10kg = {
+        ricardo: { shipping_preset_id: 'b_post_10kg' }
+      };
+
+      await content.fillRicardoShipping(draft10kg);
+
+      if (!editClicked) throw new Error('Expected Bearbeiten button to be clicked');
+      if (!paketCategoryClicked) throw new Error('Expected Paket category button to be clicked');
+      if (!chip10kgClicked) throw new Error('Expected 10kg chip to be clicked');
+      if (!saveClicked) throw new Error('Expected Speichern button to be clicked');
+      if (costInput.value !== '12') throw new Error('Expected cost input to be "12", got: ' + costInput.value);
+
     })().catch(err => {
       console.error(err);
       process.exit(1);
