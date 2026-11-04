@@ -94,13 +94,15 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "isKleinanzeigen" in content_js_code
     assert "setDescriptionValue" in content_js_code
 
-    # 5b. Tutti specific autofill & MUI combobox support
+    # 5b. Tutti & Ricardo specific autofill & MUI support
     assert "field:itemCondition" in content_js_code
     assert "field:shippingAvailable" in content_js_code
     assert "fillMuiSelect" in content_js_code
     assert "autoSelectTuttiCategory" in content_js_code
     assert 'input[name="subject"]' in content_js_code
     assert "listingType" in content_js_code
+    assert "fillRicardoPrices" in content_js_code
+    assert "SellingUI.start_price" in content_js_code
 
     # 6. 6-source hybrid price scraper & dashboard bridge
     assert "SCRAPE_ALL_PRICE_SOURCES" in bg_js_code
@@ -393,6 +395,63 @@ def test_extension_price_parser_and_stats_via_node():
       await bg.scrapeViaBackgroundTab("https://example.com", "toppreise", true);
       if (removedTabs.includes(42)) {
         throw new Error("Expected tab 42 NOT to be removed when keepTabsOpen=true");
+      }
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+    assert res.returncode == 0, f"Node test failed: {res.stderr}"
+
+
+def test_extension_ricardo_price_autofill_via_node():
+    node_script = """
+    const content = require('./extension/content.js');
+
+    (async () => {
+      let events = [];
+      const startPriceMock = {
+        value: '',
+        dispatchEvent: (ev) => events.push(ev.type)
+      };
+
+      global.Event = function(type) { this.type = type; };
+      global.document = {
+        getElementById: (id) => {
+          if (id === 'SellingUI.start_price') return startPriceMock;
+          return null;
+        },
+        querySelector: (selector) => {
+          if (selector.includes('SellingUI.start_price') || selector.includes('start_price')) {
+            return startPriceMock;
+          }
+          return null;
+        },
+        querySelectorAll: () => []
+      };
+
+      const draft = {
+        id: 'test-draft',
+        ricardo: {
+          start_price_chf: 50.0,
+          buynow_price_chf: 120.0,
+          offer_type: 'auction'
+        }
+      };
+
+      const data = content.getPlatformData(draft, 'ricardo');
+      if (data.startPrice !== 50.0 || data.buyNowPrice !== 120.0) {
+        throw new Error('Unexpected getPlatformData: ' + JSON.stringify(data));
+      }
+
+      await content.fillRicardoPrices(draft, data);
+
+      if (startPriceMock.value !== '50') {
+        throw new Error('Expected startPriceMock.value to be "50", got: ' + startPriceMock.value);
+      }
+      if (!events.includes('input') || !events.includes('change')) {
+        throw new Error('Expected input and change events to be dispatched, got: ' + JSON.stringify(events));
       }
     })().catch(err => {
       console.error(err);

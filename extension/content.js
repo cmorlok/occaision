@@ -1,7 +1,7 @@
 // Content Script for OccAIsion Smart-Panel
 // Injected into ricardo.ch and tutti.ch listing creation wizards.
 
-const browserApi = typeof browser !== "undefined" ? browser : chrome;
+const browserApi = typeof browser !== "undefined" ? browser : (typeof chrome !== "undefined" ? chrome : null);
 
 // Helper: Convert Data URL to Uint8Array
 function dataUrlToUint8Array(dataUrl) {
@@ -20,7 +20,7 @@ function dataUrlToUint8Array(dataUrl) {
 function setNativeValue(element, value) {
   if (!element) return;
   const target = element.wrappedJSObject || element;
-  const win = typeof window !== "undefined" && window.wrappedJSObject ? window.wrappedJSObject : window;
+  const win = typeof window !== "undefined" ? (window.wrappedJSObject || window) : null;
 
   let prototype = Object.getPrototypeOf(target);
   let descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
@@ -32,15 +32,102 @@ function setNativeValue(element, value) {
     }
   }
 
+  const strVal = value !== null && value !== undefined ? String(value) : "";
+
+  try {
+    target.dispatchEvent(new Event("focus", { bubbles: true }));
+  } catch (e) {}
+
   if (descriptor && descriptor.set) {
-    descriptor.set.call(target, value);
+    descriptor.set.call(target, strVal);
   } else {
-    target.value = value;
+    target.value = strVal;
   }
 
   target.dispatchEvent(new Event("input", { bubbles: true }));
   target.dispatchEvent(new Event("change", { bubbles: true }));
-  target.dispatchEvent(new Event("blur", { bubbles: true }));
+  try {
+    target.dispatchEvent(new Event("blur", { bubbles: true }));
+  } catch (e) {}
+}
+
+// Helper: Fill Ricardo prices (Startpreis & Sofort-Kaufpreis)
+async function fillRicardoPrices(draft, data) {
+  function formatPrice(val) {
+    if (val === null || val === undefined || val === "") return "";
+    const n = Number(val);
+    if (isNaN(n)) return String(val);
+    return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  }
+
+  // 1. Startpreis (Auktion)
+  let startPriceInput = document.getElementById("SellingUI.start_price");
+  if (!startPriceInput) {
+    startPriceInput = document.querySelector(
+      'input[id="SellingUI.start_price"], input[id*="start_price" i], input[id*="start-price" i], input[id*="startprice" i], input[name*="start_price" i], input[name*="startPrice" i], input[name*="start-price" i], input[aria-describedby*="start_price" i], input[aria-label*="Startpreis" i], input[data-testid*="start-price" i], input[data-testid*="start_price" i]'
+    );
+  }
+  if (!startPriceInput) {
+    const startLabel = Array.from(document.querySelectorAll("label")).find(l =>
+      /startpreis|startgebot/i.test(l.textContent || "")
+    );
+    if (startLabel) {
+      if (startLabel.htmlFor) startPriceInput = document.getElementById(startLabel.htmlFor);
+      if (!startPriceInput) {
+        startPriceInput = startLabel.closest(".MuiFormControl-root, .MuiTextField-root, div")?.querySelector('input[type="number"], input[type="text"]');
+      }
+    }
+  }
+  if (!startPriceInput) {
+    const formControl = Array.from(document.querySelectorAll(".MuiFormControl-root, .MuiTextField-root")).find(fc =>
+      /startpreis|startgebot/i.test(fc.textContent || "")
+    );
+    if (formControl) {
+      startPriceInput = formControl.querySelector('input[type="number"], input[type="text"]');
+    }
+  }
+
+  if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined) {
+    setNativeValue(startPriceInput, formatPrice(data.startPrice));
+  }
+
+  // 2. Sofort-Kaufpreis (Fixed Price / Buy Now)
+  let buynowPriceInput = document.getElementById("SellingUI.buy_now_price")
+    || document.getElementById("SellingUI.fixed_price")
+    || document.getElementById("SellingUI.buy_now")
+    || document.getElementById("SellingUI.buynow_price")
+    || document.getElementById("SellingUI.buyItNowPrice");
+
+  if (!buynowPriceInput) {
+    buynowPriceInput = document.querySelector(
+      'input[id="SellingUI.buy_now_price"], input[id="SellingUI.fixed_price"], input[id*="buy_now" i], input[id*="buynow" i], input[id*="fixed_price" i], input[id*="buy-now" i], input[name*="buyNow" i], input[name*="buy_now" i], input[name*="fixed_price" i], input[name*="buyItNow" i], input[aria-describedby*="buy_now" i], input[aria-describedby*="fixed_price" i], input[aria-label*="sofort" i], input[data-testid*="buy-now" i], input[data-testid*="fixed-price" i]'
+    );
+  }
+  if (!buynowPriceInput) {
+    const buyNowLabel = Array.from(document.querySelectorAll("label")).find(l =>
+      /sofort-?kauf/i.test(l.textContent || "")
+    );
+    if (buyNowLabel) {
+      if (buyNowLabel.htmlFor) buynowPriceInput = document.getElementById(buyNowLabel.htmlFor);
+      if (!buynowPriceInput) {
+        buynowPriceInput = buyNowLabel.closest(".MuiFormControl-root, .MuiTextField-root, div")?.querySelector('input[type="number"], input[type="text"]');
+      }
+    }
+  }
+
+  // If Sofort-Kauf switch exists but is unchecked, and the draft specifies fixed_price, toggle it
+  const fixedPriceSwitch = document.querySelector('input[type="checkbox"][value="FixedPrice"]');
+  if (!buynowPriceInput && fixedPriceSwitch && !fixedPriceSwitch.checked && (draft.ricardo?.offer_type === "fixed_price")) {
+    fixedPriceSwitch.click();
+    await new Promise(r => setTimeout(r, 150));
+    buynowPriceInput = document.getElementById("SellingUI.buy_now_price")
+      || document.getElementById("SellingUI.fixed_price")
+      || document.querySelector('input[id*="buy_now" i], input[id*="fixed_price" i]');
+  }
+
+  if (buynowPriceInput && data.buyNowPrice !== null && data.buyNowPrice !== undefined) {
+    setNativeValue(buynowPriceInput, formatPrice(data.buyNowPrice));
+  }
 }
 
 // Helper: Select an option in a Material-UI Select (combobox + popover)
@@ -613,6 +700,15 @@ async function executeStep1(draft) {
   if (titleInput && data.title) {
     setNativeValue(titleInput, data.title);
   }
+
+  // 4. On Ricardo, if price fields are already present in DOM during Step 1, fill them as well
+  if (platform === "ricardo") {
+    try {
+      await fillRicardoPrices(draft, data);
+    } catch (e) {
+      console.warn("[OccAIsion] Step 1 Ricardo price fill warning:", e);
+    }
+  }
 }
 
 async function executeStep2(draft) {
@@ -705,15 +801,17 @@ async function executeStep2(draft) {
   }
 
   // 6. Prices
-  if (platform === "ricardo" || platform === "ebay_de") {
+  if (platform === "ricardo") {
+    await fillRicardoPrices(draft, data);
+  } else if (platform === "ebay_de") {
     const startPriceInput = document.querySelector(
-      'input[name*="startPrice" i], input[id*="start-price" i], input[aria-label*="Startpreis" i], input[data-testid*="start-price" i]'
+      'input[name*="startPrice" i], input[id*="start-price" i], input[id*="start_price" i], input[aria-label*="Startpreis" i], input[data-testid*="start-price" i]'
     );
     if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined) {
       setNativeValue(startPriceInput, data.startPrice);
     }
     const buynowPriceInput = document.querySelector(
-      'input[name*="buyNowPrice" i], input[name*="buyItNowPrice" i], input[id*="buy-now-price" i], input[aria-label*="Sofort-Kaufen" i], input[data-testid*="buy-now-price" i], input[name="price"]'
+      'input[name*="buyNowPrice" i], input[name*="buyItNowPrice" i], input[id*="buy-now-price" i], input[id*="buy_now" i], input[aria-label*="Sofort-Kaufen" i], input[data-testid*="buy-now-price" i], input[name="price"]'
     );
     if (buynowPriceInput && data.buyNowPrice !== null && data.buyNowPrice !== undefined) {
       setNativeValue(buynowPriceInput, data.buyNowPrice);
@@ -917,7 +1015,7 @@ function setupDashboardBridge() {
 }
 
 // Support tab extraction message fallback for background scraping
-if (typeof browserApi !== "undefined" && browserApi.runtime && browserApi.runtime.onMessage) {
+if (typeof browserApi !== "undefined" && browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
   browserApi.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg && msg.action === "EXTRACT_PAGE_DATA") {
       const html = document.documentElement ? document.documentElement.outerHTML : (document.body ? document.body.innerText : "");
@@ -1230,5 +1328,6 @@ if (typeof module !== "undefined" && module.exports) {
     isLocalDashboard,
     detectPlatform,
     getPlatformData,
+    fillRicardoPrices,
   };
 }
