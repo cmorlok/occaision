@@ -1,4 +1,5 @@
 import io
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -465,6 +466,110 @@ def test_drafts_export_and_import_api(test_app):
     # 5. Invalid JSON import
     bad_res = client.post("/api/drafts/import", json={"drafts": "invalid_type"})
     assert bad_res.status_code == 400
+
+
+def test_frontend_api_client_contract():
+    node_script = """
+    const api = require('./frontend/api.js');
+    const recordedCalls = [];
+
+    global.fetch = async (url, options = {}) => {
+      recordedCalls.push({ url, options });
+
+      if (url === '/api/error-test') {
+        return { ok: false, status: 500 };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, data: 'mock-response' })
+      };
+    };
+
+    (async () => {
+      // 1. Auth pairing
+      await api.pairAuth();
+      const call1 = recordedCalls[recordedCalls.length - 1];
+      if (call1.url !== '/api/auth/pair' || call1.options.method !== 'POST') {
+        throw new Error('pairAuth contract failed');
+      }
+
+      // 2. Config & Settings
+      await api.getConfig();
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/config') throw new Error('getConfig failed');
+
+      await api.updateConfig({ key: 'val' });
+      const call3 = recordedCalls[recordedCalls.length - 1];
+      if (call3.url !== '/api/config' || call3.options.method !== 'POST' || call3.options.body !== '{"key":"val"}') {
+        throw new Error('updateConfig contract failed');
+      }
+
+      await api.getSettings();
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/settings') throw new Error('getSettings failed');
+
+      await api.updateSettings({ preset: 1 });
+      const call5 = recordedCalls[recordedCalls.length - 1];
+      if (call5.url !== '/api/settings' || call5.options.method !== 'PUT') throw new Error('updateSettings failed');
+
+      // 3. Draft operations
+      await api.listDrafts();
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/drafts') throw new Error('listDrafts failed');
+
+      await api.getDraft('draft 1');
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/drafts/draft%201') throw new Error('getDraft encoding failed');
+
+      await api.createDraft({ user_notes: 'note' });
+      const call8 = recordedCalls[recordedCalls.length - 1];
+      if (call8.url !== '/api/drafts' || call8.options.method !== 'POST') throw new Error('createDraft failed');
+
+      await api.updateDraft({ id: 'd-1', notes: 'updated' });
+      const call9 = recordedCalls[recordedCalls.length - 1];
+      if (call9.url !== '/api/drafts/d-1' || call9.options.method !== 'PUT') throw new Error('updateDraft failed');
+
+      await api.deleteDraft('d-1');
+      const call10 = recordedCalls[recordedCalls.length - 1];
+      if (call10.url !== '/api/drafts/d-1' || call10.options.method !== 'DELETE') throw new Error('deleteDraft failed');
+
+      await api.analyzeDraft('d-1');
+      const call11 = recordedCalls[recordedCalls.length - 1];
+      if (call11.url !== '/api/drafts/d-1/analyze' || call11.options.method !== 'POST') throw new Error('analyzeDraft failed');
+
+      // 4. Image operations
+      const mockForm = { dummy: true };
+      await api.uploadImages('d-1', mockForm);
+      const call12 = recordedCalls[recordedCalls.length - 1];
+      if (call12.url !== '/api/drafts/d-1/images' || call12.options.method !== 'POST' || call12.options.body !== mockForm) {
+        throw new Error('uploadImages failed');
+      }
+
+      await api.deleteImage('d-1', 'img 1');
+      const call13 = recordedCalls[recordedCalls.length - 1];
+      if (call13.url !== '/api/drafts/d-1/images/img%201' || call13.options.method !== 'DELETE') throw new Error('deleteImage failed');
+
+      await api.setVariant('d-1', 'img-1', 'white_bg');
+      const call14 = recordedCalls[recordedCalls.length - 1];
+      if (call14.url !== '/api/drafts/d-1/images/img-1' || call14.options.method !== 'PATCH' || call14.options.body !== '{"active_mode":"white_bg"}') {
+        throw new Error('setVariant failed');
+      }
+
+      // 5. Error handling rejection verification
+      global.fetch = async () => ({ ok: false, status: 404 });
+      let threw = false;
+      try {
+        await api.getDraft('missing');
+      } catch (err) {
+        threw = true;
+        if (!err.message.includes('404')) throw new Error('Expected 404 in error message, got: ' + err.message);
+      }
+      if (!threw) throw new Error('Expected getDraft to throw on 404');
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Frontend API client test failed: {res.stderr}"
+
 
 
 
