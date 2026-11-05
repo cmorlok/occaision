@@ -431,4 +431,39 @@ def test_analyze_skips_ebay_and_filters_sources_when_disabled_in_settings(test_a
         assert analyzed["price_analysis"]["ebay_stats"] is None
 
 
+def test_drafts_export_and_import_api(test_app):
+    client = TestClient(test_app)
+
+    # 1. Create a draft
+    create_res = client.post("/api/drafts", json={"user_notes": "API Export Note"})
+    assert create_res.status_code == 200
+    draft_id = create_res.json()["id"]
+
+    # 2. Export drafts
+    export_res = client.get("/api/drafts/export")
+    assert export_res.status_code == 200
+    assert "attachment" in export_res.headers.get("content-disposition", "")
+    backup_data = export_res.json()
+    assert backup_data["version"] == 1
+    assert any(d["id"] == draft_id for d in backup_data["drafts"])
+
+    # 3. Import via JSON payload
+    import_res = client.post("/api/drafts/import", json=backup_data)
+    assert import_res.status_code == 200
+    assert import_res.json()["imported_count"] >= 1
+
+    # 4. Import via multipart file upload
+    import json
+    file_bytes = json.dumps(backup_data).encode("utf-8")
+    files = {"file": ("backup.json", file_bytes, "application/json")}
+    file_res = client.post("/api/drafts/import", files=files)
+    assert file_res.status_code == 200
+    assert file_res.json()["imported_count"] >= 1
+
+    # 5. Invalid JSON import
+    bad_res = client.post("/api/drafts/import", json={"drafts": "invalid_type"})
+    assert bad_res.status_code == 400
+
+
+
 

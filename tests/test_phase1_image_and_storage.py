@@ -214,3 +214,53 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     assert storage_reloaded.get_draft(d1.id) is None
     assert not img_dir_d1.exists()
     assert len(storage_reloaded.list_drafts()) == 2
+
+
+def test_storage_export_and_import(temp_data_dir: Path):
+    storage = StorageService(data_dir=temp_data_dir)
+
+    # 1. Create drafts with distinct content
+    d1 = storage.create_draft(user_notes="Export Test Note 1", identified_product="Product A")
+    d2 = storage.create_draft(user_notes="Export Test Note 2", identified_product="Product B")
+
+    # Export data
+    backup = storage.export_drafts_data()
+    assert backup.get("version") == 1
+    assert "exported_at" in backup
+    assert len(backup.get("drafts", [])) == 2
+    assert "settings" in backup
+
+    # 2. Test importing into fresh storage instance
+    new_dir = temp_data_dir / "restored_store"
+    storage_new = StorageService(data_dir=new_dir)
+    assert len(storage_new.list_drafts()) == 0
+
+    res = storage_new.import_drafts_data(backup)
+    assert res["imported_count"] == 2
+    assert res["total_count"] == 2
+    assert len(storage_new.list_drafts()) == 2
+    assert storage_new.get_draft(d1.id).user_notes == "Export Test Note 1"
+
+    # 3. Test merge vs overwrite
+    d3 = storage_new.create_draft(user_notes="Unique Local Note")
+    assert len(storage_new.list_drafts()) == 3
+
+    # Merge import: d1 and d2 re-imported, d3 preserved
+    res_merge = storage_new.import_drafts_data(backup, overwrite=False)
+    assert res_merge["total_count"] == 3
+
+    # Overwrite import: d3 removed, only backup items remain
+    res_overwrite = storage_new.import_drafts_data(backup, overwrite=True)
+    assert res_overwrite["total_count"] == 2
+    assert storage_new.get_draft(d3.id) is None
+
+    # 4. Invalid payload validation
+    with pytest.raises(ValueError, match="JSON-Objekt erwartet"):
+        storage_new.import_drafts_data(["not", "a", "dict"])
+
+    with pytest.raises(ValueError, match="drafts.*muss eine Liste sein"):
+        storage_new.import_drafts_data({"drafts": "invalid"})
+
+    with pytest.raises(ValueError, match="Ungültiger Entwurf im Import"):
+        storage_new.import_drafts_data({"drafts": [{"id": 12345, "invalid": True}]})
+

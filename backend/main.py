@@ -4,6 +4,7 @@ import logging
 import os
 import secrets
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -385,6 +386,45 @@ def create_app(
         user_notes = req.user_notes if req else ""
         identified_product = req.identified_product if req else ""
         return storage.create_draft(user_notes=user_notes, identified_product=identified_product)
+
+    @app.get("/api/drafts/export")
+    def export_drafts():
+        data = storage.export_drafts_data()
+        now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        headers = {
+            "Content-Disposition": f'attachment; filename="occaision_backup_{now_str}.json"'
+        }
+        return JSONResponse(content=data, headers=headers)
+
+    @app.post("/api/drafts/import")
+    async def import_drafts(
+        request: Request,
+        overwrite: bool = False,
+        file: Optional[UploadFile] = None,
+    ):
+        content_type = request.headers.get("content-type", "")
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            upload = form.get("file")
+            if not upload or not hasattr(upload, "read"):
+                raise HTTPException(status_code=400, detail="Keine Datei 'file' im Upload gefunden.")
+            content_bytes = await upload.read()
+            try:
+                payload = json.loads(content_bytes.decode("utf-8"))
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Ungültige JSON-Datei: {e}")
+            if form.get("overwrite") in ("true", "1", True):
+                overwrite = True
+        else:
+            try:
+                payload = await request.json()
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Ungültiges JSON im Request-Body: {e}")
+
+        try:
+            return storage.import_drafts_data(payload, overwrite=overwrite)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     @app.get("/api/drafts/{draft_id}", response_model=Draft)
     def get_draft(draft_id: str):
