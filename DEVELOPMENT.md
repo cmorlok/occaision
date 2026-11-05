@@ -28,7 +28,11 @@ Dieses Dokument beschreibt die lokale Entwicklungsumgebung, Testausführung und 
 3. **Abhängigkeiten installieren:**
    ```bash
    pip install --upgrade pip
+   # Für reguläre Ausführung:
    pip install -r requirements.txt
+
+   # Für Entwicklung & Linting (inkl. ruff):
+   pip install -r requirements-dev.txt
    ```
 
 4. **Umgebungsvariablen konfigurieren:**
@@ -60,7 +64,7 @@ Das Projekt enthält eine vollständige Dev-Container-Konfiguration (`.devcontai
 
 ---
 
-## 3. Test-Suite ausführen (TDD & Qualitätssicherung)
+## 3. Test-Suite & Linting ausführen (TDD & Qualitätssicherung)
 
 Das Projekt folgt einem strikten **Test-Driven Development (TDD)**-Ansatz. Die automatisierte Testsuite deckt 5 Bereiche ab:
 * Bildverarbeitung & EXIF-Sanitization (`tests/test_phase1_image_and_storage.py`)
@@ -69,6 +73,19 @@ Das Projekt folgt einem strikten **Test-Driven Development (TDD)**-Ansatz. Die a
 * Firefox MV3 Extension Syntax, DOM-Autofill & Scraper (`tests/test_phase4_extension.py`)
 * Security Hardening, Token-Auth & Concurrency Revisions (`tests/test_hardening_security.py`)
 
+### Schnellstart via Makefile:
+```bash
+# Gesamte Testsuite ausführen (nutzt automatisch .venv oder System-pytest)
+make test
+
+# Linter & JavaScript-Syntaxprüfung ausführen
+make lint
+
+# Firefox-Extension bauen & verifizieren
+make test-extension
+```
+
+### Manuelle Ausführung:
 ```bash
 # Gesamte Testsuite ausführen
 pytest -v
@@ -143,15 +160,15 @@ bash scripts/build_docker.sh v1.0.0
 Im Verzeichnis `.github/workflows/` sind zwei Pipelines eingerichtet:
 
 ### 1. `ci.yml` (Continuous Integration)
-* **Trigger:** Jeder Pull Request auf den `main`-Branch.
-* **Ablauf:** Führt `pytest -v` aus, verifiziert das Packaging der Firefox-Extension (`scripts/build_extension.sh`) und baut das Dockerfile zur Syntax- und Layer-Prüfung.
+* **Trigger:** Jeder Push oder Pull Request auf den `main`-Branch.
+* **Ablauf:** Führt `make lint` und `pytest -v` aus, verifiziert das Packaging der Firefox-Extension (`scripts/build_extension.sh`) und baut das Dockerfile zur Syntax- und Layer-Prüfung.
 
 ### 2. `release.yml` (Automated Build & GitHub Release)
 * **Trigger:** 
   * Push eines Git-Tags nach dem Schema `v*` (z. B. `git tag v1.0.0 && git push origin v1.0.0`)
   * Manuell über die GitHub Actions Benutzeroberfläche (*"Run workflow"*).
 * **Ablauf:**
-  1. Führt die gesamte Pytest- und Node-Testsuite aus.
+  1. Führt `make lint` und die gesamte Pytest-Testsuite aus.
   2. Baut die Firefox-Extension als `dist/occaision.zip`.
   3. Baut das Docker-Image und pusht es zur GitHub Container Registry (`ghcr.io/<owner>/occaision:<tag>`).
   4. Exportiert ein eigenständiges Offline-Image-Archiv `dist/occaision-docker.tar.gz`.
