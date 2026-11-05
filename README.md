@@ -107,7 +107,7 @@ docker run -d \
 1. **Repository klonen:**
    ```bash
    git clone <repo-url>
-   cd seller
+   cd occaision
    ```
 
 2. **Umgebungskonfiguration anlegen:**

@@ -16,7 +16,7 @@ Dieses Dokument beschreibt die lokale Entwicklungsumgebung, Testausführung und 
 1. **Repository klonen und ins Verzeichnis wechseln:**
    ```bash
    git clone <repo-url>
-   cd seller
+   cd occaision
    ```
 
 2. **Virtuelle Python-Umgebung erstellen & aktivieren:**
@@ -62,7 +62,12 @@ Das Projekt enthält eine vollständige Dev-Container-Konfiguration (`.devcontai
 
 ## 3. Test-Suite ausführen (TDD & Qualitätssicherung)
 
-Das Projekt folgt einem strikten **Test-Driven Development (TDD)**-Ansatz. Die Testsuite umfasst 22 Unit- und Integrationstests (Image-Processing, Gemini AI Mocking, REST-Endpoints, MV3 Extension Node-DOM-Tests).
+Das Projekt folgt einem strikten **Test-Driven Development (TDD)**-Ansatz. Die automatisierte Testsuite deckt 5 Bereiche ab:
+* Bildverarbeitung & EXIF-Sanitization (`tests/test_phase1_image_and_storage.py`)
+* Gemini AI Mocking, Safeguards & Preis-Parsing (`tests/test_phase2_pricing_and_ai.py`)
+* FastAPI REST-Endpoints, Static Mount & Settings (`tests/test_phase3_api_and_ui.py`)
+* Firefox MV3 Extension Syntax, DOM-Autofill & Scraper (`tests/test_phase4_extension.py`)
+* Security Hardening, Token-Auth & Concurrency Revisions (`tests/test_hardening_security.py`)
 
 ```bash
 # Gesamte Testsuite ausführen
@@ -122,7 +127,7 @@ Im Verzeichnis `.github/workflows/` sind zwei Pipelines eingerichtet:
   * Push eines Git-Tags nach dem Schema `v*` (z. B. `git tag v1.0.0 && git push origin v1.0.0`)
   * Manuell über die GitHub Actions Benutzeroberfläche (*"Run workflow"*).
 * **Ablauf:**
-  1. Führt alle 22 Tests aus.
+  1. Führt die gesamte Pytest- und Node-Testsuite aus.
   2. Baut die Firefox-Extension als `dist/occaision.zip`.
   3. Baut das Docker-Image und pusht es zur GitHub Container Registry (`ghcr.io/<owner>/occaision:<tag>`).
   4. Exportiert ein eigenständiges Offline-Image-Archiv `dist/occaision-docker.tar.gz`.
@@ -137,11 +142,10 @@ Im Verzeichnis `.github/workflows/` sind zwei Pipelines eingerichtet:
 │   ├── main.py              # FastAPI-Server, REST-API & Statik-Mount
 │   ├── config.py            # Pydantic Settings & Logging-Setup
 │   ├── models.py            # Pydantic Datenmodelle (Draft, Pricing, Shipping)
-│   ├── storage.py           # JSON-basierte Entwurfs- & Bildpersistenz
+│   ├── storage.py           # JSON-basierte Entwurfs- & Bildpersistenz mit Revisionssicherung
 │   └── services/
 │       ├── ai_service.py    # Google Gemini Multimodal-Analyse & Safeguards
-│       ├── image_service.py # EXIF-Stripping, Downscaling & Rembg-Pipeline
-│       └── ebay_service.py  # Backend-Fallback-Scraper für eBay DE Sold
+│       └── image_service.py # EXIF-Stripping, Downscaling & Rembg-Pipeline
 ├── frontend/
 │   ├── index.html           # Single-Page Web-Dashboard UI
 │   ├── app.js               # Frontend-State-Management & REST-Client
@@ -151,7 +155,7 @@ Im Verzeichnis `.github/workflows/` sind zwei Pipelines eingerichtet:
 │   ├── background.js        # Service Worker: Hybrid-Preis-Scraper & CORS-Proxy
 │   ├── content.js           # Smart-Panel UI & 1-Klick-Autofill für Verkaufsplattformen
 │   └── panel.css            # Styling für das injizierte Smart-Panel
-├── tests/                   # 22 automatisierte Pytest- & Node-Tests
+├── tests/                   # Automatisierte Pytest-, Node- & Security-Tests
 ├── scripts/                 # Build- & Dev-Container-Hilfsskripte
 ├── Dockerfile               # Multi-Stage Produktions-Dockerfile
 ├── docker-compose.yml       # Docker Compose Setup
