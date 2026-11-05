@@ -14,7 +14,13 @@ from backend.models import (
     ShippingPreset,
 )
 from backend.services.image_service import ImageService
-from backend.storage import StorageService
+from backend.storage import (
+    BatchLimitExceededError,
+    DraftNotFoundError,
+    DraftStore,
+    FileTooLargeError,
+    StorageService,
+)
 
 
 def dummy_mask_extractor(img: Image.Image) -> Image.Image:
@@ -284,5 +290,105 @@ def test_storage_orphan_image_cleanup(temp_data_dir: Path):
     assert active_img_dir.exists()
     assert (active_img_dir / "img1.jpg").exists()
     assert not orphan_img_dir.exists()
+
+
+def test_draft_store_add_images_and_atomic_rollback(temp_data_dir: Path, synthetic_exif_jpeg: bytes):
+    img_svc = ImageService(data_dir=temp_data_dir, mask_extractor=dummy_mask_extractor)
+    store = DraftStore(data_dir=temp_data_dir, image_service=img_svc)
+    draft = store.create_draft(user_notes="Store Rollback Test")
+
+    # 1. Valid upload
+    updated = store.add_images(draft.id, [("test1.jpg", synthetic_exif_jpeg)])
+    assert len(updated.images) == 1
+    img1_id = updated.images[0].id
+    assert (temp_data_dir / "images" / draft.id / f"{img1_id}_optimized.jpg").exists()
+
+    # 2. Batch limit exceeded (> 15 files)
+    oversized = [(f"f_{i}.jpg", synthetic_exif_jpeg) for i in range(16)]
+    with pytest.raises(BatchLimitExceededError):
+        store.add_images(draft.id, oversized)
+
+    # 3. File size limit exceeded (> 25MB)
+    too_large = [("huge.jpg", b"0" * (25 * 1024 * 1024 + 10))]
+    with pytest.raises(FileTooLargeError):
+        store.add_images(draft.id, too_large)
+
+    # 4. Atomic rollback: file 1 valid, file 2 corrupt
+    draft_before_err = store.get_draft(draft.id)
+    initial_img_count = len(draft_before_err.images)
+    initial_files = set((temp_data_dir / "images" / draft.id).iterdir())
+
+    with pytest.raises(Exception):
+        store.add_images(
+            draft.id,
+            [("good.jpg", synthetic_exif_jpeg), ("bad.jpg", b"not_an_image")],
+        )
+
+    # Verify no new images added to draft and no orphaned files remain on disk
+    draft_after_err = store.get_draft(draft.id)
+    assert len(draft_after_err.images) == initial_img_count
+    current_files = set((temp_data_dir / "images" / draft.id).iterdir())
+    assert current_files == initial_files
+
+
+def test_draft_store_mode_switching_and_file_resolution(temp_data_dir: Path, synthetic_exif_jpeg: bytes):
+    img_svc = ImageService(data_dir=temp_data_dir, mask_extractor=dummy_mask_extractor)
+    store = DraftStore(data_dir=temp_data_dir, image_service=img_svc)
+    draft = store.create_draft(user_notes="Store Mode Test")
+    draft = store.add_images(draft.id, [("mode_img.jpg", synthetic_exif_jpeg)])
+    img_id = draft.images[0].id
+
+    # Switch to cutout
+    draft = store.set_image_mode(draft.id, img_id, ImageVariantMode.CUTOUT)
+    assert draft.images[0].active_mode == ImageVariantMode.CUTOUT
+    assert ImageVariantMode.CUTOUT in draft.images[0].variants
+
+    # Switch to blurred
+    draft = store.set_image_mode(draft.id, img_id, ImageVariantMode.BLURRED)
+    assert draft.images[0].active_mode == ImageVariantMode.BLURRED
+    assert ImageVariantMode.BLURRED in draft.images[0].variants
+
+    # File path resolution
+    cutout_path = store.get_image_file_path(draft.id, img_id, "cutout")
+    blurred_path = store.get_image_file_path(draft.id, img_id, "blurred")
+    active_path = store.get_image_file_path(draft.id, img_id, "active")
+
+    assert cutout_path.exists()
+    assert blurred_path.exists()
+    assert active_path == blurred_path
+
+    # AI paths
+    ai_paths = store.get_ai_image_paths(draft.id)
+    assert len(ai_paths) == 1
+    assert ai_paths[0].exists()
+    assert "_ai.jpg" in ai_paths[0].name
+
+
+def test_draft_store_delete_image_and_draft(temp_data_dir: Path, synthetic_exif_jpeg: bytes):
+    img_svc = ImageService(data_dir=temp_data_dir, mask_extractor=dummy_mask_extractor)
+    store = DraftStore(data_dir=temp_data_dir, image_service=img_svc)
+    draft = store.create_draft(user_notes="Store Delete Test")
+    draft = store.add_images(
+        draft.id,
+        [("del1.jpg", synthetic_exif_jpeg), ("del2.jpg", synthetic_exif_jpeg)],
+    )
+    assert len(draft.images) == 2
+    img1_id = draft.images[0].id
+    img2_id = draft.images[1].id
+
+    # Delete first image
+    draft = store.delete_image(draft.id, img1_id)
+    assert len(draft.images) == 1
+    assert draft.images[0].id == img2_id
+    assert not (temp_data_dir / "images" / draft.id / f"{img1_id}_optimized.jpg").exists()
+    assert (temp_data_dir / "images" / draft.id / f"{img2_id}_optimized.jpg").exists()
+
+    # Delete draft entirely
+    draft_dir = temp_data_dir / "images" / draft.id
+    assert draft_dir.exists()
+    store.delete_draft(draft.id)
+    assert not draft_dir.exists()
+    assert store.get_draft(draft.id) is None
+
 
 
