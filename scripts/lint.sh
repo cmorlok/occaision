@@ -29,6 +29,9 @@ if command -v node &>/dev/null; then
     node -c "$WORKSPACE_DIR/extension/background.js"
     node -c "$WORKSPACE_DIR/extension/content.js"
     node -c "$WORKSPACE_DIR/frontend/app.js"
+    if [ -f "$WORKSPACE_DIR/frontend/api.js" ]; then
+        node -c "$WORKSPACE_DIR/frontend/api.js"
+    fi
     echo "✅ JavaScript syntax validation passed."
 else
     echo "⚠️ Warning: 'node' not found in PATH; skipping JS syntax checks." >&2

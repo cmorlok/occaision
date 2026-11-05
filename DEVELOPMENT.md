@@ -75,6 +75,9 @@ Das Projekt folgt einem strikten **Test-Driven Development (TDD)**-Ansatz. Die a
 
 ### Schnellstart via Makefile:
 ```bash
+# Alle Prüfungen ausführen (Linter, JS-Syntax & gesamte Testsuite)
+make check
+
 # Gesamte Testsuite ausführen (nutzt automatisch .venv oder System-pytest)
 make test
 
