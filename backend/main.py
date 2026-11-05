@@ -169,6 +169,7 @@ def create_app(
 
     configure_logging(cfg.log_level)
     storage = storage_service or StorageService(data_dir=cfg.data_dir)
+    storage.cleanup_orphaned_images()
     img_svc = image_service or ImageService(
         data_dir=cfg.data_dir,
         rembg_model=cfg.rembg_model,

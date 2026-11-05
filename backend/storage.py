@@ -222,3 +222,20 @@ class StorageService:
 
             self._write_json_atomic(self.drafts_file, merged_list)
             return {"imported_count": imported_count, "total_count": len(merged_list)}
+
+    def cleanup_orphaned_images(self) -> int:
+        """Scan self.images_dir and delete any folder whose draft ID no longer exists."""
+        with self._lock:
+            existing_ids = {d.id for d in self.list_drafts()}
+        cleaned_count = 0
+        if not self.images_dir.exists():
+            return 0
+        try:
+            for entry in list(self.images_dir.iterdir()):
+                if entry.is_dir() and entry.name not in existing_ids:
+                    shutil.rmtree(entry, ignore_errors=True)
+                    cleaned_count += 1
+                    logger.info(f"[Storage] Cleaned up orphaned image directory: {entry.name}")
+        except Exception as e:
+            logger.warning(f"[Storage] Error during orphan image cleanup: {e}")
+        return cleaned_count

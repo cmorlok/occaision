@@ -264,3 +264,25 @@ def test_storage_export_and_import(temp_data_dir: Path):
     with pytest.raises(ValueError, match="Ungültiger Entwurf im Import"):
         storage_new.import_drafts_data({"drafts": [{"id": 12345, "invalid": True}]})
 
+
+def test_storage_orphan_image_cleanup(temp_data_dir: Path):
+    storage = StorageService(data_dir=temp_data_dir)
+    d1 = storage.create_draft(user_notes="Active Draft")
+
+    # Create image dir for active draft
+    active_img_dir = temp_data_dir / "images" / d1.id
+    active_img_dir.mkdir(parents=True, exist_ok=True)
+    (active_img_dir / "img1.jpg").write_text("data", encoding="utf-8")
+
+    # Create orphaned image dir
+    orphan_img_dir = temp_data_dir / "images" / "orphan_12345"
+    orphan_img_dir.mkdir(parents=True, exist_ok=True)
+    (orphan_img_dir / "stale.jpg").write_text("stale", encoding="utf-8")
+
+    cleaned = storage.cleanup_orphaned_images()
+    assert cleaned == 1
+    assert active_img_dir.exists()
+    assert (active_img_dir / "img1.jpg").exists()
+    assert not orphan_img_dir.exists()
+
+
