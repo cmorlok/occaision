@@ -25,7 +25,7 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt ruff
+          pip install -r requirements-dev.txt
 
       - name: Set up Node.js 18
         uses: actions/setup-node@v4
@@ -34,9 +34,7 @@ jobs:
 
       - name: Run Linter Checks
         run: |
-          ruff check backend/ tests/
-          node -c extension/background.js
-          node -c extension/content.js
+          make lint
 
       - name: Run Test Suite
         run: |
