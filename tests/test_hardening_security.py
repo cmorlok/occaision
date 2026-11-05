@@ -178,4 +178,45 @@ def test_analyze_does_not_resurrect_deleted_draft(temp_data_dir: Path):
     assert storage.get_draft(draft.id) is None
 
 
+def test_durable_config_persistence_and_read_only_get(temp_data_dir: Path):
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=False)
+    app = create_app(settings=test_settings)
+    client = TestClient(app)
+
+    # 1. Update config via POST /api/config
+    res_update = client.post(
+        "/api/config",
+        json={
+            "gemini_api_key": "AIzaSyTestDurableKey12345",
+            "gemini_model": "custom-model-id",
+            "enable_search_grounding": False,
+        },
+    )
+    assert res_update.status_code == 200
+
+    # Verify data/config.json was written
+    config_file = temp_data_dir / "config.json"
+    assert config_file.exists(), "config.json must be persisted in data directory"
+    saved = json.loads(config_file.read_text(encoding="utf-8"))
+    assert saved["gemini_model"] == "custom-model-id"
+    assert saved["enable_search_grounding"] is False
+
+    # 2. Re-create app from same data_dir (simulating container restart without .env)
+    new_settings = Settings(data_dir=temp_data_dir, require_auth=False)
+    app2 = create_app(settings=new_settings)
+    client2 = TestClient(app2)
+
+    res_cfg = client2.get("/api/config")
+    assert res_cfg.status_code == 200
+    cfg2 = res_cfg.json()
+    assert cfg2["gemini_model"] == "custom-model-id"
+    assert cfg2["enable_search_grounding"] is False
+    assert cfg2["gemini_api_key_configured"] is True
+
+    # 3. GET /api/config must not mutate model
+    res_cfg_again = client2.get("/api/config")
+    assert res_cfg_again.json()["gemini_model"] == "custom-model-id"
+
+
+
 

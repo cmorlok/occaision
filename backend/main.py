@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from pathlib import Path
@@ -77,6 +78,29 @@ def get_or_create_auth_token(data_dir: Path) -> str:
     return token
 
 
+def load_persisted_config(data_dir: Path) -> dict:
+    config_path = data_dir / "config.json"
+    if config_path.exists():
+        try:
+            return json.loads(config_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"[Config] Error reading {config_path}: {e}")
+            return {}
+    return {}
+
+
+def save_persisted_config(data_dir: Path, updates: dict) -> None:
+    data_dir.mkdir(parents=True, exist_ok=True)
+    config_path = data_dir / "config.json"
+    current = load_persisted_config(data_dir)
+    current.update(updates)
+    config_path.write_text(json.dumps(current, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    try:
+        config_path.chmod(0o600)
+    except OSError:
+        pass
+
+
 def _save_to_env(updates: dict) -> None:
     env_path = Path(".env")
     if not env_path.exists() or "pytest" in sys.modules:
@@ -126,6 +150,15 @@ def create_app(
     ai_service: Optional[AIService] = None,
 ) -> FastAPI:
     cfg = settings or default_settings
+    persisted = load_persisted_config(cfg.data_dir)
+    if persisted:
+        if "gemini_model" in persisted and "GEMINI_MODEL" not in os.environ:
+            cfg.gemini_model = persisted["gemini_model"]
+        if "enable_search_grounding" in persisted and "ENABLE_SEARCH_GROUNDING" not in os.environ:
+            cfg.enable_search_grounding = persisted["enable_search_grounding"]
+        if "gemini_api_key" in persisted and "GEMINI_API_KEY" not in os.environ:
+            cfg.gemini_api_key = persisted["gemini_api_key"]
+
     configure_logging(cfg.log_level)
     storage = storage_service or StorageService(data_dir=cfg.data_dir)
     img_svc = image_service or ImageService(
@@ -277,10 +310,7 @@ def create_app(
             clean_key = key.strip()
             masked = f"{clean_key[:4]}...{clean_key[-4:]}"
 
-        # Auto-upgrade deprecated gemini-2.5-flash / gemini-2.0-flash to gemini-3.8-flash
-        if cfg.gemini_model in ["gemini-2.5-flash", "gemini-2.0-flash"]:
-            cfg.gemini_model = "gemini-3.8-flash"
-            ai_svc.model_name = "gemini-3.8-flash"
+        # Auto-upgrade deprecated gemini-2.5-flash / gemini-2.0-flash to gemini-3.8-flash removed: GET is idempotent and read-only
 
         available_models = ai_svc.get_available_models()
 
@@ -300,26 +330,34 @@ def create_app(
     @app.post("/api/config")
     def update_system_config(body: UpdateSystemConfigRequest):
         env_updates = {}
+        persisted_updates = {}
         if body.gemini_model:
             cfg.gemini_model = body.gemini_model
             ai_svc.model_name = body.gemini_model
             env_updates["GEMINI_MODEL"] = cfg.gemini_model
+            persisted_updates["gemini_model"] = cfg.gemini_model
 
         if body.enable_search_grounding is not None:
             cfg.enable_search_grounding = body.enable_search_grounding
             ai_svc.enable_search_grounding = body.enable_search_grounding
             env_updates["ENABLE_SEARCH_GROUNDING"] = "true" if cfg.enable_search_grounding else "false"
+            persisted_updates["enable_search_grounding"] = cfg.enable_search_grounding
 
         if body.gemini_api_key is not None and body.gemini_api_key.strip():
             new_key = body.gemini_api_key.strip()
             cfg.gemini_api_key = new_key
             ai_svc.set_api_key(new_key, model_name=cfg.gemini_model)
             env_updates["GEMINI_API_KEY"] = new_key
+            persisted_updates["gemini_api_key"] = new_key
             if "GEMINI_MODEL" not in env_updates:
                 env_updates["GEMINI_MODEL"] = cfg.gemini_model
+                persisted_updates["gemini_model"] = cfg.gemini_model
             if "ENABLE_SEARCH_GROUNDING" not in env_updates:
                 env_updates["ENABLE_SEARCH_GROUNDING"] = "true" if cfg.enable_search_grounding else "false"
+                persisted_updates["enable_search_grounding"] = cfg.enable_search_grounding
 
+        if persisted_updates:
+            save_persisted_config(cfg.data_dir, persisted_updates)
         if env_updates:
             _save_to_env(env_updates)
 
