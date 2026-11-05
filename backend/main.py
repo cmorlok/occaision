@@ -2,28 +2,33 @@ import asyncio
 import json
 import logging
 import os
-from pathlib import Path
 import secrets
 import sys
+from pathlib import Path
 from typing import List, Optional
+
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend.config import Settings, get_logger, settings as default_settings
+from backend.config import Settings, get_logger
+from backend.config import settings as default_settings
 from backend.models import (
     DEFAULT_PRICE_SOURCES,
     Draft,
     DraftImage,
-    DraftStatus,
     ImageVariantMode,
     PresetSettings,
 )
 from backend.services.ai_service import AIService
 from backend.services.image_service import ImageService
-from backend.storage import DraftNotFoundError, RevisionConflictError, StorageCorruptedError, StorageService
+from backend.storage import (
+    DraftNotFoundError,
+    RevisionConflictError,
+    StorageService,
+)
 
 logger = get_logger("occaision.api")
 
@@ -49,8 +54,8 @@ def configure_logging(level_name: Optional[str] = None):
     level = getattr(logging, effective_name, logging.INFO)
 
     for name in ["occaision", "occaision.api", "occaision.image", "occaision.ai", "occaision.ebay"]:
-        l = logging.getLogger(name)
-        l.setLevel(level)
+        named_logger = logging.getLogger(name)
+        named_logger.setLevel(level)
 
     if level == logging.DEBUG:
         logger.info("[Logging] Debug-Logging ist AKTIV (vollständige Prompts und Antworten werden ausgegeben).")

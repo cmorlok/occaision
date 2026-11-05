@@ -1,12 +1,11 @@
 import io
-import logging
-from pathlib import Path
-import sys
 import time
-from typing import Callable, Optional
 import uuid
-from PIL import Image, ImageFilter, ImageOps
+from pathlib import Path
+from typing import Callable, Optional
+
 import pillow_heif
+from PIL import Image, ImageFilter, ImageOps
 
 from backend.config import get_logger
 from backend.models import DraftImage, ImageVariantMode

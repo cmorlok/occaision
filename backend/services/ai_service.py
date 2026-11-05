@@ -1,29 +1,25 @@
-import io
 import json
-import logging
 import math
 import os
-from pathlib import Path
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional
 import urllib.parse
-from PIL import Image
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from google import genai
 from google.genai import types
 
+from backend.config import get_logger
 from backend.models import (
     ConditionType,
     Draft,
     DraftStatus,
     EbaySoldStats,
     PriceAnalysis,
-    RicardoListing,
-    TuttiListing,
     VerificationLinks,
 )
-from backend.config import get_logger
 
 logger = get_logger("occaision.ai")
 

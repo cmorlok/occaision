@@ -1,12 +1,11 @@
-from datetime import datetime, timezone
 import json
-import logging
-from pathlib import Path
 import shutil
 import tempfile
 import threading
-from typing import Dict, List, Optional
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
 
 from backend.config import get_logger
 from backend.models import Draft, PresetSettings
@@ -36,7 +35,7 @@ class StorageService:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.images_dir = self.data_dir / "images"
         self.images_dir.mkdir(parents=True, exist_ok=True)
-        
+
         self.drafts_file = self.data_dir / "drafts.json"
         self.settings_file = self.data_dir / "settings.json"
         self._lock = threading.Lock()
@@ -106,7 +105,7 @@ class StorageService:
         settings = self.get_settings()
         now_iso = datetime.now(timezone.utc).isoformat()
         draft_id = f"draft_{uuid.uuid4().hex[:12]}"
-        
+
         draft = Draft(
             id=draft_id,
             created_at=now_iso,
@@ -128,7 +127,7 @@ class StorageService:
 
     def update_draft(self, draft: Draft) -> Draft:
         draft.updated_at = datetime.now(timezone.utc).isoformat()
-        
+
         with self._lock:
             raw_list = self._load_drafts_raw()
             found_idx = None

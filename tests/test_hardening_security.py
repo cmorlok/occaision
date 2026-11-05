@@ -1,8 +1,9 @@
 import json
 from pathlib import Path
 from unittest.mock import patch
-from fastapi.testclient import TestClient
+
 import pytest
+from fastapi.testclient import TestClient
 
 from backend.config import Settings
 from backend.main import create_app
@@ -114,7 +115,7 @@ def test_content_js_safe_description_rendering():
 
 
 def test_storage_revision_conflict_and_no_resurrection(temp_data_dir: Path):
-    from backend.storage import StorageService, RevisionConflictError, DraftNotFoundError
+    from backend.storage import DraftNotFoundError, RevisionConflictError, StorageService
     storage = StorageService(data_dir=temp_data_dir)
 
     draft = storage.create_draft(user_notes="Original")
@@ -139,7 +140,7 @@ def test_storage_revision_conflict_and_no_resurrection(temp_data_dir: Path):
 
 
 def test_storage_corruption_safety(temp_data_dir: Path):
-    from backend.storage import StorageService, StorageCorruptedError
+    from backend.storage import StorageCorruptedError, StorageService
     storage = StorageService(data_dir=temp_data_dir)
     storage.create_draft(user_notes="Important Data")
 
@@ -292,6 +293,7 @@ def test_upload_batch_limits_and_atomic_cleanup(temp_data_dir: Path):
 
     # 3. Atomic rollback: file 1 valid, file 2 corrupt
     import io
+
     from PIL import Image
     valid_img = Image.new("RGB", (100, 100), color=(10, 20, 30))
     buf = io.BytesIO()

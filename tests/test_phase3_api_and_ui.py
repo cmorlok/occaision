@@ -1,9 +1,10 @@
 import io
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-import pytest
 
 from backend.config import Settings
 from backend.main import create_app
@@ -50,12 +51,12 @@ def test_app(temp_data_dir: Path):
 
 def test_full_rest_lifecycle(test_app):
     client = TestClient(test_app)
-    
+
     # 1. Health check
     res_health = client.get("/api/health")
     assert res_health.status_code == 200
     assert res_health.json()["status"] == "ok"
-    
+
     # 2. POST /api/drafts
     res_create = client.post("/api/drafts", json={"user_notes": "Logitech MX Master 3"})
     assert res_create.status_code == 200
@@ -63,11 +64,11 @@ def test_full_rest_lifecycle(test_app):
     draft_id = draft_data["id"]
     assert draft_data["user_notes"] == "Logitech MX Master 3"
     assert draft_data["status"] == DraftStatus.DRAFT
-    
+
     # 3. POST /api/drafts/{id}/images (upload 2 test images)
     img1_bytes = create_test_jpeg(800, 600)
     img2_bytes = create_test_jpeg(1200, 900)
-    
+
     files = [
         ("files", ("mouse1.jpg", img1_bytes, "image/jpeg")),
         ("files", ("mouse2.jpg", img2_bytes, "image/jpeg")),
@@ -77,7 +78,7 @@ def test_full_rest_lifecycle(test_app):
     updated_draft = res_img.json()
     assert len(updated_draft["images"]) == 2
     img1_id = updated_draft["images"][0]["id"]
-    
+
     # 4. PATCH image 1 to 'blurred'
     res_patch = client.patch(
         f"/api/drafts/{draft_id}/images/{img1_id}",
@@ -85,13 +86,13 @@ def test_full_rest_lifecycle(test_app):
     )
     assert res_patch.status_code == 200
     assert res_patch.json()["images"][0]["active_mode"] == "blurred"
-    
+
     # 5. GET /api/drafts/{id}/images/{img_id}/active -> should serve image/jpeg
     res_active_img = client.get(f"/api/drafts/{draft_id}/images/{img1_id}/active")
     assert res_active_img.status_code == 200
     assert "image/jpeg" in res_active_img.headers["content-type"]
     assert len(res_active_img.content) > 0
-    
+
     # 6. POST /api/drafts/{id}/analyze (with mocked AI & eBay services)
     mock_ai_response = {
         "identified_product": "Logitech MX Master 3",
@@ -109,11 +110,11 @@ def test_full_rest_lifecycle(test_app):
         "tutti_description": "Funktioniert einwandfrei.\\n\\nPrivatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.",
         "tutti_condition": "gebraucht"
     }
-    
+
     with patch("backend.services.ai_service.AIService._call_gemini", new_callable=AsyncMock) as mock_gemini:
         import json
         mock_gemini.return_value = json.dumps(mock_ai_response)
-        
+
         res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
         assert res_analyze.status_code == 200
         analyzed = res_analyze.json()
@@ -121,7 +122,7 @@ def test_full_rest_lifecycle(test_app):
         assert analyzed["identified_product"] == "Logitech MX Master 3"
         assert analyzed["price_analysis"]["ricardo_start_chf"] == 40.0
         assert analyzed["price_analysis"]["verification_links"]["ebay_sold_url"] is not None
-            
+
     # 7. PUT /api/drafts/{id} (manual edit with Ricardo title > 60 chars)
     analyzed["ricardo"]["title"] = "X" * 75
     analyzed["tutti"]["title"] = "Y" * 95
@@ -134,12 +135,12 @@ def test_full_rest_lifecycle(test_app):
     assert len(saved["tutti"]["title"]) <= 80
     assert len(saved["ebay_de"]["title"]) <= 80
     assert len(saved["kleinanzeigen"]["title"]) <= 65
-    
+
     # 8. DELETE /api/drafts/{id}
     res_del = client.delete(f"/api/drafts/{draft_id}")
     assert res_del.status_code == 200
     assert res_del.json()["ok"] is True
-    
+
     # Verify 404 after deletion
     res_get_deleted = client.get(f"/api/drafts/{draft_id}")
     assert res_get_deleted.status_code == 404
@@ -150,7 +151,7 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
     res = client.get("/")
     assert res.status_code == 200
     html = res.text
-    
+
     required_ids = [
         "btn-new-draft",
         "dropzone",
@@ -195,7 +196,7 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
 
 def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     client = TestClient(test_app)
-    
+
     # 1. GET /api/config & GET /api/models
     res_cfg = client.get("/api/config")
     assert res_cfg.status_code == 200
@@ -211,7 +212,7 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     assert res_models.status_code == 200
     models_data = res_models.json()
     assert len(models_data) > 0
-    
+
     # 2. POST /api/config with a new key and disable search grounding
     res_update = client.post(
         "/api/config",
@@ -225,11 +226,11 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     assert updated_cfg["gemini_api_key_configured"] is True
     assert updated_cfg["enable_search_grounding"] is False
     assert "AIza" in updated_cfg["masked_key"]
-    
+
     # 3. Create a draft and test defensive handling when Gemini raises an invalid key error
     res_create = client.post("/api/drafts", json={"user_notes": "Test Article"})
     draft_id = res_create.json()["id"]
-    
+
     with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=Exception("API_KEY_INVALID: API key not valid")):
         res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
         assert res_analyze.status_code == 400
