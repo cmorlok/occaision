@@ -715,3 +715,132 @@ def test_extension_ricardo_shipping_autofill_via_node():
     res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
     assert res.returncode == 0, f"Node test failed: {res.stderr}"
 
+
+def test_extension_content_dom_autofill_and_security():
+    node_script = """
+    const content = require('./extension/content.js');
+
+    // 1. Verify setNativeValue event dispatching and tracking
+    const eventsFired = [];
+    const mockInput = {
+      value: '',
+      dispatchEvent: (evt) => { eventsFired.push(evt.type); }
+    };
+    content.setNativeValue(mockInput, 'Pro Modell 2026');
+    if (mockInput.value !== 'Pro Modell 2026') {
+      throw new Error('setNativeValue did not set string value');
+    }
+    if (!eventsFired.includes('input') || !eventsFired.includes('change')) {
+      throw new Error('Required DOM events input/change not fired');
+    }
+
+    // 2. Verify setDescriptionValue iframe sanitization (prevent innerHTML injection)
+    class MockNode {
+      constructor(nodeType, nodeName, textContent = '') {
+        this.nodeType = nodeType;
+        this.nodeName = nodeName;
+        this.textContent = textContent;
+      }
+    }
+    class MockElement extends MockNode {
+      constructor(nodeName) {
+        super(1, nodeName);
+        this.childNodes = [];
+        this.events = [];
+      }
+      appendChild(child) { this.childNodes.push(child); }
+      replaceChildren() { this.childNodes = []; }
+      dispatchEvent(evt) { this.events.push(evt.type); }
+    }
+
+    const mockIframeBody = new MockElement('BODY');
+    const mockIframeDoc = {
+      querySelector: (sel) => mockIframeBody,
+      createTextNode: (text) => new MockNode(3, '#text', text),
+      createElement: (tag) => new MockElement(tag.toUpperCase())
+    };
+
+    const mockDocWithIframe = {
+      querySelector: (sel) => null,
+      querySelectorAll: (sel) => {
+        if (sel.includes('iframe')) {
+          return [{ contentDocument: mockIframeDoc }];
+        }
+        return [];
+      }
+    };
+
+    const xssPayload = 'Line 1\\n<script>alert(1)<\\/script>\\n<img src=x onerror=alert(2)>';
+    const iframeRes = content.setDescriptionValue(xssPayload, mockDocWithIframe);
+    if (!iframeRes) throw new Error('setDescriptionValue failed on mock iframe');
+
+    // Must create text nodes and BR elements, NEVER script/img element nodes
+    if (mockIframeBody.childNodes.length !== 5) {
+      throw new Error('Expected 5 nodes (3 text nodes, 2 BR), got: ' + mockIframeBody.childNodes.length);
+    }
+    for (let i = 0; i < mockIframeBody.childNodes.length; i++) {
+      const node = mockIframeBody.childNodes[i];
+      if (i % 2 === 0) {
+        if (node.nodeType !== 3) {
+          throw new Error('Node ' + i + ' should be text node, got type: ' + node.nodeType);
+        }
+      } else {
+        if (node.nodeName !== 'BR') {
+          throw new Error('Node ' + i + ' should be BR, got: ' + node.nodeName);
+        }
+      }
+    }
+    if (mockIframeBody.childNodes[2].textContent !== '<script>alert(1)<\\/script>') {
+      throw new Error('Raw script tag must remain unexecuted textContent');
+    }
+
+    // 3. Verify fillRicardoPrices with auction and fixed prices
+    const startInput = { value: '', dispatchEvent: () => {} };
+    const buyNowInput = { value: '', dispatchEvent: () => {} };
+    global.document = {
+      getElementById: (id) => {
+        if (id === 'SellingUI.start_price') return startInput;
+        if (id === 'SellingUI.buy_now_price') return buyNowInput;
+        return null;
+      },
+      querySelector: () => null,
+      querySelectorAll: () => []
+    };
+
+    (async () => {
+      await content.fillRicardoPrices({}, { startPrice: 19.95, buyNowPrice: 49.0 });
+      if (startInput.value !== '19.95') {
+        throw new Error('Expected startInput to be "19.95", got: ' + startInput.value);
+      }
+      if (buyNowInput.value !== '49') {
+        throw new Error('Expected buyNowInput to be "49", got: ' + buyNowInput.value);
+      }
+
+      // 4. Verify host boundary checking against phishing/spoofing
+      if (!content.isRicardo('www.ricardo.ch') || !content.isRicardo('seller.ricardo.ch')) {
+        throw new Error('Valid ricardo subdomains rejected');
+      }
+      if (content.isRicardo('ricardo.ch.attacker.org') || content.isRicardo('fake-ricardo.ch')) {
+        throw new Error('Deceptive ricardo domains accepted');
+      }
+
+      if (!content.isTutti('www.tutti.ch') || content.isTutti('tutti.ch.evil.com')) {
+        throw new Error('Tutti domain validation failed');
+      }
+
+      if (!content.isEbayDE('www.ebay.de') || content.isEbayDE('ebay.de.attacker.com')) {
+        throw new Error('eBay DE domain validation failed');
+      }
+
+      if (!content.isKleinanzeigen('www.kleinanzeigen.de') || content.isKleinanzeigen('kleinanzeigen.de.phishing.org')) {
+        throw new Error('Kleinanzeigen domain validation failed');
+      }
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+    assert res.returncode == 0, f"Node test failed: {res.stderr}"
+
+
