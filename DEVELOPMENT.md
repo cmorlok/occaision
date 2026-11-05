@@ -84,7 +84,31 @@ Vor jedem Commit muss `pytest -v` mit **0 Fehlern** durchlaufen.
 
 ---
 
-## 4. Firefox-Extension bauen
+## 4. Sicherheits- & Concurrency-Architektur
+
+OccAIsion implementiert mehrschichtige Sicherheitsvorkehrungen:
+1. **Loopback-Authentifizierung & CORS:**
+   * Backend bindet in `docker-compose.yml` ausschließlich an `127.0.0.1:8000`.
+   * Wildcard-CORS ist entfernt; nur Loopback (`127.0.0.1`, `localhost`) und WebExtensions (`moz-extension://`) sind autorisiert.
+   * Beim Start generiert das Backend ein Pairing-Token in `data/auth_token.txt`.
+   * Das Dashboard setzt automatisch ein `SameSite=Strict` Session-Cookie bei Zugriff via Loopback.
+   * Die Firefox-Extension empfängt das Pairing-Token beim Aufruf des Dashboards und nutzt es für alle Hintergrund-API-Aufrufe (`Authorization: Bearer <token>`).
+2. **XSS-Schutz & Content Security Policy (CSP):**
+   * Alle dynamischen DOM-Elemente im Dashboard und der Extension nutzen `createElement()`, `textContent` und `replaceChildren()` statt unsicherem `innerHTML`.
+   * Das Dashboard liefert einen restriktiven `Content-Security-Policy`-Header aus.
+3. **Optimistische Concurrency & Datensicherheit:**
+   * Jeder Entwurf besitzt ein monotones `revision`-Feld.
+   * Gleichzeitige oder veraltete Schreibzugriffe werden mit `409 Conflict` abgewiesen (`RevisionConflictError`).
+   * `/analyze` führt die KI-Generierung aus, ohne den Entwurf im Speicher zu blockieren, und mergt die Ergebnisse auf den aktuellen Live-Zustand. Gelöschte Entwürfe werden nicht wiederbelebt (`404 Not Found`).
+   * Bei beschädigtem JSON in `drafts.json` wird automatisch ein Backup (`drafts.json.corrupt.<timestamp>`) angelegt, anstatt die Datei zu leeren (`StorageCorruptedError`).
+4. **Dauerhafte Konfiguration:**
+   * Dashboard-Einstellungen werden in `data/config.json` innerhalb des gemounteten Datenvolumens persistiert.
+   * Rangfolge: Umgebungsvariablen > `data/config.json` > Standardwerte.
+   * `GET /api/config` ist rein lesend und seiteneffektfrei.
+
+---
+
+## 5. Firefox-Extension bauen
 
 Das Build-Skript bündelt `manifest.json`, `background.js`, `content.js` und `panel.css` in ein distributionsfertiges ZIP-Archiv:
 
@@ -100,7 +124,7 @@ bash scripts/build_extension.sh
 
 ---
 
-## 5. Docker Image bauen
+## 6. Docker Image bauen
 
 Um ein produktionsreifes Docker-Image lokal auf dem Host zu bauen:
 
@@ -114,7 +138,7 @@ bash scripts/build_docker.sh v1.0.0
 
 ---
 
-## 6. GitHub Actions CI/CD & Release-Pipeline
+## 7. GitHub Actions CI/CD & Release-Pipeline
 
 Im Verzeichnis `.github/workflows/` sind zwei Pipelines eingerichtet:
 
@@ -135,7 +159,7 @@ Im Verzeichnis `.github/workflows/` sind zwei Pipelines eingerichtet:
 
 ---
 
-## 7. Projektstruktur
+## 8. Projektstruktur
 
 ```
 ├── backend/
