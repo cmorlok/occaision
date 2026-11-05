@@ -312,7 +312,7 @@ async function fillMuiSelect(comboboxEl, matchFn) {
         )
       );
       if (options.length > 0) {
-        const match = options.find(matchFn) || options[0];
+        const match = options.find(matchFn);
         if (match) {
           match.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
           match.click();
@@ -490,28 +490,28 @@ function injectFilesIntoInput(fileInput, imagePayloads) {
 
 // Platform detection
 function isRicardo(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("ricardo.ch");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "ricardo.ch" || h.endsWith(".ricardo.ch");
 }
 
 function isTutti(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("tutti.ch");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "tutti.ch" || h.endsWith(".tutti.ch");
 }
 
 function isEbayDE(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("ebay.de");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "ebay.de" || h.endsWith(".ebay.de");
 }
 
 function isKleinanzeigen(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("kleinanzeigen.de");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "kleinanzeigen.de" || h.endsWith(".kleinanzeigen.de");
 }
 
 function isLocalDashboard(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h === "127.0.0.1" || h === "localhost" || h.includes("127.0.0.1") || h.includes("localhost");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "127.0.0.1" || h === "localhost";
 }
 
 function detectPlatform(hostname) {

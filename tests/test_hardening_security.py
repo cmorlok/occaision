@@ -316,6 +316,39 @@ def test_upload_batch_limits_and_atomic_cleanup(temp_data_dir: Path):
         assert len(files_left) == 0, f"Expected 0 orphaned files, found: {files_left}"
 
 
+def test_extension_autofill_and_domain_safety():
+    content_js = Path("extension/content.js").read_text(encoding="utf-8")
+
+    # 1. No blind options[0] fallback
+    assert "|| options[0]" not in content_js, "fillMuiSelect must not fall back to options[0] on non-match"
+
+    # 2. Test domain detection safety via Node.js
+    import subprocess
+    node_script = """
+    const content = require('./extension/content.js');
+    
+    // Valid domains
+    if (!content.isRicardo('ricardo.ch') || !content.isRicardo('www.ricardo.ch')) process.exit(1);
+    if (!content.isTutti('tutti.ch') || !content.isTutti('m.tutti.ch')) process.exit(2);
+    if (!content.isEbayDE('ebay.de') || !content.isEbayDE('www.ebay.de')) process.exit(3);
+    if (!content.isKleinanzeigen('kleinanzeigen.de') || !content.isKleinanzeigen('m.kleinanzeigen.de')) process.exit(4);
+    if (!content.isLocalDashboard('127.0.0.1') || !content.isLocalDashboard('localhost')) process.exit(5);
+
+    // Spoofed domains must be rejected
+    if (content.isRicardo('ricardo.ch.attacker.com')) process.exit(10);
+    if (content.isTutti('tutti.ch.evil.com')) process.exit(11);
+    if (content.isEbayDE('ebay.de.attacker.com')) process.exit(12);
+    if (content.isKleinanzeigen('kleinanzeigen.de.evil.com')) process.exit(13);
+    if (content.isLocalDashboard('127.0.0.1.attacker.com')) process.exit(14);
+    if (content.isLocalDashboard('localhost.evil.com')) process.exit(15);
+
+    process.exit(0);
+    """
+    res = subprocess.run(["node", "-e", node_script])
+    assert res.returncode == 0, f"Domain detection safety failed with code {res.returncode}"
+
+
+
 
 
 
