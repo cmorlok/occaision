@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     host: str = "127.0.0.1"
     port: int = 8000
+    require_auth: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

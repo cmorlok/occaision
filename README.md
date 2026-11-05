@@ -90,7 +90,7 @@ echo "GEMINI_API_KEY=AIzaSy...DeinSchluesselHier" > .env
 # Container starten
 docker run -d \
   --name occaision \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
   -v "$(pwd)/data:/app/data" \
   --env-file .env \
   --restart unless-stopped \

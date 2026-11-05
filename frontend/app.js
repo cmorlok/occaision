@@ -103,6 +103,15 @@ const cfgKeyStatus = document.getElementById("cfg-key-status");
 let systemConfig = null;
 
 async function init() {
+  try {
+    const pairRes = await fetch("/api/auth/pair", { method: "POST" });
+    if (pairRes.ok) {
+      const pairData = await pairRes.json();
+      if (pairData.token) {
+        window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairData.token }), "*");
+      }
+    }
+  } catch (_) {}
   await loadSettings();
   await loadSystemConfig();
   await loadDrafts();

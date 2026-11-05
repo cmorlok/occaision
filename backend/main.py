@@ -1,9 +1,10 @@
 import logging
 import os
 from pathlib import Path
+import secrets
 import sys
 from typing import List, Optional
-from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -57,6 +58,23 @@ def configure_logging(level_name: Optional[str] = None):
 
     if level == logging.DEBUG:
         logger.info("[Logging] Debug-Logging ist AKTIV (vollständige Prompts und Antworten werden ausgegeben).")
+
+
+def get_or_create_auth_token(data_dir: Path) -> str:
+    """Read or generate local auth token stored in data_dir."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    token_path = data_dir / "auth_token.txt"
+    if token_path.exists():
+        t = token_path.read_text(encoding="utf-8").strip()
+        if t:
+            return t
+    token = secrets.token_urlsafe(32)
+    token_path.write_text(token, encoding="utf-8")
+    try:
+        token_path.chmod(0o600)
+    except OSError:
+        pass
+    return token
 
 
 def _save_to_env(updates: dict) -> None:
@@ -125,14 +143,69 @@ def create_app(
         title="OccAIsion",
         version="1.0.0",
     )
+    auth_token = get_or_create_auth_token(cfg.data_dir)
+
+    @app.middleware("http")
+    async def validate_host_header(request: Request, call_next):
+        host = request.headers.get("host", "").split(":")[0].lower()
+        allowed_hosts = {"127.0.0.1", "localhost", "testserver"}
+        if host and host not in allowed_hosts:
+            return JSONResponse(status_code=403, content={"detail": f"Untrusted Host: {host}"})
+        return await call_next(request)
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[
+            "http://127.0.0.1:8000",
+            "http://localhost:8000",
+            "http://127.0.0.1",
+            "http://localhost",
+        ],
+        allow_origin_regex=r"^moz-extension://.*",
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
+
+    @app.middleware("http")
+    async def auth_middleware(request: Request, call_next):
+        path = request.url.path
+        # When auth is disabled in settings (e.g. routine pytest suite)
+        if not cfg.require_auth:
+            return await call_next(request)
+
+        # Public paths
+        if (
+            path == "/api/health"
+            or path == "/api/auth/pair"
+            or not path.startswith("/api/")
+        ):
+            response = await call_next(request)
+            if path == "/" or path == "/api/health":
+                response.set_cookie(
+                    key="occaision_token",
+                    value=auth_token,
+                    httponly=True,
+                    samesite="strict",
+                    path="/",
+                )
+            return response
+
+        # Check Bearer token or session cookie
+        auth_header = request.headers.get("authorization", "")
+        has_bearer = auth_header.startswith("Bearer ") and secrets.compare_digest(
+            auth_header[7:].strip(), auth_token
+        )
+        cookie_token = request.cookies.get("occaision_token", "")
+        has_cookie = bool(cookie_token and secrets.compare_digest(cookie_token, auth_token))
+
+        if not (has_bearer or has_cookie):
+            return JSONResponse(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                content={"detail": "Authentication required"},
+            )
+
+        return await call_next(request)
 
     @app.middleware("http")
     async def add_no_cache_for_static(request, call_next):
@@ -142,6 +215,18 @@ def create_app(
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
         return response
+
+    # 0. Pairing
+    @app.post("/api/auth/pair")
+    def pair_extension(request: Request):
+        origin = request.headers.get("origin")
+        if origin and not (
+            origin.startswith("http://127.0.0.1")
+            or origin.startswith("http://localhost")
+            or origin.startswith("moz-extension://")
+        ):
+            raise HTTPException(status_code=403, detail="Untrusted origin")
+        return {"ok": True, "token": auth_token}
 
     # 1. Health
     @app.get("/api/health")

@@ -7,7 +7,7 @@ services:
     container_name: occaision
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
     env_file:

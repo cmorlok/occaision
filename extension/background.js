@@ -10,6 +10,31 @@ function getBrowserApi() {
 const browserApi = getBrowserApi();
 const BACKEND_BASE = "http://127.0.0.1:8000";
 
+let cachedAuthToken = null;
+
+async function getAuthToken() {
+  if (cachedAuthToken) return cachedAuthToken;
+  if (browserApi && browserApi.storage && browserApi.storage.local) {
+    try {
+      const data = await browserApi.storage.local.get(["occaision_auth_token"]);
+      if (data && data.occaision_auth_token) {
+        cachedAuthToken = data.occaision_auth_token;
+        return cachedAuthToken;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+async function getAuthHeaders() {
+  const token = await getAuthToken();
+  const headers = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 const ALL_HOST_ORIGINS = [
   "http://127.0.0.1/*",
   "http://localhost/*",
@@ -1942,52 +1967,67 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources 
 
 if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
   browserApi.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "SET_AUTH_TOKEN") {
+      cachedAuthToken = request.token || null;
+      if (browserApi && browserApi.storage && browserApi.storage.local && request.token) {
+        browserApi.storage.local.set({ occaision_auth_token: request.token });
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
     if (request.action === "LIST_DRAFTS") {
-      fetch(`${BACKEND_BASE}/api/drafts`)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
-        .then(drafts => sendResponse({ ok: true, drafts }))
-        .catch(err => sendResponse({ ok: false, error: err.message }));
+      getAuthHeaders().then(headers => {
+        fetch(`${BACKEND_BASE}/api/drafts`, { headers })
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(drafts => sendResponse({ ok: true, drafts }))
+          .catch(err => sendResponse({ ok: false, error: err.message }));
+      });
       return true;
     }
 
     if (request.action === "GET_DRAFT") {
-      fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
-        .then(draft => sendResponse({ ok: true, draft }))
-        .catch(err => sendResponse({ ok: false, error: err.message }));
+      getAuthHeaders().then(headers => {
+        fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`, { headers })
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(draft => sendResponse({ ok: true, draft }))
+          .catch(err => sendResponse({ ok: false, error: err.message }));
+      });
       return true;
     }
 
     if (request.action === "FETCH_DRAFT_IMAGES") {
-      fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
-        .then(async draft => {
-          const imagePayloads = [];
-          for (const img of draft.images || []) {
-            const imgUrl = `${BACKEND_BASE}/api/drafts/${draft.id}/images/${img.id}/active`;
-            const imgRes = await fetch(imgUrl);
-            if (!imgRes.ok) continue;
-            const buf = await imgRes.arrayBuffer();
-            const dataUrl = arrayBufferToBase64DataUrl(buf, "image/jpeg");
-            imagePayloads.push({
-              id: img.id,
-              filename: `${img.id}_${img.active_mode}.jpg`,
-              mimeType: "image/jpeg",
-              dataUrl: dataUrl,
-            });
-          }
-          sendResponse({ ok: true, images: imagePayloads });
-        })
-        .catch(err => sendResponse({ ok: false, error: err.message }));
+      getAuthHeaders().then(headers => {
+        fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`, { headers })
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(async draft => {
+            const imagePayloads = [];
+            for (const img of draft.images || []) {
+              const imgUrl = `${BACKEND_BASE}/api/drafts/${draft.id}/images/${img.id}/active`;
+              const imgRes = await fetch(imgUrl, { headers });
+              if (!imgRes.ok) continue;
+              const buf = await imgRes.arrayBuffer();
+              const dataUrl = arrayBufferToBase64DataUrl(buf, "image/jpeg");
+              imagePayloads.push({
+                id: img.id,
+                filename: `${img.id}_${img.active_mode}.jpg`,
+                mimeType: "image/jpeg",
+                dataUrl: dataUrl,
+              });
+            }
+            sendResponse({ ok: true, images: imagePayloads });
+          })
+          .catch(err => sendResponse({ ok: false, error: err.message }));
+      });
       return true;
     }
 

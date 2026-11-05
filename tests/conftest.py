@@ -7,6 +7,11 @@ import pillow_heif
 
 pillow_heif.register_heif_opener()
 
+@pytest.fixture(autouse=True)
+def setup_test_env(monkeypatch):
+    # Default to False for existing tests that don't pass auth; security tests override with Settings(require_auth=True)
+    monkeypatch.setenv("REQUIRE_AUTH", "false")
+
 @pytest.fixture
 def temp_data_dir(tmp_path: Path) -> Path:
     data_dir = tmp_path / "data"

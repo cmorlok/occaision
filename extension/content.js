@@ -1054,6 +1054,13 @@ function setupDashboardBridge() {
       return;
     }
 
+    if (msg.type === "OCCAISION_SET_TOKEN" && msg.token) {
+      if (browserApi && browserApi.runtime && browserApi.runtime.sendMessage) {
+        browserApi.runtime.sendMessage({ action: "SET_AUTH_TOKEN", token: msg.token });
+      }
+      return;
+    }
+
     if (msg.type === "OCCAISION_SCRAPE_PRICES") {
       const reqId = msg.requestId;
       const query = msg.query || "";
