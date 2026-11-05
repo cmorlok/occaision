@@ -99,6 +99,64 @@ const btnToggleKey = document.getElementById("btn-toggle-key");
 const cfgGeminiModel = document.getElementById("cfg-gemini-model");
 const cfgSearchGrounding = document.getElementById("cfg-search-grounding");
 const cfgKeyStatus = document.getElementById("cfg-key-status");
+const toastContainer = document.getElementById("toast-container");
+
+function showToast(message, type = "info", options = {}) {
+  if (!toastContainer) {
+    if (type === "error" || type === "warning") {
+      console.warn(`[${type}] ${message}`);
+    }
+    return null;
+  }
+  const {
+    duration = (type === "error" || type === "warning" ? 7000 : 4000),
+    actionText = null,
+    onAction = null
+  } = options;
+
+  const toast = document.createElement("div");
+  toast.className = `toast toast-${type}`;
+
+  const content = document.createElement("div");
+  content.className = "toast-content";
+  content.textContent = message;
+  toast.appendChild(content);
+
+  if (actionText && typeof onAction === "function") {
+    const actionBtn = document.createElement("button");
+    actionBtn.className = "toast-action-btn";
+    actionBtn.textContent = actionText;
+    actionBtn.onclick = (e) => {
+      e.stopPropagation();
+      toast.remove();
+      onAction();
+    };
+    toast.appendChild(actionBtn);
+  }
+
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "toast-close-btn";
+  closeBtn.setAttribute("aria-label", "Schließen");
+  closeBtn.textContent = "×";
+  closeBtn.onclick = () => {
+    toast.classList.add("toast-fade-out");
+    setTimeout(() => toast.remove(), 200);
+  };
+  toast.appendChild(closeBtn);
+
+  toastContainer.appendChild(toast);
+
+  if (duration > 0) {
+    setTimeout(() => {
+      if (toast.isConnected) {
+        toast.classList.add("toast-fade-out");
+        setTimeout(() => toast.remove(), 200);
+      }
+    }, duration);
+  }
+
+  return toast;
+}
 
 let systemConfig = null;
 
@@ -269,13 +327,13 @@ async function saveSystemConfig() {
       updatePriceSourcesVisibility();
 
       closeSettingsModal();
-      alert("Einstellungen erfolgreich gespeichert!");
+      showToast("Einstellungen erfolgreich gespeichert!", "success");
     } else {
       const err = await res.json().catch(() => ({}));
-      alert(`Fehler beim Speichern: ${err.detail || "Serverfehler"}`);
+      showToast(`Fehler beim Speichern: ${err.detail || "Serverfehler"}`, "error");
     }
   } catch (err) {
-    alert(`Fehler: ${err.message}`);
+    showToast(`Fehler: ${err.message}`, "error");
   } finally {
     btnSaveSettings.disabled = false;
   }
@@ -672,13 +730,13 @@ async function changeImageMode(imageId, mode) {
       renderGallery();
     } else {
       const err = await res.json().catch(() => ({}));
-      alert(`Fehler bei der Bildbearbeitung: ${err.detail || res.statusText || "Serverfehler"}`);
+      showToast(`Fehler bei der Bildbearbeitung: ${err.detail || res.statusText || "Serverfehler"}`, "error");
       if (overlay) overlay.remove();
       if (card) card.querySelectorAll("button").forEach(b => b.disabled = false);
     }
   } catch (err) {
     console.error("Failed to change mode", err);
-    alert(`Fehler bei der Bildbearbeitung: ${err.message}`);
+    showToast(`Fehler bei der Bildbearbeitung: ${err.message}`, "error");
     if (overlay) overlay.remove();
     if (card) card.querySelectorAll("button").forEach(b => b.disabled = false);
   }
@@ -699,8 +757,9 @@ async function deleteImage(imageId) {
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
+      showToast("Foto gelöscht.", "info");
     } else {
-      alert("Fehler beim Löschen des Fotos.");
+      showToast("Fehler beim Löschen des Fotos.", "error");
       if (card) {
         card.style.opacity = "1";
         card.querySelectorAll("button").forEach(b => b.disabled = false);
@@ -708,6 +767,7 @@ async function deleteImage(imageId) {
     }
   } catch (err) {
     console.error("Failed to delete image", err);
+    showToast(`Fehler beim Löschen des Fotos: ${err.message}`, "error");
     if (card) {
       card.style.opacity = "1";
       card.querySelectorAll("button").forEach(b => b.disabled = false);
@@ -732,7 +792,7 @@ async function uploadFiles(files) {
     await ensureDraft();
   }
   if (!currentDraft) {
-    alert("Konnte keinen Entwurf für den Foto-Upload erstellen.");
+    showToast("Konnte keinen Entwurf für den Foto-Upload erstellen.", "error");
     return;
   }
 
@@ -755,13 +815,18 @@ async function uploadFiles(files) {
       currentDraft = await res.json();
       renderGallery();
       await loadDrafts();
+      showToast("Fotos erfolgreich hochgeladen & verarbeitet.", "success");
     } else {
       const errData = await res.json().catch(() => ({}));
-      alert(`Upload fehlgeschlagen: ${errData.detail || res.statusText || "Serverfehler"}`);
+      if (res.status === 413) {
+        showToast("Upload abgelehnt: Dateigröße überschreitet maximales Limit (25 MB).", "error");
+      } else {
+        showToast(`Upload fehlgeschlagen: ${errData.detail || res.statusText || "Serverfehler"}`, "error");
+      }
     }
   } catch (err) {
     console.error("Upload error", err);
-    alert(`Fehler beim Upload: ${err.message}`);
+    showToast(`Fehler beim Upload: ${err.message}`, "error");
   } finally {
     if (dropzoneP) dropzoneP.textContent = originalText;
     dropzoneEl.style.opacity = "1";
@@ -849,10 +914,29 @@ function setupEventListeners() {
         currentDraft = await res.json();
         await loadDrafts();
         populateForm();
-        alert("Entwurf erfolgreich gespeichert!");
+        showToast("Entwurf erfolgreich gespeichert!", "success");
+      } else if (res.status === 409) {
+        showToast(
+          "Entwurf wurde anderweitig aktualisiert (Konflikt). Änderungen wurden nicht überschrieben.",
+          "warning",
+          {
+            duration: 12000,
+            actionText: "Neu laden",
+            onAction: async () => {
+              if (currentDraft && currentDraft.id) {
+                await loadDraft(currentDraft.id);
+                showToast("Entwurf neu geladen.", "info");
+              }
+            }
+          }
+        );
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Fehler beim Speichern: ${err.detail || res.statusText || "Serverfehler"}`, "error");
       }
     } catch (err) {
       console.error("Failed to save draft", err);
+      showToast(`Fehler beim Speichern: ${err.message}`, "error");
     }
   };
 
@@ -883,16 +967,17 @@ function setupEventListeners() {
         currentDraft = await res.json();
         await loadDrafts();
         populateForm();
+        showToast("KI-Analyse abgeschlossen!", "success");
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(`Analyse fehlgeschlagen: ${err.detail || "Serverfehler"}`);
+        showToast(`Analyse fehlgeschlagen: ${err.detail || "Serverfehler"}`, "error");
         if (err.detail && (err.detail.includes("API-Key") || err.detail.includes("Gemini"))) {
           openSettingsModal();
         }
       }
     } catch (err) {
       console.error("Analysis error", err);
-      alert("Fehler bei der Analyse.");
+      showToast("Fehler bei der Analyse.", "error");
     } finally {
       btnAnalyze.disabled = false;
       analyzeSpinner.classList.add("hidden");
@@ -968,7 +1053,7 @@ async function scrapePricesViaExtension() {
   ).trim();
 
   if (!query) {
-    alert("Bitte gib zuerst oben einen Produktnamen / Modell für die Preisrecherche ein.");
+    showToast("Bitte gib zuerst oben einen Produktnamen / Modell für die Preisrecherche ein.", "warning");
     if (productNameEl) productNameEl.focus();
     return;
   }
@@ -1217,7 +1302,7 @@ async function scrapePricesViaExtension() {
     }
   } catch (err) {
     console.error("Extension price scrape failed", err);
-    alert(err.message);
+    showToast(`Preisrecherche fehlgeschlagen: ${err.message}`, "error");
   } finally {
     if (btnScrapeExtension) btnScrapeExtension.disabled = false;
     if (analyzeSpinner) {
