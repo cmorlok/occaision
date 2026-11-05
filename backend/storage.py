@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
 import shutil
 import tempfile
@@ -8,6 +9,24 @@ from typing import Dict, List, Optional
 import uuid
 
 from backend.models import Draft, PresetSettings
+
+logger = logging.getLogger("occaision.storage")
+
+
+class StorageError(Exception):
+    pass
+
+
+class StorageCorruptedError(StorageError):
+    pass
+
+
+class DraftNotFoundError(StorageError):
+    pass
+
+
+class RevisionConflictError(StorageError):
+    pass
 
 
 class StorageService:
@@ -55,7 +74,16 @@ class StorageService:
         try:
             with open(self.drafts_file, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, FileNotFoundError):
+        except json.JSONDecodeError as e:
+            now_str = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            backup_path = self.data_dir / f"drafts.json.corrupt.{now_str}"
+            try:
+                shutil.copy2(self.drafts_file, backup_path)
+                logger.error(f"[Storage] Corrupt drafts.json backed up to {backup_path}: {e}")
+            except Exception as copy_err:
+                logger.error(f"[Storage] Failed to back up corrupt drafts.json: {copy_err}")
+            raise StorageCorruptedError(f"Corrupted drafts.json: {e}") from e
+        except FileNotFoundError:
             return []
 
     def list_drafts(self) -> List[Draft]:
@@ -112,14 +140,24 @@ class StorageService:
         
         with self._lock:
             raw_list = self._load_drafts_raw()
-            found = False
+            found_idx = None
+            existing_item = None
             for idx, item in enumerate(raw_list):
                 if item.get("id") == draft.id:
-                    raw_list[idx] = draft.model_dump()
-                    found = True
+                    found_idx = idx
+                    existing_item = item
                     break
-            if not found:
-                raw_list.append(draft.model_dump())
+            if found_idx is None:
+                raise DraftNotFoundError(f"Draft {draft.id} does not exist (cannot update)")
+
+            existing_rev = existing_item.get("revision", 1)
+            if draft.revision != existing_rev:
+                raise RevisionConflictError(
+                    f"Conflict updating draft {draft.id}: expected revision {existing_rev}, got {draft.revision}"
+                )
+
+            draft.revision = existing_rev + 1
+            raw_list[found_idx] = draft.model_dump()
             self._write_json_atomic(self.drafts_file, raw_list)
         return draft
 

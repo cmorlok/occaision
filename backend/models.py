@@ -221,6 +221,7 @@ class Draft(BaseModel):
     id: str
     created_at: str
     updated_at: str
+    revision: int = 1
     status: DraftStatus = DraftStatus.DRAFT
     user_notes: str = ""
     identified_product: str = ""

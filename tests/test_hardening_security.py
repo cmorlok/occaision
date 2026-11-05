@@ -112,3 +112,70 @@ def test_content_js_safe_description_rendering():
     assert "editable.innerHTML = htmlVal" not in content_js, "content.js must not assign unescaped innerHTML in setDescriptionValue"
     assert "createTextNode" in content_js, "content.js must use createTextNode for safe multiline insertion"
 
+
+def test_storage_revision_conflict_and_no_resurrection(temp_data_dir: Path):
+    from backend.storage import StorageService, RevisionConflictError, DraftNotFoundError
+    storage = StorageService(data_dir=temp_data_dir)
+
+    draft = storage.create_draft(user_notes="Original")
+    assert draft.revision == 1
+
+    # First update increments revision to 2
+    draft.user_notes = "Updated 1"
+    updated = storage.update_draft(draft)
+    assert updated.revision == 2
+
+    # Stale write with revision 1 must raise RevisionConflictError
+    stale_draft = draft.model_copy(update={"revision": 1, "user_notes": "Stale overwrite"})
+    with pytest.raises(RevisionConflictError):
+        storage.update_draft(stale_draft)
+
+    # Deleting the draft
+    assert storage.delete_draft(draft.id) is True
+
+    # Attempting to update deleted draft must raise DraftNotFoundError (no resurrection/upsert)
+    with pytest.raises(DraftNotFoundError):
+        storage.update_draft(updated)
+
+
+def test_storage_corruption_safety(temp_data_dir: Path):
+    from backend.storage import StorageService, StorageCorruptedError
+    storage = StorageService(data_dir=temp_data_dir)
+    storage.create_draft(user_notes="Important Data")
+
+    # Corrupt drafts.json
+    drafts_file = temp_data_dir / "drafts.json"
+    drafts_file.write_text("{ corrupt json: invalid ...", encoding="utf-8")
+
+    # Reading corrupt file must raise StorageCorruptedError and preserve backup
+    with pytest.raises(StorageCorruptedError):
+        storage.list_drafts()
+
+    backup_files = list(temp_data_dir.glob("drafts.json.corrupt.*"))
+    assert len(backup_files) >= 1, "Must create backup of corrupted drafts.json"
+
+
+def test_analyze_does_not_resurrect_deleted_draft(temp_data_dir: Path):
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=False)
+    storage = StorageService(data_dir=temp_data_dir)
+    image_service = ImageService(data_dir=temp_data_dir)
+    app = create_app(settings=test_settings, storage_service=storage, image_service=image_service)
+    client = TestClient(app)
+
+    draft = storage.create_draft(user_notes="Will be deleted mid-analysis")
+
+    def delete_during_ai(*args, **kwargs):
+        # Delete draft while Gemini is "running"
+        storage.delete_draft(draft.id)
+        return draft
+
+    with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=delete_during_ai):
+        res = client.post(f"/api/drafts/{draft.id}/analyze")
+        assert res.status_code == 404
+        assert "deleted" in res.json()["detail"].lower()
+
+    # Draft must still not exist (no resurrection)
+    assert storage.get_draft(draft.id) is None
+
+
+

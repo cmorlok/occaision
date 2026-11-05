@@ -21,7 +21,7 @@ from backend.models import (
 )
 from backend.services.ai_service import AIService
 from backend.services.image_service import ImageService
-from backend.storage import StorageService
+from backend.storage import DraftNotFoundError, RevisionConflictError, StorageCorruptedError, StorageService
 
 logger = logging.getLogger("occaision.api")
 if not logger.handlers:
@@ -347,10 +347,12 @@ def create_app(
     def update_draft(draft_id: str, updated_draft: Draft):
         if draft_id != updated_draft.id:
             raise HTTPException(status_code=400, detail="Draft ID mismatch")
-        existing = storage.get_draft(draft_id)
-        if not existing:
+        try:
+            return storage.update_draft(updated_draft)
+        except DraftNotFoundError:
             raise HTTPException(status_code=404, detail="Draft not found")
-        return storage.update_draft(updated_draft)
+        except RevisionConflictError as e:
+            raise HTTPException(status_code=409, detail=str(e))
 
     @app.delete("/api/drafts/{draft_id}")
     def delete_draft(draft_id: str):
@@ -515,7 +517,21 @@ def create_app(
                 detail=f"Fehler bei der KI-Analyse: {err_str}",
             )
 
-        return storage.update_draft(analyzed_draft)
+        current = storage.get_draft(draft_id)
+        if not current:
+            raise HTTPException(status_code=404, detail="Draft was deleted during analysis")
+
+        current.ricardo = analyzed_draft.ricardo
+        current.tutti = analyzed_draft.tutti
+        current.ebay_de = analyzed_draft.ebay_de
+        current.kleinanzeigen = analyzed_draft.kleinanzeigen
+        current.price_analysis = analyzed_draft.price_analysis
+        current.status = analyzed_draft.status
+        current.missing_photo_hints = analyzed_draft.missing_photo_hints
+        if analyzed_draft.identified_product and not current.identified_product:
+            current.identified_product = analyzed_draft.identified_product
+
+        return storage.update_draft(current)
 
     # 6. Static files frontend
     frontend_dir = Path(__file__).resolve().parent.parent / "frontend"
