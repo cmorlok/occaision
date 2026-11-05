@@ -9,6 +9,14 @@ ZIP_FILE="${DIST_DIR}/occaision.zip"
 mkdir -p "${DIST_DIR}"
 rm -f "${ZIP_FILE}"
 
+# Optional: Version aktualisieren, falls als Parameter übergeben (z. B. 1.1.0 oder v1.1.0)
+TARGET_VERSION="${1:-}"
+if [ -n "${TARGET_VERSION}" ]; then
+  CLEAN_VERSION="${TARGET_VERSION#v}"
+  echo "📝 Aktualisiere Version in manifest.json auf ${CLEAN_VERSION}..."
+  sed -i -E "s/\"version\":\s*\"[^\"]+\"/\"version\": \"${CLEAN_VERSION}\"/" "${EXTENSION_DIR}/manifest.json"
+fi
+
 echo "🔨 Baue Firefox WebExtension..."
 cd "${EXTENSION_DIR}"
 zip -q -r "${ZIP_FILE}" manifest.json background.js content.js panel.css

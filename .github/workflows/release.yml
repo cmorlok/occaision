@@ -51,9 +51,24 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Determine Release Tag & Version
+        id: release_tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            RAW_TAG="${{ github.event.inputs.tag }}"
+          elif [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
+            RAW_TAG="${GITHUB_REF#refs/tags/}"
+          else
+            RAW_TAG="v$(date +'%Y.%m.%d-%H%M')"
+          fi
+          CLEAN_VER="${RAW_TAG#v}"
+          echo "tag=${RAW_TAG}" >> $GITHUB_OUTPUT
+          echo "version=${CLEAN_VER}" >> $GITHUB_OUTPUT
+          echo "Release Tag: ${RAW_TAG} (Version: ${CLEAN_VER})"
+
       - name: Build Firefox Extension (dist/occaision.zip)
         run: |
-          bash scripts/build_extension.sh
+          bash scripts/build_extension.sh "${{ steps.release_tag.outputs.version }}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -81,10 +96,11 @@ jobs:
 
       - name: Build and Export Standalone Docker Archive
         run: |
-          docker build -t occaision:latest .
+          VERSION="${{ steps.release_tag.outputs.version }}"
+          docker build -t occaision:latest -t "occaision:${VERSION}" .
           mkdir -p dist
           echo "Packaging Docker image to dist/occaision-docker.tar.gz..."
-          docker save occaision:latest | gzip > dist/occaision-docker.tar.gz
+          docker save occaision:latest "occaision:${VERSION}" | gzip > dist/occaision-docker.tar.gz
 
       - name: Build & Push Docker Image to GHCR
         uses: docker/build-push-action@v5
@@ -93,17 +109,6 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Determine Release Tag
-        id: release_tag
-        run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
-          elif [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
-            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-          else
-            echo "tag=v$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
-          fi
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
