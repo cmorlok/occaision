@@ -109,7 +109,28 @@ bash scripts/build_docker.sh v1.0.0
 
 ---
 
-## 6. Projektstruktur
+## 6. GitHub Actions CI/CD & Release-Pipeline
+
+Im Verzeichnis `.github/workflows/` sind zwei Pipelines eingerichtet:
+
+### 1. `ci.yml` (Continuous Integration)
+* **Trigger:** Jeder Pull Request auf den `main`-Branch.
+* **Ablauf:** Führt `pytest -v` aus, verifiziert das Packaging der Firefox-Extension (`scripts/build_extension.sh`) und baut das Dockerfile zur Syntax- und Layer-Prüfung.
+
+### 2. `release.yml` (Automated Build & GitHub Release)
+* **Trigger:** 
+  * Push eines Git-Tags nach dem Schema `v*` (z. B. `git tag v1.0.0 && git push origin v1.0.0`)
+  * Manuell über die GitHub Actions Benutzeroberfläche (*"Run workflow"*).
+* **Ablauf:**
+  1. Führt alle 22 Tests aus.
+  2. Baut die Firefox-Extension als `dist/occaision.zip`.
+  3. Baut das Docker-Image und pusht es zur GitHub Container Registry (`ghcr.io/<owner>/occaision:<tag>`).
+  4. Exportiert ein eigenständiges Offline-Image-Archiv `dist/occaision-docker.tar.gz`.
+  5. Erstellt automatisch ein offizielles **GitHub Release** mit Release Notes und hängt `dist/occaision.zip` sowie `dist/occaision-docker.tar.gz` als Assets zum Download an.
+
+---
+
+## 7. Projektstruktur
 
 ```
 ├── backend/

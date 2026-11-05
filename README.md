@@ -72,15 +72,39 @@ OccAIsion nutzt die multimodalen Modelle von **Google Gemini** (standardmäßig 
 
 ## 📦 Schnellstart: Installation & Inbetriebnahme
 
-### Voraussetzungen
-* **Docker & Docker Compose** (oder Docker Desktop auf Windows/macOS/Linux)
-* **Mozilla Firefox** Browser
+### Option A: Fertige GitHub-Releases herunterladen (Empfohlen)
+
+Unter **GitHub Releases** stehen zu jedem Release zwei vorgefertigte Download-Pakete bereit:
+* **`occaision.zip`:** Die fertige Firefox-Erweiterung (direkt installierbar).
+* **`occaision-docker.tar.gz`:** Das fertige Docker-Image zum direkten Laden ohne Build-Tools.
+
+#### 1. Backend starten:
+```bash
+# Docker-Image aus Release-Archiv laden
+docker load -i occaision-docker.tar.gz
+
+# Verzeichnis für Entwürfe & .env vorbereiten
+mkdir -p data
+echo "GEMINI_API_KEY=AIzaSy...DeinSchluesselHier" > .env
+
+# Container starten
+docker run -d \
+  --name occaision \
+  -p 8000:8000 \
+  -v "$(pwd)/data:/app/data" \
+  --env-file .env \
+  --restart unless-stopped \
+  occaision:latest
+```
+
+*(Alternativ kann das Image auch direkt aus der GitHub Container Registry gezogen werden:*  
+`docker pull ghcr.io/<owner>/occaision:latest`*)*
 
 ---
 
-### Schritt 1: Backend via Docker starten
+### Option B: Aus dem Git-Repository starten (Docker Compose)
 
-1. **Repository klonen oder herunterladen:**
+1. **Repository klonen:**
    ```bash
    git clone <repo-url>
    cd seller
@@ -91,25 +115,11 @@ OccAIsion nutzt die multimodalen Modelle von **Google Gemini** (standardmäßig 
    ```bash
    cp .env.example .env
    ```
-   Öffne `.env` in einem Texteditor und trage deinen Gemini API-Key ein:
-   ```env
-   GEMINI_API_KEY=AIzaSy...DeinSchluesselHier
-   ```
+   Trage in `.env` deinen `GEMINI_API_KEY` ein.
 
 3. **Container mit Docker Compose starten:**
    ```bash
    docker compose up -d
-   ```
-
-   *(Alternativ mit `docker run`:)*
-   ```bash
-   docker run -d \
-     --name occaision \
-     -p 8000:8000 \
-     -v "$(pwd)/data:/app/data" \
-     --env-file .env \
-     --restart unless-stopped \
-     occaision:latest
    ```
 
 4. **Web-Dashboard im Browser öffnen:**  
