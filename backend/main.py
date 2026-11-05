@@ -4,9 +4,10 @@ import logging
 import os
 import secrets
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,6 @@ from backend.config import settings as default_settings
 from backend.models import (
     DEFAULT_PRICE_SOURCES,
     Draft,
-    DraftImage,
     ImageVariantMode,
     PresetSettings,
 )
@@ -192,6 +192,8 @@ def create_app(
         version="1.0.0",
     )
     auth_token = get_or_create_auth_token(cfg.data_dir)
+    active_analyses: set[str] = set()
+    active_analyses_lock = threading.Lock()
 
     @app.middleware("http")
     async def validate_host_header(request: Request, call_next):
@@ -532,72 +534,84 @@ def create_app(
     # 5. Analysis
     @app.post("/api/drafts/{draft_id}/analyze", response_model=Draft)
     async def analyze_draft(draft_id: str):
-        logger.info(f"[API] Starte KI- und Preisanalyse für Draft {draft_id}...")
-        draft = storage.get_draft(draft_id)
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
+        with active_analyses_lock:
+            if draft_id in active_analyses:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Analyse für diesen Entwurf läuft bereits. Bitte warten.",
+                )
+            active_analyses.add(draft_id)
 
-        # 0. Load enabled price sources from settings
-        preset_settings = storage.get_settings()
-        if hasattr(preset_settings, "enabled_price_sources") and preset_settings.enabled_price_sources is not None:
-            enabled_sources = preset_settings.enabled_price_sources
-        else:
-            enabled_sources = list(DEFAULT_PRICE_SOURCES)
-
-        # 1. Check if extension already fetched market prices
-        pa = draft.price_analysis
-        ebay_stats = pa.ebay_stats if (pa and "ebay_de_sold" in enabled_sources) else None
-
-        # 2. Gather AI input images
-        ai_image_paths = storage.get_ai_image_paths(draft_id)
-
-        # 3. Run AI analysis
         try:
-            analyzed_draft = await ai_svc.analyze_draft(
-                draft=draft,
-                image_paths=ai_image_paths,
-                ebay_stats=ebay_stats,
-                enabled_sources=enabled_sources,
-            )
-        except Exception as e:
-            logger.error(f"[API] KI-Analyse fehlgeschlagen: {e}")
-            err_str = str(e)
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=(
-                        "Google Gemini Quota-Limit erreicht (429 RESOURCE_EXHAUSTED).\n\n"
-                        "Mögliche Ursachen & Lösungen:\n"
-                        "1. Kurzzeitiges Limit: Warte ca. 1 Minute und klicke erneut auf Analyse (Rate-Limit pro Minute im Free Tier).\n"
-                        "2. Web-Suche deaktivieren: Schalte in den Einstellungen (⚙️) 'Google Search Grounding (Websuche)' aus, da die Live-Suche im Free Tier oft strenger limitiert ist.\n"
-                        "3. Wichtig zum Google One / AI Pro Abo: Ein Google One AI Premium Abo gilt nur für den Consumer-Chat (gemini.google.com), nicht für die Entwickler-API (Google AI Studio). Für unbegrenztes API-Volumen kann auf https://aistudio.google.com ein Pay-As-You-Go Billing-Account hinterlegt werden (für Flash-Modelle fallen meist weniger als 0.001 CHF pro Inserat an)."
-                    ),
+            logger.info(f"[API] Starte KI- und Preisanalyse für Draft {draft_id}...")
+            draft = storage.get_draft(draft_id)
+            if not draft:
+                raise HTTPException(status_code=404, detail="Draft not found")
+
+            # 0. Load enabled price sources from settings
+            preset_settings = storage.get_settings()
+            if hasattr(preset_settings, "enabled_price_sources") and preset_settings.enabled_price_sources is not None:
+                enabled_sources = preset_settings.enabled_price_sources
+            else:
+                enabled_sources = list(DEFAULT_PRICE_SOURCES)
+
+            # 1. Check if extension already fetched market prices
+            pa = draft.price_analysis
+            ebay_stats = pa.ebay_stats if (pa and "ebay_de_sold" in enabled_sources) else None
+
+            # 2. Gather AI input images
+            ai_image_paths = storage.get_ai_image_paths(draft_id)
+
+            # 3. Run AI analysis
+            try:
+                analyzed_draft = await ai_svc.analyze_draft(
+                    draft=draft,
+                    image_paths=ai_image_paths,
+                    ebay_stats=ebay_stats,
+                    enabled_sources=enabled_sources,
                 )
-            if "API_KEY_INVALID" in err_str or "API key not valid" in err_str or "API key" in err_str:
+            except Exception as e:
+                logger.error(f"[API] KI-Analyse fehlgeschlagen: {e}")
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    raise HTTPException(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        detail=(
+                            "Google Gemini Quota-Limit erreicht (429 RESOURCE_EXHAUSTED).\n\n"
+                            "Mögliche Ursachen & Lösungen:\n"
+                            "1. Kurzzeitiges Limit: Warte ca. 1 Minute und klicke erneut auf Analyse (Rate-Limit pro Minute im Free Tier).\n"
+                            "2. Web-Suche deaktivieren: Schalte in den Einstellungen (⚙️) 'Google Search Grounding (Websuche)' aus, da die Live-Suche im Free Tier oft strenger limitiert ist.\n"
+                            "3. Wichtig zum Google One / AI Pro Abo: Ein Google One AI Premium Abo gilt nur für den Consumer-Chat (gemini.google.com), nicht für die Entwickler-API (Google AI Studio). Für unbegrenztes API-Volumen kann auf https://aistudio.google.com ein Pay-As-You-Go Billing-Account hinterlegt werden (für Flash-Modelle fallen meist weniger als 0.001 CHF pro Inserat an)."
+                        ),
+                    )
+                if "API_KEY_INVALID" in err_str or "API key not valid" in err_str or "API key" in err_str:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Ungültiger oder fehlender Google Gemini API-Key. Bitte trage deinen API-Key in den Einstellungen (⚙️) oder in der .env-Datei ein.",
+                    )
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Ungültiger oder fehlender Google Gemini API-Key. Bitte trage deinen API-Key in den Einstellungen (⚙️) oder in der .env-Datei ein.",
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Fehler bei der KI-Analyse: {err_str}",
                 )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Fehler bei der KI-Analyse: {err_str}",
-            )
 
-        current = storage.get_draft(draft_id)
-        if not current:
-            raise HTTPException(status_code=404, detail="Draft was deleted during analysis")
+            current = storage.get_draft(draft_id)
+            if not current:
+                raise HTTPException(status_code=404, detail="Draft was deleted during analysis")
 
-        current.ricardo = analyzed_draft.ricardo
-        current.tutti = analyzed_draft.tutti
-        current.ebay_de = analyzed_draft.ebay_de
-        current.kleinanzeigen = analyzed_draft.kleinanzeigen
-        current.price_analysis = analyzed_draft.price_analysis
-        current.status = analyzed_draft.status
-        current.missing_photo_hints = analyzed_draft.missing_photo_hints
-        if analyzed_draft.identified_product and not current.identified_product:
-            current.identified_product = analyzed_draft.identified_product
+            current.ricardo = analyzed_draft.ricardo
+            current.tutti = analyzed_draft.tutti
+            current.ebay_de = analyzed_draft.ebay_de
+            current.kleinanzeigen = analyzed_draft.kleinanzeigen
+            current.price_analysis = analyzed_draft.price_analysis
+            current.status = analyzed_draft.status
+            current.missing_photo_hints = analyzed_draft.missing_photo_hints
+            if analyzed_draft.identified_product and not current.identified_product:
+                current.identified_product = analyzed_draft.identified_product
 
-        return storage.update_draft(current)
+            return storage.update_draft(current)
+        finally:
+            with active_analyses_lock:
+                active_analyses.discard(draft_id)
 
     # 6. Static files frontend
     frontend_dir = Path(__file__).resolve().parent.parent / "frontend"

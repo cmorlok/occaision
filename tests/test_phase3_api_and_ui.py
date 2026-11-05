@@ -571,6 +571,46 @@ def test_frontend_api_client_contract():
     assert res.returncode == 0, f"Frontend API client test failed: {res.stderr}"
 
 
+def test_analyze_draft_concurrency_guard(test_app):
+    client = TestClient(test_app)
+    res_create = client.post("/api/drafts", json={"user_notes": "Concurrency Test"})
+    assert res_create.status_code == 200
+    draft_id = res_create.json()["id"]
+
+    import asyncio
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    real_draft = Draft.model_validate(res_create.json())
+    real_draft.status = DraftStatus.READY
+
+    async def slow_analyze(*args, **kwargs):
+        await asyncio.sleep(0.3)
+        return real_draft
+
+    with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=slow_analyze):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            fut1 = executor.submit(lambda: client.post(f"/api/drafts/{draft_id}/analyze"))
+            time.sleep(0.05)
+            fut2 = executor.submit(lambda: client.post(f"/api/drafts/{draft_id}/analyze"))
+
+            res1 = fut1.result()
+            res2 = fut2.result()
+
+        statuses = {res1.status_code, res2.status_code}
+        assert 200 in statuses
+        assert 409 in statuses
+
+        conflict_res = res1 if res1.status_code == 409 else res2
+        assert "Analyse für diesen Entwurf läuft bereits" in conflict_res.json()["detail"]
+
+    # After completion, subsequent request can acquire lock and succeed
+    with patch("backend.services.ai_service.AIService.analyze_draft", return_value=real_draft):
+        res3 = client.post(f"/api/drafts/{draft_id}/analyze")
+        assert res3.status_code == 200
+
+
+
 
 
 
