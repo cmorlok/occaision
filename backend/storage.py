@@ -8,9 +8,10 @@ import threading
 from typing import Dict, List, Optional
 import uuid
 
+from backend.config import get_logger
 from backend.models import Draft, PresetSettings
 
-logger = logging.getLogger("occaision.storage")
+logger = get_logger("occaision.storage")
 
 
 class StorageError(Exception):

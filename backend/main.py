@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend.config import Settings, settings as default_settings
+from backend.config import Settings, get_logger, settings as default_settings
 from backend.models import (
     DEFAULT_PRICE_SOURCES,
     Draft,
@@ -25,13 +25,7 @@ from backend.services.ai_service import AIService
 from backend.services.image_service import ImageService
 from backend.storage import DraftNotFoundError, RevisionConflictError, StorageCorruptedError, StorageService
 
-logger = logging.getLogger("occaision.api")
-if not logger.handlers:
-    _api_handler = logging.StreamHandler(sys.stdout)
-    _api_handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
-    logger.addHandler(_api_handler)
-logger.setLevel(logging.INFO)
-logger.propagate = False
+logger = get_logger("occaision.api")
 
 
 def configure_logging(level_name: Optional[str] = None):

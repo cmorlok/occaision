@@ -1,4 +1,6 @@
+import logging
 from pathlib import Path
+import sys
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,3 +24,15 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def get_logger(name: str) -> logging.Logger:
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
+        logger.addHandler(handler)
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    logger.setLevel(level)
+    logger.propagate = False
+    return logger

@@ -21,13 +21,9 @@ from backend.models import (
     TuttiListing,
     VerificationLinks,
 )
+from backend.config import get_logger
 
-logger = logging.getLogger("occaision.ai")
-if not logger.handlers:
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
-    logger.addHandler(_handler)
-logger.propagate = False
+logger = get_logger("occaision.ai")
 
 
 def safe_price(val: Any, default: float = 0.0) -> float:

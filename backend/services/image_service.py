@@ -8,18 +8,13 @@ import uuid
 from PIL import Image, ImageFilter, ImageOps
 import pillow_heif
 
+from backend.config import get_logger
 from backend.models import DraftImage, ImageVariantMode
 
 pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 50_000_000
 
-logger = logging.getLogger("occaision.image")
-if not logger.handlers:
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
-    logger.addHandler(_handler)
-logger.setLevel(logging.INFO)
-logger.propagate = False
+logger = get_logger("occaision.image")
 
 
 class ImageService:
