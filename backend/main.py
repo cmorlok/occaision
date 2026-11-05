@@ -143,6 +143,7 @@ class UpdateSystemConfigRequest(BaseModel):
     gemini_api_key: Optional[str] = None
     gemini_model: Optional[str] = None
     enable_search_grounding: Optional[bool] = None
+    eur_to_chf_rate: Optional[float] = None
 
 
 def create_app(
@@ -160,6 +161,11 @@ def create_app(
             cfg.enable_search_grounding = persisted["enable_search_grounding"]
         if "gemini_api_key" in persisted and "GEMINI_API_KEY" not in os.environ:
             cfg.gemini_api_key = persisted["gemini_api_key"]
+        if "eur_to_chf_rate" in persisted and "EUR_TO_CHF_RATE" not in os.environ:
+            try:
+                cfg.eur_to_chf_rate = float(persisted["eur_to_chf_rate"])
+            except (ValueError, TypeError):
+                pass
 
     configure_logging(cfg.log_level)
     storage = storage_service or StorageService(data_dir=cfg.data_dir)
@@ -376,6 +382,12 @@ def create_app(
             if "ENABLE_SEARCH_GROUNDING" not in env_updates:
                 env_updates["ENABLE_SEARCH_GROUNDING"] = "true" if cfg.enable_search_grounding else "false"
                 persisted_updates["enable_search_grounding"] = cfg.enable_search_grounding
+
+        if body.eur_to_chf_rate is not None and body.eur_to_chf_rate > 0:
+            cfg.eur_to_chf_rate = round(float(body.eur_to_chf_rate), 4)
+            ai_svc.eur_to_chf = cfg.eur_to_chf_rate
+            env_updates["EUR_TO_CHF_RATE"] = str(cfg.eur_to_chf_rate)
+            persisted_updates["eur_to_chf_rate"] = cfg.eur_to_chf_rate
 
         if persisted_updates:
             save_persisted_config(cfg.data_dir, persisted_updates)

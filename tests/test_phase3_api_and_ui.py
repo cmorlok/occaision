@@ -213,18 +213,20 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     models_data = res_models.json()
     assert len(models_data) > 0
 
-    # 2. POST /api/config with a new key and disable search grounding
+    # 2. POST /api/config with a new key and disable search grounding and custom exchange rate
     res_update = client.post(
         "/api/config",
         json={
             "gemini_api_key": "AIzaSyTestValidLengthKey12345",
             "enable_search_grounding": False,
+            "eur_to_chf_rate": 0.96,
         },
     )
     assert res_update.status_code == 200
     updated_cfg = res_update.json()
     assert updated_cfg["gemini_api_key_configured"] is True
     assert updated_cfg["enable_search_grounding"] is False
+    assert updated_cfg["eur_to_chf_rate"] == 0.96
     assert "AIza" in updated_cfg["masked_key"]
 
     # 3. Create a draft and test defensive handling when Gemini raises an invalid key error

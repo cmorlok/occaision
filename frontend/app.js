@@ -98,6 +98,7 @@ const cfgGeminiKey = document.getElementById("cfg-gemini-key");
 const btnToggleKey = document.getElementById("btn-toggle-key");
 const cfgGeminiModel = document.getElementById("cfg-gemini-model");
 const cfgSearchGrounding = document.getElementById("cfg-search-grounding");
+const cfgEurRate = document.getElementById("cfg-eur-rate");
 const cfgKeyStatus = document.getElementById("cfg-key-status");
 const btnExportBackup = document.getElementById("btn-export-backup");
 const backupFileInput = document.getElementById("backup-file-input");
@@ -201,6 +202,9 @@ async function loadSystemConfig() {
       if (cfgSearchGrounding) {
         cfgSearchGrounding.checked = systemConfig.enable_search_grounding !== false;
       }
+      if (cfgEurRate && systemConfig.eur_to_chf_rate !== undefined) {
+        cfgEurRate.value = systemConfig.eur_to_chf_rate;
+      }
       updateKeyStatusUI();
     }
   } catch (err) {
@@ -284,6 +288,12 @@ async function saveSystemConfig() {
     gemini_model: newModel,
     enable_search_grounding: cfgSearchGrounding ? cfgSearchGrounding.checked : true,
   };
+  if (cfgEurRate) {
+    const rateVal = parseFloat(cfgEurRate.value);
+    if (!isNaN(rateVal) && rateVal > 0) {
+      payload.eur_to_chf_rate = rateVal;
+    }
+  }
   if (newKey) {
     payload.gemini_api_key = newKey;
   }
