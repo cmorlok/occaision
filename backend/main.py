@@ -59,6 +59,33 @@ def configure_logging(level_name: Optional[str] = None):
         logger.info("[Logging] Debug-Logging ist AKTIV (vollständige Prompts und Antworten werden ausgegeben).")
 
 
+def _save_to_env(updates: dict) -> None:
+    env_path = Path(".env")
+    if not env_path.exists() or "pytest" in sys.modules:
+        return
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        keys_found = set()
+        new_lines = []
+        for line in lines:
+            matched = False
+            for k, v in updates.items():
+                if line.startswith(f"{k}="):
+                    new_lines.append(f"{k}={v}")
+                    keys_found.add(k)
+                    matched = True
+                    break
+            if not matched:
+                new_lines.append(line)
+        for k, v in updates.items():
+            if k not in keys_found:
+                new_lines.append(f"{k}={v}")
+        env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+        logger.info(f"[Config] {', '.join(updates.keys())} in .env gespeichert.")
+    except Exception as e:
+        logger.warning(f"Fehler beim Speichern in .env: {e}")
+
+
 class CreateDraftRequest(BaseModel):
     user_notes: str = ""
     identified_product: str = ""
@@ -180,76 +207,29 @@ def create_app(
 
     @app.post("/api/config")
     def update_system_config(body: UpdateSystemConfigRequest):
+        env_updates = {}
         if body.gemini_model:
             cfg.gemini_model = body.gemini_model
             ai_svc.model_name = body.gemini_model
+            env_updates["GEMINI_MODEL"] = cfg.gemini_model
 
         if body.enable_search_grounding is not None:
             cfg.enable_search_grounding = body.enable_search_grounding
             ai_svc.enable_search_grounding = body.enable_search_grounding
+            env_updates["ENABLE_SEARCH_GROUNDING"] = "true" if cfg.enable_search_grounding else "false"
 
         if body.gemini_api_key is not None and body.gemini_api_key.strip():
             new_key = body.gemini_api_key.strip()
             cfg.gemini_api_key = new_key
             ai_svc.set_api_key(new_key, model_name=cfg.gemini_model)
-            # Update .env (do not overwrite during test runs)
-            env_path = Path(".env")
-            if env_path.exists() and "pytest" not in sys.modules:
-                try:
-                    lines = env_path.read_text(encoding="utf-8").splitlines()
-                    updated = []
-                    found_key = False
-                    found_model = False
-                    found_grounding = False
-                    grounding_val = "true" if cfg.enable_search_grounding else "false"
-                    for l in lines:
-                        if l.startswith("GEMINI_API_KEY="):
-                            updated.append(f"GEMINI_API_KEY={new_key}")
-                            found_key = True
-                        elif l.startswith("GEMINI_MODEL="):
-                            updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
-                            found_model = True
-                        elif l.startswith("ENABLE_SEARCH_GROUNDING="):
-                            updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
-                            found_grounding = True
-                        else:
-                            updated.append(l)
-                    if not found_key:
-                        updated.append(f"GEMINI_API_KEY={new_key}")
-                    if not found_model:
-                        updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
-                    if not found_grounding:
-                        updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
-                    env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
-                    logger.info("[Config] GEMINI_API_KEY, GEMINI_MODEL und ENABLE_SEARCH_GROUNDING in .env gespeichert.")
-                except Exception as e:
-                    logger.warning(f"Fehler beim Speichern in .env: {e}")
-        elif body.gemini_model or body.enable_search_grounding is not None:
-            # Model or grounding update in .env (do not overwrite during test runs)
-            env_path = Path(".env")
-            if env_path.exists() and "pytest" not in sys.modules:
-                try:
-                    lines = env_path.read_text(encoding="utf-8").splitlines()
-                    updated = []
-                    found_model = False
-                    found_grounding = False
-                    grounding_val = "true" if cfg.enable_search_grounding else "false"
-                    for l in lines:
-                        if l.startswith("GEMINI_MODEL="):
-                            updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
-                            found_model = True
-                        elif l.startswith("ENABLE_SEARCH_GROUNDING="):
-                            updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
-                            found_grounding = True
-                        else:
-                            updated.append(l)
-                    if not found_model:
-                        updated.append(f"GEMINI_MODEL={cfg.gemini_model}")
-                    if not found_grounding:
-                        updated.append(f"ENABLE_SEARCH_GROUNDING={grounding_val}")
-                    env_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
-                except Exception as e:
-                    logger.warning(f"Fehler beim Speichern in .env: {e}")
+            env_updates["GEMINI_API_KEY"] = new_key
+            if "GEMINI_MODEL" not in env_updates:
+                env_updates["GEMINI_MODEL"] = cfg.gemini_model
+            if "ENABLE_SEARCH_GROUNDING" not in env_updates:
+                env_updates["ENABLE_SEARCH_GROUNDING"] = "true" if cfg.enable_search_grounding else "false"
+
+        if env_updates:
+            _save_to_env(env_updates)
 
         return get_system_config()
 
@@ -442,8 +422,6 @@ def create_app(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Fehler bei der KI-Analyse: {err_str}",
             )
-
-        return storage.update_draft(analyzed_draft)
 
         return storage.update_draft(analyzed_draft)
 
