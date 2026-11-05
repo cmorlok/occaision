@@ -122,11 +122,11 @@ def test_extension_price_parser_and_stats_via_node():
     const bg = require('./extension/background.js');
 
     // Test Kleinanzeigen verification URL structure
-    const links = bg.buildVerificationLinks('HP Color LaserJet');
+    const links = bg.buildVerificationLinks('RetroWidget Hyper Pro');
     if (!links.kleinanzeigen_search_url.includes('anbieter:privat') || !links.kleinanzeigen_search_url.includes('global.zustand:alright%2Clike_new%2Cok')) {
       throw new Error('Kleinanzeigen search url missing condition or private filter: ' + links.kleinanzeigen_search_url);
     }
-    if (!links.ricardo_search_url.includes('item_condition=used') || !links.ricardo_search_url.includes('seller_type=individual') || !links.ricardo_search_url.includes('HP%20Color%20LaserJet')) {
+    if (!links.ricardo_search_url.includes('item_condition=used') || !links.ricardo_search_url.includes('seller_type=individual') || !links.ricardo_search_url.includes('RetroWidget%20Hyper%20Pro')) {
       throw new Error('Ricardo search url invalid: ' + links.ricardo_search_url);
     }
     if (!links.tutti_search_url.includes('tutti.ch')) {
@@ -134,10 +134,23 @@ def test_extension_price_parser_and_stats_via_node():
     }
 
     // Test Kleinanzeigen JSON parsing
-    const kaJsonContent = fs.readFileSync('temp/kleinanzeigen.json', 'utf8');
+    const kaJsonObj = {
+      result: {
+        resultList: Array.from({ length: 25 }, (_, i) => ({
+          organicAdPreview: {
+            id: 'ka-' + i,
+            title: 'RetroWidget Hyper Pro Angebot ' + i,
+            price: i === 0 ? '50 €' : (50 + i) + ' €',
+            posterType: 'PRIVATE',
+            condition: 'Gebraucht'
+          }
+        }))
+      }
+    };
+    const kaJsonContent = JSON.stringify(kaJsonObj);
     const kaItems = bg.extractKleinanzeigenItems(kaJsonContent);
     if (!Array.isArray(kaItems) || kaItems.length !== 25) {
-      throw new Error('Expected 25 kleinanzeigen items from temp/kleinanzeigen.json, got: ' + (kaItems ? kaItems.length : 0));
+      throw new Error('Expected 25 kleinanzeigen items, got: ' + (kaItems ? kaItems.length : 0));
     }
     for (const item of kaItems) {
       if (!item.title || typeof item.price !== 'number' || item.posterType !== 'PRIVATE') {
@@ -153,11 +166,11 @@ def test_extension_price_parser_and_stats_via_node():
     const idealoHtml = `
       <div class="sr-resultList_NAJkZ">
         <div class="sr-resultList__item">
-          <div class="sr-productSummary__title_f5flP productSummary__title--GRID">HP Color LaserJet Pro MFP 4302dw (4RA83F)</div>
+          <div class="sr-productSummary__title_f5flP productSummary__title--GRID">Acme Gizmo Pro 500 (AG-500)</div>
           <span class="sr-detailedPriceInfo__price_sYVmx">499,00 €</span>
         </div>
         <div class="sr-resultList__item">
-          <div class="sr-productSummary__title_f5flP">HP Toner Schwarz</div>
+          <div class="sr-productSummary__title_f5flP">Acme Gizmo Zubehör</div>
           <span class="sr-detailedPriceInfo__price_sYVmx">65,00 €</span>
         </div>
       </div>
@@ -166,7 +179,7 @@ def test_extension_price_parser_and_stats_via_node():
     if (!idealoItems || idealoItems.length !== 1) {
       throw new Error('Expected exactly 1 idealo item (top product), got: ' + JSON.stringify(idealoItems));
     }
-    if (idealoItems[0].price !== 499 || idealoItems[0].title !== 'HP Color LaserJet Pro MFP 4302dw (4RA83F)') {
+    if (idealoItems[0].price !== 499 || idealoItems[0].title !== 'Acme Gizmo Pro 500 (AG-500)') {
       throw new Error('Unexpected idealo item 0: ' + JSON.stringify(idealoItems[0]));
     }
     const idealoPrices = bg.extractPricesFromHtml('idealo', idealoHtml);
@@ -175,12 +188,21 @@ def test_extension_price_parser_and_stats_via_node():
     }
 
     // Test real Idealo HTML with window.csr.initialData (no background tab DOM rendering required)
-    const realIdealoHtml = fs.readFileSync('temp/idealo.html', 'utf8');
+    const csrPayload = Buffer.from(JSON.stringify({
+      items: [
+        {
+          title: 'RetroWidget Hyper Pro',
+          rawPrice: 499,
+          offerInfo: { formattedPrice: '499,00 €' }
+        }
+      ]
+    })).toString('base64');
+    const realIdealoHtml = `<script>window.csr.initialData['searchResult'] = '${csrPayload}';</script>`;
     const realIdealoItems = bg.extractIdealoItems(realIdealoHtml);
     if (!realIdealoItems || realIdealoItems.length !== 1) {
-      throw new Error('Expected 1 idealo item from temp/idealo.html via window.csr, got: ' + JSON.stringify(realIdealoItems));
+      throw new Error('Expected 1 idealo item via window.csr, got: ' + JSON.stringify(realIdealoItems));
     }
-    if (realIdealoItems[0].price !== 499 || !realIdealoItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+    if (realIdealoItems[0].price !== 499 || !realIdealoItems[0].title.includes('RetroWidget Hyper Pro')) {
       throw new Error('Unexpected real idealo item: ' + JSON.stringify(realIdealoItems[0]));
     }
     const realIdealoPrices = bg.extractPricesFromHtml('idealo', realIdealoHtml);
@@ -189,30 +211,57 @@ def test_extension_price_parser_and_stats_via_node():
     }
 
     // Test Toppreise extraction for single product page and search result list (first entry only)
-    const tpSingleHtml = fs.readFileSync('temp/toppreise-SONY Alpha 7 V Body (ILCE7M5B) ab CHF 2\\'173.45 bei Toppreise.ch.html', 'utf8');
+    const tpSingleHtml = `
+      <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "XenoPix Alpha 99 Body (XP99B)",
+        "offers": {
+          "@type": "AggregateOffer",
+          "lowPrice": "2'173.45",
+          "priceCurrency": "CHF"
+        }
+      }
+      </script>
+    `;
     const tpSingleItems = bg.extractToppreiseItems(tpSingleHtml);
     if (!tpSingleItems || tpSingleItems.length !== 1) {
       throw new Error('Expected exactly 1 toppreise item from single product page, got: ' + JSON.stringify(tpSingleItems));
     }
-    if (tpSingleItems[0].price !== 2173.45 || !tpSingleItems[0].title.includes('SONY Alpha 7 V')) {
+    if (tpSingleItems[0].price !== 2173.45 || !tpSingleItems[0].title.includes('XenoPix Alpha 99')) {
       throw new Error('Unexpected toppreise single item: ' + JSON.stringify(tpSingleItems[0]));
     }
 
-    const tpListHtml = fs.readFileSync('temp/toppreise-Alpha 7 V - Preisvergleich und Bewertungen bei Toppreise.ch.html', 'utf8');
+    const tpListHtml = `
+      <main>
+        <div class="Plugin_Product">
+          <a class="bold" href="/preisvergleich/xenopix-alpha-99">XenoPix Alpha 99 Body</a>
+          <div class="Plugin_Price">2'173.45</div>
+        </div>
+      </main>
+    `;
     const tpListItems = bg.extractToppreiseItems(tpListHtml);
     if (!tpListItems || tpListItems.length !== 1) {
       throw new Error('Expected exactly 1 toppreise item from search list, got: ' + JSON.stringify(tpListItems));
     }
-    if (tpListItems[0].price !== 2173.45 || !tpListItems[0].title.includes('SONY Alpha 7 V')) {
+    if (tpListItems[0].price !== 2173.45 || !tpListItems[0].title.includes('XenoPix Alpha 99')) {
       throw new Error('Unexpected toppreise list item: ' + JSON.stringify(tpListItems[0]));
     }
 
-    const tpHpHtml = fs.readFileSync('temp/toppreise-HP Color LaserJet Pro MFP 4302fdw - Preisvergleich und Bewertungen bei Toppreise.ch.htm', 'utf8');
+    const tpHpHtml = `
+      <main>
+        <div class="Plugin_Product">
+          <a class="bold" href="/preisvergleich/retrowidget-hyper-pro">RetroWidget Hyper Pro</a>
+          <div class="Plugin_Price">387.00</div>
+        </div>
+      </main>
+    `;
     const tpHpItems = bg.extractToppreiseItems(tpHpHtml);
     if (!tpHpItems || tpHpItems.length !== 1) {
       throw new Error('Expected exactly 1 toppreise item from HP list, got: ' + JSON.stringify(tpHpItems));
     }
-    if (tpHpItems[0].price !== 387 || !tpHpItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+    if (tpHpItems[0].price !== 387 || !tpHpItems[0].title.includes('RetroWidget Hyper Pro')) {
       throw new Error('Unexpected toppreise HP item: ' + JSON.stringify(tpHpItems[0]));
     }
     const tpPrices = bg.extractPricesFromHtml('toppreise', tpHpHtml);
@@ -241,12 +290,17 @@ def test_extension_price_parser_and_stats_via_node():
     }
 
     // Test Galaxus / Digitec extraction for first product
-    const galaxusHtml = fs.readFileSync('temp/galaxus-HP Color LaserJet Pro MFP 4302fdw_ Suche - Galaxus.html', 'utf8');
+    const galaxusHtml = `
+      <article>
+        <a href="/product/123" aria-label="RetroWidget Hyper Pro">RetroWidget Hyper Pro</a>
+        <div>CHF 428.–</div>
+      </article>
+    `;
     const galaxusItems = bg.extractDigitecItems(galaxusHtml);
     if (!galaxusItems || galaxusItems.length !== 1) {
       throw new Error('Expected exactly 1 galaxus item, got: ' + JSON.stringify(galaxusItems));
     }
-    if (galaxusItems[0].price !== 428 || !galaxusItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+    if (galaxusItems[0].price !== 428 || !galaxusItems[0].title.includes('RetroWidget Hyper Pro')) {
       throw new Error('Unexpected galaxus item 0: ' + JSON.stringify(galaxusItems[0]));
     }
     const galaxusPrices = bg.extractPricesFromHtml('digitec', galaxusHtml);
@@ -254,21 +308,38 @@ def test_extension_price_parser_and_stats_via_node():
       throw new Error('Expected [428] from extractPricesFromHtml for digitec/galaxus: ' + JSON.stringify(galaxusPrices));
     }
 
-    const digitecHtml = fs.readFileSync('temp/digitec-HP Color LaserJet Pro MFP 4302fdw_ Suche - Digitec.html', 'utf8');
+    const digitecHtml = `
+      <article>
+        <a href="/product/456" aria-label="RetroWidget Hyper Pro">RetroWidget Hyper Pro</a>
+        <div>CHF 428.–</div>
+      </article>
+    `;
     const digitecItems = bg.extractDigitecItems(digitecHtml);
     if (!digitecItems || digitecItems.length !== 1) {
       throw new Error('Expected exactly 1 digitec item, got: ' + JSON.stringify(digitecItems));
     }
-    if (digitecItems[0].price !== 428 || !digitecItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+    if (digitecItems[0].price !== 428 || !digitecItems[0].title.includes('RetroWidget Hyper Pro')) {
       throw new Error('Unexpected digitec item 0: ' + JSON.stringify(digitecItems[0]));
     }
 
-    const ricardoHtml = fs.readFileSync('temp/ricardo-Hp Color Laserjet Pro Mfp 4302fdw kaufen _ Günstig auf Ricardo.ch finden.html', 'utf8');
+    const ricardoHtml = `
+      <div data-testid="regular-results">
+        <a href="/de/a/retrowidget-123">
+          <span class="MuiTypography-body1">RetroWidget Hyper Pro</span>
+          <span>300.00 Sofort kaufen</span>
+        </a>
+        <h2>Ergebnisse für ähnliche Suchbegriffe</h2>
+        <a href="/de/a/retrowidget-relaxed-456">
+          <span class="MuiTypography-body1">RetroWidget Relaxed</span>
+          <span>150.00 Sofort kaufen</span>
+        </a>
+      </div>
+    `;
     const ricardoItems = bg.extractRicardoItems(ricardoHtml);
     if (!Array.isArray(ricardoItems) || ricardoItems.length !== 1) {
       throw new Error('Expected exactly 1 regular ricardo item (excluding relaxed search keywords), got: ' + (ricardoItems ? ricardoItems.length : 0));
     }
-    if (ricardoItems[0].price !== 300 || !ricardoItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+    if (ricardoItems[0].price !== 300 || !ricardoItems[0].title.includes('RetroWidget Hyper Pro')) {
       throw new Error('Unexpected ricardo item 0: ' + JSON.stringify(ricardoItems[0]));
     }
     const ricardoPrices = bg.extractPricesFromHtml('ricardo', ricardoHtml);
@@ -276,28 +347,54 @@ def test_extension_price_parser_and_stats_via_node():
       throw new Error('Expected [300] from extractPricesFromHtml for regular ricardo results, got: ' + JSON.stringify(ricardoPrices));
     }
 
-    const tuttiHtml = fs.readFileSync('temp/tutti-13 Inserate für _HP Color LaserJet Pro MFP 4302fdw_ in Alle Kategorien - tutti.html', 'utf8');
+    let tuttiHtml = `
+      <div data-private-srp-listing-item-id="ricardo-ad">
+        <a href="https://www.ricardo.ch/de/a/ad-1">Sponsored Ricardo</a>
+        <h2>Gesponserte Ricardo Anzeige</h2>
+        <span>99.–</span>
+      </div>
+      <div data-private-srp-listing-item-id="item-0">
+        <a href="/vi/item-0">Link 0</a>
+        <h2>RetroWidget Hyper Pro</h2>
+        <span>250.–</span>
+      </div>
+      <div data-private-srp-listing-item-id="item-1">
+        <a href="/vi/item-1">Link 1</a>
+        <span class="badge">Logo MegaVendor 8152 Glattbrugg</span>
+        <h2>ChromaModule Cyan 99X</h2>
+        <span>178.–</span>
+      </div>
+    `;
+    for (let i = 2; i < 13; i++) {
+      tuttiHtml += `
+        <div data-private-srp-listing-item-id="item-` + i + `">
+          <a href="/vi/item-` + i + `">Link ` + i + `</a>
+          <h2>RetroWidget Accessoire ` + i + `</h2>
+          <span>` + (50 + i * 10) + `.–</span>
+        </div>
+      `;
+    }
     const tuttiItems = bg.extractTuttiItems(tuttiHtml);
     if (!Array.isArray(tuttiItems) || tuttiItems.length !== 13) {
       throw new Error('Expected exactly 13 tutti items (excluding Ricardo ads), got: ' + (tuttiItems ? tuttiItems.length : 0));
     }
-    if (tuttiItems[0].price !== 250 || !tuttiItems[0].title.includes('HP Color LaserJet Pro MFP 4302fdw')) {
+    if (tuttiItems[0].price !== 250 || !tuttiItems[0].title.includes('RetroWidget Hyper Pro')) {
       throw new Error('Unexpected tutti item 0: ' + JSON.stringify(tuttiItems[0]));
     }
     const tuttiPrices = bg.extractPricesFromHtml('tutti', tuttiHtml);
     if (!tuttiPrices || tuttiPrices.length !== 13 || tuttiPrices[0] !== 250) {
       throw new Error('Expected 13 prices starting with 250 from extractPricesFromHtml for tutti, got: ' + JSON.stringify(tuttiPrices));
     }
-    const copytronItem = tuttiItems.find(it => it.title.includes('cyan Toner, 220X, W2201X'));
-    if (!copytronItem || copytronItem.price !== 178) {
-      throw new Error('Expected price 178 for Copytron cyan toner with logo (not postal code 8152), got: ' + JSON.stringify(copytronItem));
+    const vendorItem = tuttiItems.find(it => it.title.includes('ChromaModule Cyan 99X'));
+    if (!vendorItem || vendorItem.price !== 178) {
+      throw new Error('Expected price 178 for vendor cyan module with logo (not postal code 8152), got: ' + JSON.stringify(vendorItem));
     }
 
     const ebayHtml = `
       <div class="s-item"><div class="s-item__title">Shop on eBay</div><span class="s-item__price">EUR 19,99</span></div>
-      <div class="s-item"><div class="s-item__title">HP 4302fdw</div><span class="s-item__price">EUR 250,00</span></div>
-      <div class="s-item"><div class="s-item__title">HP 4302fdw Drucker</div><span class="s-item__price">290,00 €</span></div>
-      <div class="s-item"><div class="s-item__title">HP 4302fdw Spanne</div><span class="s-item__price">EUR 100,00 bis EUR 400,00</span></div>
+      <div class="s-item"><div class="s-item__title">RetroWidget Pro</div><span class="s-item__price">EUR 250,00</span></div>
+      <div class="s-item"><div class="s-item__title">RetroWidget Pro Gerät</div><span class="s-item__price">290,00 €</span></div>
+      <div class="s-item"><div class="s-item__title">RetroWidget Pro Spanne</div><span class="s-item__price">EUR 100,00 bis EUR 400,00</span></div>
     `;
     const ebayPrices = bg.extractPricesFromHtml('ebay_de_sold', ebayHtml);
     if (ebayPrices.length !== 2 || ebayPrices[0] !== 250 || ebayPrices[1] !== 290) {
@@ -307,15 +404,15 @@ def test_extension_price_parser_and_stats_via_node():
     if (ebayItems.length !== 2) {
       throw new Error('Expected 2 ebay items, got ' + ebayItems.length);
     }
-    if (ebayItems[0].title !== 'HP 4302fdw' || ebayItems[0].price !== 250) {
+    if (ebayItems[0].title !== 'RetroWidget Pro' || ebayItems[0].price !== 250) {
       throw new Error('Unexpected ebay item[0]: ' + JSON.stringify(ebayItems[0]));
     }
 
     const ebayFewerKeywordsHtml = `
-      <div class="s-item"><div class="s-item__title">HP 4302fdw</div><span class="s-item__price">EUR 250,00</span></div>
-      <div class="s-item"><div class="s-item__title">HP 4302fdw Drucker</div><span class="s-item__price">290,00 €</span></div>
+      <div class="s-item"><div class="s-item__title">RetroWidget Pro</div><span class="s-item__price">EUR 250,00</span></div>
+      <div class="s-item"><div class="s-item__title">RetroWidget Pro Gerät</div><span class="s-item__price">290,00 €</span></div>
       <div class="srp-river-answer"><h3>Ergebnisse für weniger Suchbegriffe</h3></div>
-      <div class="s-item"><div class="s-item__title">HP Toner Schwarz</div><span class="s-item__price">50,00 €</span></div>
+      <div class="s-item"><div class="s-item__title">RetroWidget Zubehör</div><span class="s-item__price">50,00 €</span></div>
       <div class="s-item"><div class="s-item__title">Anderes Modell</div><span class="s-item__price">465,82 €</span></div>
     `;
     const filteredItems = bg.extractEbayItemsFromHtml(ebayFewerKeywordsHtml);
@@ -347,7 +444,7 @@ def test_extension_price_parser_and_stats_via_node():
     if (!bg.isEbayLoginRequired('<html><head><title>Bitte einloggen | eBay</title></head><body><form id="signin-form"></form></body></html>', 'https://signin.ebay.de/ws/eBayISAPI.dll?SignIn')) {
       throw new Error('Expected isEbayLoginRequired to detect signin page');
     }
-    if (bg.isEbayLoginRequired(ebayHtml, 'https://www.ebay.de/sch/i.html?_nkw=HP')) {
+    if (bg.isEbayLoginRequired(ebayHtml, 'https://www.ebay.de/sch/i.html?_nkw=RetroWidget')) {
       throw new Error('Expected isEbayLoginRequired to be false on valid search results');
     }
     const loginStats = bg.computeSourceStats(
