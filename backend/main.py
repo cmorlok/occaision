@@ -212,11 +212,12 @@ def create_app(
         # Public paths
         if (
             path == "/api/health"
+            or path == "/health"
             or path == "/api/auth/pair"
             or not path.startswith("/api/")
         ):
             response = await call_next(request)
-            if path == "/" or path == "/api/health":
+            if path in ("/", "/api/health", "/health"):
                 response.set_cookie(
                     key="occaision_token",
                     value=auth_token,
@@ -283,8 +284,15 @@ def create_app(
 
     # 1. Health
     @app.get("/api/health")
+    @app.get("/health")
     def health():
-        return {"status": "ok", "model": cfg.gemini_model}
+        return {
+            "status": "ok",
+            "model": cfg.gemini_model,
+            "api_key_configured": bool(cfg.gemini_api_key and cfg.gemini_api_key.strip()),
+            "data_dir_writable": os.access(cfg.data_dir, os.W_OK),
+            "version": "1.1.0",
+        }
 
     # 2. Settings
     @app.get("/api/settings", response_model=PresetSettings)

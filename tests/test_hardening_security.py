@@ -50,6 +50,16 @@ def test_api_auth_rejection_and_token_acceptance(temp_data_dir: Path):
     # 2. Public health endpoint remains accessible without auth
     res_health = client.get("/api/health")
     assert res_health.status_code == 200
+    health_data = res_health.json()
+    assert health_data["status"] == "ok"
+    assert "data_dir_writable" in health_data
+    assert "api_key_configured" in health_data
+    assert health_data["version"] == "1.1.0"
+
+    # Root /health alias also accessible without auth
+    res_root_health = client.get("/health")
+    assert res_root_health.status_code == 200
+    assert res_root_health.json()["status"] == "ok"
 
     # Read generated token from data_dir
     token_file = temp_data_dir / "auth_token.txt"
