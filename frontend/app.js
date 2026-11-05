@@ -1,3 +1,12 @@
+if (typeof document === "undefined") {
+  // Support headless Node.js environments / automated tests
+  global.document = {
+    getElementById: () => null,
+    createElement: () => ({ setAttribute: () => {}, appendChild: () => {}, style: {}, classList: { add: () => {}, remove: () => {} } }),
+    addEventListener: () => {},
+  };
+}
+
 let currentDraft = null;
 let drafts = [];
 let settings = null;
@@ -761,8 +770,49 @@ function updateCharCounter(inputEl, counterEl, max) {
   }
 }
 
+const MAX_UPLOAD_FILES = 15;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const ALLOWED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+
+function validateUploadFiles(files) {
+  if (!files || !files.length) {
+    return { valid: false, error: "Keine Dateien ausgewählt." };
+  }
+  if (files.length > MAX_UPLOAD_FILES) {
+    return {
+      valid: false,
+      error: `Maximal ${MAX_UPLOAD_FILES} Bilder pro Upload erlaubt (ausgewählt: ${files.length}).`,
+    };
+  }
+  for (const f of files) {
+    const name = f.name || "";
+    const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")).toLowerCase() : "";
+    const isAllowedExt = ALLOWED_IMAGE_EXTENSIONS.includes(ext);
+    const isImageMime = f.type && (f.type.startsWith("image/") || f.type === "image/heic" || f.type === "image/heif");
+    if (!isAllowedExt && !isImageMime) {
+      return {
+        valid: false,
+        error: `Ungültiges Dateiformat für '${name || "Datei"}'. Erlaubt sind JPG, PNG, WEBP und HEIC/HEIF.`,
+      };
+    }
+    if (f.size && f.size > MAX_FILE_BYTES) {
+      return {
+        valid: false,
+        error: `Datei '${name || "Datei"}' überschreitet das Limit von 25 MB.`,
+      };
+    }
+  }
+  return { valid: true };
+}
+
 async function uploadFiles(files) {
   if (!files || !files.length) return;
+
+  const validation = validateUploadFiles(files);
+  if (!validation.valid) {
+    showToast(validation.error, "warning");
+    return;
+  }
 
   if (!currentDraft) {
     await ensureDraft();
@@ -1358,4 +1408,14 @@ async function deleteDraft(draftId) {
   }
 }
 
-window.addEventListener("DOMContentLoaded", init);
+if (typeof window !== "undefined") {
+  window.addEventListener("DOMContentLoaded", init);
+}
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    validateUploadFiles,
+    MAX_UPLOAD_FILES,
+    MAX_FILE_BYTES,
+    ALLOWED_IMAGE_EXTENSIONS,
+  };
+}

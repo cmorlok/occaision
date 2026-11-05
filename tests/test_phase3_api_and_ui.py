@@ -610,6 +610,53 @@ def test_analyze_draft_concurrency_guard(test_app):
         assert res3.status_code == 200
 
 
+def test_frontend_upload_validation():
+    node_script = """
+    const { validateUploadFiles, MAX_UPLOAD_FILES, MAX_FILE_BYTES } = require('./frontend/app.js');
+
+    // 1. Empty files
+    const resEmpty = validateUploadFiles([]);
+    if (resEmpty.valid !== false || !resEmpty.error.includes('Keine Dateien')) {
+      throw new Error('Empty files validation failed: ' + JSON.stringify(resEmpty));
+    }
+
+    // 2. Excess files (>15)
+    const excessFiles = Array(16).fill({ name: 'photo.jpg', size: 1000, type: 'image/jpeg' });
+    const resExcess = validateUploadFiles(excessFiles);
+    if (resExcess.valid !== false || !resExcess.error.includes('Maximal 15 Bilder')) {
+      throw new Error('Excess files validation failed: ' + JSON.stringify(resExcess));
+    }
+
+    // 3. Unsupported extension
+    const invalidExtFiles = [{ name: 'payload.exe', size: 1000, type: 'application/octet-stream' }];
+    const resInvalidExt = validateUploadFiles(invalidExtFiles);
+    if (resInvalidExt.valid !== false || !resInvalidExt.error.includes('Ungültiges Dateiformat')) {
+      throw new Error('Invalid extension validation failed: ' + JSON.stringify(resInvalidExt));
+    }
+
+    // 4. File exceeding 25MB
+    const oversizedFiles = [{ name: 'giant.png', size: 26 * 1024 * 1024, type: 'image/png' }];
+    const resOversized = validateUploadFiles(oversizedFiles);
+    if (resOversized.valid !== false || !resOversized.error.includes('25 MB')) {
+      throw new Error('Oversized validation failed: ' + JSON.stringify(resOversized));
+    }
+
+    // 5. Valid files batch
+    const validBatch = [
+      { name: 'photo1.JPG', size: 2 * 1024 * 1024, type: 'image/jpeg' },
+      { name: 'photo2.webp', size: 500 * 1024, type: 'image/webp' },
+      { name: 'photo3.heic', size: 10 * 1024 * 1024, type: 'image/heic' }
+    ];
+    const resValid = validateUploadFiles(validBatch);
+    if (resValid.valid !== true) {
+      throw new Error('Valid batch unexpectedly failed: ' + JSON.stringify(resValid));
+    }
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Frontend upload validation failed: {res.stderr}"
+
+
+
 
 
 
