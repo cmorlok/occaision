@@ -238,31 +238,49 @@ function extractEbayItemsFromHtml(html) {
   return items.slice(0, 30);
 }
 
-function logEbayExtractedItems(items) {
+function logExtractedItems(sourceKey, label, items, currency = "EUR", isSingleTop = false) {
   if (!items || items.length === 0) {
-    console.log("[OccAIsion] [ebay_de_sold] Keine verkauften Artikel extrahiert (0 Treffer).");
+    console.log(`[OccAIsion] [${sourceKey}] Keine ${label} extrahiert (0 Treffer).`);
     return;
   }
-  console.group(`[OccAIsion] [ebay_de_sold] Extrahierte verkaufte Artikel (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition}] | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (€)": it.price,
-          "Zustand": it.condition,
-          "Titel": it.title,
-        }))
-      );
-    } catch (_) {}
+  if (isSingleTop) {
+    const top = items[0];
+    console.group(`[OccAIsion] [${sourceKey}] ${label} (Bestpreis des ersten Produkts):`);
+    console.log(`  Top-Treffer: ${top.price} ${currency} | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
+    console.groupEnd();
+    if (typeof console.table === "function") {
+      try {
+        console.table([{
+          [`Preis (${currency})`]: top.price,
+          "Zustand": top.condition || "Neu",
+          "Produktname": top.title,
+        }]);
+      } catch (_) {}
+    }
+  } else {
+    console.group(`[OccAIsion] [${sourceKey}] ${label} (${items.length} Treffer):`);
+    items.forEach((it, idx) => {
+      const extra = it.bidType ? ` | [${it.bidType}]` : (it.condition ? ` | Zustand: [${it.condition}]` : "");
+      console.log(`  #${idx + 1}: ${it.price} ${currency}${extra} | Titel: "${it.title}"`);
+    });
+    console.groupEnd();
+    if (typeof console.table === "function") {
+      try {
+        console.table(
+          items.map((it, idx) => ({
+            "#": idx + 1,
+            [`Preis (${currency})`]: it.price,
+            "Zustand": it.condition || it.bidType || "-",
+            "Titel": it.title,
+          }))
+        );
+      } catch (_) {}
+    }
   }
+}
+
+function logEbayExtractedItems(items) {
+  logExtractedItems("ebay_de_sold", "verkaufte Artikel", items, "€");
 }
 
 function extractKleinanzeigenItems(content) {
@@ -398,30 +416,7 @@ function extractKleinanzeigenItems(content) {
 }
 
 function logKleinanzeigenExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [kleinanzeigen] Keine Kleinanzeigen-Artikel extrahiert (0 Treffer).");
-    return;
-  }
-  console.group(`[OccAIsion] [kleinanzeigen] Extrahierte Kleinanzeigen-Artikel (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Gebraucht"}] | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (€)": it.price,
-          "Zustand": it.condition || "Gebraucht",
-          "Titel": it.title,
-        }))
-      );
-    } catch (_) {}
-  }
+  logExtractedItems("kleinanzeigen", "Kleinanzeigen-Artikel", items, "€");
 }
 
 function extractRicardoItems(html, priceNodes = [], ricardoCards = []) {
@@ -525,30 +520,7 @@ function extractRicardoItems(html, priceNodes = [], ricardoCards = []) {
 }
 
 function logRicardoExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [ricardo] Keine Ricardo-Angebote extrahiert (0 Treffer).");
-    return;
-  }
-  console.group(`[OccAIsion] [ricardo] Extrahierte Ricardo-Angebote (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} CHF | [${it.bidType || "Angebot"}] | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (CHF)": it.price,
-          "Art": it.bidType || "Angebot",
-          "Titel": it.title,
-        }))
-      );
-    } catch (_) {}
-  }
+  logExtractedItems("ricardo", "Ricardo-Angebote", items, "CHF");
 }
 
 function extractTuttiItems(html, priceNodes = [], tuttiCards = []) {
@@ -628,30 +600,7 @@ function extractTuttiItems(html, priceNodes = [], tuttiCards = []) {
 }
 
 function logTuttiExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [tutti] Keine Tutti-Preise extrahiert (0 Treffer).");
-    return;
-  }
-  console.group(`[OccAIsion] [tutti] Extrahierte Tutti.ch Inserate (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} CHF | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (CHF)": it.price,
-          "Titel": it.title,
-          "URL": it.url,
-        }))
-      );
-    } catch (_) {}
-  }
+  logExtractedItems("tutti", "Tutti.ch Inserate", items, "CHF");
 }
 
 function findIdealoProductsInNextData(obj) {
@@ -795,26 +744,7 @@ function extractIdealoItems(html, priceNodes = [], idealoCards = []) {
 }
 
 function logIdealoExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [idealo] Kein Idealo-Neupreis extrahiert (0 Treffer).");
-    return;
-  }
-  const top = items[0];
-  console.group(`[OccAIsion] [idealo] Idealo Neupreis (Bestpreis des ersten Produkts):`);
-  console.log(`  Top-Treffer: ${top.price} € | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table([
-        {
-          "Preis (€)": top.price,
-          "Zustand": top.condition || "Neu",
-          "Produktname": top.title,
-        }
-      ]);
-    } catch (_) {}
-  }
+  logExtractedItems("idealo", "Idealo Neupreis", items, "€", true);
 }
 
 function extractToppreiseItems(html, priceNodes = [], toppreiseCards = []) {
@@ -916,26 +846,7 @@ function extractToppreiseItems(html, priceNodes = [], toppreiseCards = []) {
 }
 
 function logToppreiseExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [toppreise] Kein Toppreise-Neupreis extrahiert (0 Treffer).");
-    return;
-  }
-  const top = items[0];
-  console.group(`[OccAIsion] [toppreise] Toppreise Neupreis (Bestpreis des ersten Produkts):`);
-  console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table([
-        {
-          "Preis (CHF)": top.price,
-          "Zustand": top.condition || "Neu",
-          "Produktname": top.title,
-        }
-      ]);
-    } catch (_) {}
-  }
+  logExtractedItems("toppreise", "Toppreise Neupreis", items, "CHF", true);
 }
 
 function extractDigitecItems(html, priceNodes = [], digitecCards = []) {
@@ -1039,26 +950,7 @@ function extractDigitecItems(html, priceNodes = [], digitecCards = []) {
 }
 
 function logDigitecExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [digitec] Kein Galaxus/Digitec-Neupreis extrahiert (0 Treffer).");
-    return;
-  }
-  const top = items[0];
-  console.group(`[OccAIsion] [digitec] Galaxus/Digitec Neupreis (Bestpreis des ersten Produkts):`);
-  console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table([
-        {
-          "Preis (CHF)": top.price,
-          "Zustand": top.condition || "Neu",
-          "Produktname": top.title,
-        }
-      ]);
-    } catch (_) {}
-  }
+  logExtractedItems("digitec", "Galaxus/Digitec Neupreis", items, "CHF", true);
 }
 
 function extractPricesFromHtml(sourceId, html) {
