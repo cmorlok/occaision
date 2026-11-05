@@ -26,7 +26,10 @@ from backend.models import (
 from backend.services.ai_service import AIService
 from backend.services.image_service import ImageService
 from backend.storage import (
+    BatchLimitExceededError,
     DraftNotFoundError,
+    DraftStore,
+    FileTooLargeError,
     RevisionConflictError,
     StorageCorruptedError,
     StorageService,
@@ -148,6 +151,7 @@ class UpdateSystemConfigRequest(BaseModel):
 
 def create_app(
     settings: Optional[Settings] = None,
+    draft_store: Optional[DraftStore] = None,
     storage_service: Optional[StorageService] = None,
     image_service: Optional[ImageService] = None,
     ai_service: Optional[AIService] = None,
@@ -168,12 +172,14 @@ def create_app(
                 pass
 
     configure_logging(cfg.log_level)
-    storage = storage_service or StorageService(data_dir=cfg.data_dir)
-    storage.cleanup_orphaned_images()
-    img_svc = image_service or ImageService(
+    img_svc = image_service or getattr(draft_store or storage_service, "image_service", None) or ImageService(
         data_dir=cfg.data_dir,
         rembg_model=cfg.rembg_model,
     )
+    storage = draft_store or storage_service or DraftStore(data_dir=cfg.data_dir, image_service=img_svc)
+    if image_service is not None:
+        storage.image_service = image_service
+    storage.cleanup_orphaned_images()
     ai_svc = ai_service or AIService(
         api_key=cfg.gemini_api_key,
         model_name=cfg.gemini_model,
@@ -473,143 +479,55 @@ def create_app(
         return {"ok": True, "message": "Draft deleted"}
 
     # 4. Images
-    MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
-    MAX_FILES_PER_BATCH = 15
-
     @app.post("/api/drafts/{draft_id}/images", response_model=Draft)
     async def upload_images(draft_id: str, files: List[UploadFile] = File(...)):
-        if len(files) > MAX_FILES_PER_BATCH:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Maximal {MAX_FILES_PER_BATCH} Bilder pro Upload erlaubt (erhalten: {len(files)}).",
-            )
-        draft = storage.get_draft(draft_id)
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
         logger.info(f"[API] Empfange {len(files)} Bild(er) für Draft {draft_id}...")
-        processed_images = []
+        file_payloads: List[Tuple[str, bytes]] = []
+        for f in files:
+            content = await f.read()
+            file_payloads.append((f.filename or "upload.jpg", content))
+
         try:
-            for f in files:
-                content = await f.read()
-                if len(content) > MAX_FILE_SIZE:
-                    raise HTTPException(
-                        status_code=413,
-                        detail=f"Datei '{f.filename}' überschreitet das Limit von 25 MB.",
-                    )
-                draft_image = await asyncio.to_thread(
-                    img_svc.process_upload,
-                    draft_id=draft_id,
-                    raw_bytes=content,
-                    original_filename=f.filename or "upload.jpg",
-                )
-                processed_images.append(draft_image)
-                logger.info(f"[API] Bild {draft_image.id} ({f.filename}) zu Draft hinzugefügt.")
+            return await asyncio.to_thread(storage.add_images, draft_id, file_payloads)
+        except BatchLimitExceededError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except FileTooLargeError as e:
+            raise HTTPException(status_code=413, detail=str(e))
+        except DraftNotFoundError as e:
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
-            for img in processed_images:
-                try:
-                    img_svc.delete_image(draft_id, img.id)
-                except Exception:
-                    pass
-            if isinstance(e, HTTPException):
-                raise e
             raise HTTPException(status_code=400, detail=f"Fehler beim Verarbeiten der Bilder: {e}")
-
-        current_draft = storage.get_draft(draft_id)
-        if not current_draft:
-            for img in processed_images:
-                try:
-                    img_svc.delete_image(draft_id, img.id)
-                except Exception:
-                    pass
-            raise HTTPException(status_code=404, detail="Draft was deleted during upload")
-
-        current_draft.images.extend(processed_images)
-        return storage.update_draft(current_draft)
 
     @app.delete("/api/drafts/{draft_id}/images/{image_id}", response_model=Draft)
     def delete_image(draft_id: str, image_id: str):
-        draft = storage.get_draft(draft_id)
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
-        initial_len = len(draft.images)
-        draft.images = [img for img in draft.images if img.id != image_id]
-        if len(draft.images) == initial_len:
-            raise HTTPException(status_code=404, detail="Image not found")
-
         logger.info(f"[API] Lösche Bild {image_id} aus Draft {draft_id}...")
-        img_svc.delete_image(draft_id=draft_id, image_id=image_id)
-        return storage.update_draft(draft)
+        try:
+            return storage.delete_image(draft_id, image_id)
+        except DraftNotFoundError:
+            raise HTTPException(status_code=404, detail="Draft not found")
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Image not found")
 
     @app.patch("/api/drafts/{draft_id}/images/{image_id}", response_model=Draft)
-    def patch_image_mode(draft_id: str, image_id: str, body: PatchImageModeRequest):
-        draft = storage.get_draft(draft_id)
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
-        target_img: Optional[DraftImage] = None
-        for img in draft.images:
-            if img.id == image_id:
-                target_img = img
-                break
-
-        if not target_img:
-            raise HTTPException(status_code=404, detail="Image not found")
-
+    async def patch_image_mode(draft_id: str, image_id: str, body: PatchImageModeRequest):
         mode = body.active_mode
         logger.info(f"[API] Moduswechsel für Bild {image_id} auf '{mode.value}' angefordert (Draft: {draft_id})...")
-        # Pre-generate variant if needed
-        if mode == ImageVariantMode.CUTOUT:
-            img_svc.get_or_create_cutout(draft_id=draft_id, image_id=image_id)
-            target_img.variants[ImageVariantMode.CUTOUT] = (
-                f"/api/drafts/{draft_id}/images/{image_id}/cutout"
-            )
-        elif mode == ImageVariantMode.BLURRED:
-            img_svc.get_or_create_blurred(draft_id=draft_id, image_id=image_id)
-            target_img.variants[ImageVariantMode.BLURRED] = (
-                f"/api/drafts/{draft_id}/images/{image_id}/blurred"
-            )
-
-        target_img.active_mode = mode
-        updated = storage.update_draft(draft)
-        logger.info(f"[API] Bild {image_id} Modus erfolgreich auf '{mode.value}' gesetzt.")
-        return updated
+        try:
+            updated = await asyncio.to_thread(storage.set_image_mode, draft_id, image_id, mode)
+            logger.info(f"[API] Bild {image_id} Modus erfolgreich auf '{mode.value}' gesetzt.")
+            return updated
+        except DraftNotFoundError:
+            raise HTTPException(status_code=404, detail="Draft not found")
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Image not found")
 
     @app.get("/api/drafts/{draft_id}/images/{image_id}/{variant}")
     def get_image_file(draft_id: str, image_id: str, variant: str):
-        draft = storage.get_draft(draft_id)
-        if not draft:
-            raise HTTPException(status_code=404, detail="Draft not found")
-
-        target_img: Optional[DraftImage] = None
-        for img in draft.images:
-            if img.id == image_id:
-                target_img = img
-                break
-
-        if not target_img:
-            raise HTTPException(status_code=404, detail="Image not found")
-
-        var_mode = variant
-        if variant == "active":
-            var_mode = target_img.active_mode.value
-
-        img_dir = cfg.data_dir / "images" / draft_id
-        file_path = img_dir / f"{image_id}_{var_mode}.jpg"
-
-        if not file_path.exists():
-            if var_mode == ImageVariantMode.CUTOUT.value:
-                file_path = img_svc.get_or_create_cutout(draft_id=draft_id, image_id=image_id)
-            elif var_mode == ImageVariantMode.BLURRED.value:
-                file_path = img_svc.get_or_create_blurred(draft_id=draft_id, image_id=image_id)
-            elif var_mode == "ai":
-                file_path = img_dir / f"{image_id}_ai.jpg"
-
-        if not file_path.exists():
+        try:
+            file_path = storage.get_image_file_path(draft_id, image_id, variant)
+            return FileResponse(file_path, media_type="image/jpeg")
+        except (DraftNotFoundError, FileNotFoundError):
             raise HTTPException(status_code=404, detail="Image variant not found")
-
-        return FileResponse(file_path, media_type="image/jpeg")
 
     # 5. Analysis
     @app.post("/api/drafts/{draft_id}/analyze", response_model=Draft)
@@ -631,8 +549,7 @@ def create_app(
         ebay_stats = pa.ebay_stats if (pa and "ebay_de_sold" in enabled_sources) else None
 
         # 2. Gather AI input images
-        img_dir = cfg.data_dir / "images" / draft_id
-        ai_image_paths = [img_dir / f"{img.id}_ai.jpg" for img in draft.images]
+        ai_image_paths = storage.get_ai_image_paths(draft_id)
 
         # 3. Run AI analysis
         try:
