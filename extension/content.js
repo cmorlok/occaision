@@ -732,7 +732,7 @@ function bindPanelEvents() {
   const step1Btn = document.getElementById("ai-ext-step1-btn");
   step1Btn.onclick = async () => {
     if (!activeDraft) {
-      alert("Bitte wähle zuerst einen Entwurf aus.");
+      alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
       return;
     }
     const platform = detectPlatform();
@@ -762,7 +762,7 @@ function bindPanelEvents() {
   const step2Btn = document.getElementById("ai-ext-step2-btn");
   step2Btn.onclick = async () => {
     if (!activeDraft) {
-      alert("Bitte wähle zuerst einen Entwurf aus.");
+      alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
       return;
     }
     const platform = detectPlatform();
@@ -835,9 +835,11 @@ function fetchDraftsList() {
       });
       activeDraft = currentDrafts[0];
     } else if (response && (response.unauthorized || (response.error && response.error.includes("401")))) {
-      draftSelect.innerHTML = '<option value="">Nicht autorisiert (Bitte Dashboard 127.0.0.1:8000 öffnen)</option>';
+      draftSelect.innerHTML = '<option value="">⚠️ Nicht gekoppelt: Einmalig 127.0.0.1:8000 im Browser öffnen</option>';
+      activeDraft = null;
     } else {
       draftSelect.innerHTML = '<option value="">Fehler beim Laden (Backend online?)</option>';
+      activeDraft = null;
     }
   });
 }
@@ -1522,5 +1524,6 @@ if (typeof module !== "undefined" && module.exports) {
     getPlatformData,
     fillRicardoPrices,
     fillRicardoShipping,
+    fetchDraftsList,
   };
 }

@@ -851,7 +851,7 @@ def test_extension_unpaired_auth_handling():
     content_text = content_file.read_text(encoding="utf-8")
     bg_text = bg_file.read_text(encoding="utf-8")
 
-    assert "Nicht autorisiert (Bitte Dashboard 127.0.0.1:8000 öffnen)" in content_text
+    assert "⚠️ Nicht gekoppelt: Einmalig 127.0.0.1:8000 im Browser öffnen" in content_text
     assert "unauthorized: isAuth" in bg_text
 
     node_script = """
@@ -892,6 +892,54 @@ def test_extension_unpaired_auth_handling():
     """
     res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
     assert res.returncode == 0, f"Node auth handling test failed: {res.stderr}"
+
+
+def test_content_handles_unauthorized_draft_list():
+    node_script = """
+    const mockSelect = { innerHTML: '', appendChild: (opt) => {} };
+    global.document = {
+      createElement: (tag) => ({ value: '', textContent: '' }),
+      getElementById: (id) => {
+        if (id === 'ai-ext-draft-select') return mockSelect;
+        return null;
+      }
+    };
+
+    // 1. Test unauthorized response
+    global.browser = {
+      runtime: {
+        sendMessage: (msg, cb) => {
+          if (msg.action === 'LIST_DRAFTS') {
+            cb({ ok: false, unauthorized: true, error: 'HTTP 401' });
+          }
+        }
+      }
+    };
+
+    const content = require('./extension/content.js');
+    content.fetchDraftsList();
+
+    if (!mockSelect.innerHTML.includes('Nicht gekoppelt')) {
+      throw new Error('Expected draftSelect to contain actionable uncoupled hint, got: ' + mockSelect.innerHTML);
+    }
+    if (!mockSelect.innerHTML.includes('127.0.0.1:8000')) {
+      throw new Error('Expected draftSelect to prompt 127.0.0.1:8000, got: ' + mockSelect.innerHTML);
+    }
+
+    // 2. Test successful response
+    global.browser.runtime.sendMessage = (msg, cb) => {
+      if (msg.action === 'LIST_DRAFTS') {
+        cb({ ok: true, drafts: [{ id: 'd-1', identified_product: 'Test Item', status: 'ready' }] });
+      }
+    };
+    content.fetchDraftsList();
+    if (mockSelect.innerHTML.includes('Nicht gekoppelt')) {
+      throw new Error('Unexpected uncoupled hint on successful response');
+    }
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Content script auth UX test failed: {res.stderr}"
+
 
 
 
