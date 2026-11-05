@@ -99,6 +99,8 @@ const btnToggleKey = document.getElementById("btn-toggle-key");
 const cfgGeminiModel = document.getElementById("cfg-gemini-model");
 const cfgSearchGrounding = document.getElementById("cfg-search-grounding");
 const cfgKeyStatus = document.getElementById("cfg-key-status");
+const btnExportBackup = document.getElementById("btn-export-backup");
+const backupFileInput = document.getElementById("backup-file-input");
 const toastContainer = document.getElementById("toast-container");
 
 function showToast(message, type = "info", options = {}) {
@@ -396,6 +398,19 @@ async function loadDrafts() {
         }
       } else if (!currentDraft) {
         await ensureDraft();
+      }
+    } else {
+      const err = await res.json().catch(() => ({}));
+      if (err.error_code === "STORAGE_CORRUPTED") {
+        showToast(
+          "Datenbank-Datei beschädigt. Ein automatisches Backup wurde angelegt. Nutze die Wiederherstellung in den Einstellungen.",
+          "error",
+          {
+            duration: 15000,
+            actionText: "Einstellungen",
+            onAction: openSettingsModal,
+          }
+        );
       }
     }
   } catch (err) {
@@ -992,6 +1007,56 @@ function setupEventListeners() {
   if (btnToggleKey) {
     btnToggleKey.onclick = () => {
       cfgGeminiKey.type = cfgGeminiKey.type === "password" ? "text" : "password";
+    };
+  }
+
+  if (btnExportBackup) {
+    btnExportBackup.onclick = async () => {
+      try {
+        const res = await fetch("/api/drafts/export");
+        if (!res.ok) throw new Error(`Export fehlgeschlagen (${res.status})`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const disp = res.headers.get("content-disposition") || "";
+        const match = disp.match(/filename="?([^"]+)"?/);
+        a.download = match ? match[1] : `occaision_backup_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("Backup erfolgreich heruntergeladen.", "success");
+      } catch (err) {
+        showToast(`Export fehlgeschlagen: ${err.message}`, "error");
+      }
+    };
+  }
+
+  if (backupFileInput) {
+    backupFileInput.onchange = async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = await fetch("/api/drafts/import", {
+          method: "POST",
+          body: formData,
+        });
+        if (res.ok) {
+          const result = await res.json();
+          await loadDrafts();
+          showToast(`Backup wiederhergestellt: ${result.imported_count} Entwürfe importiert.`, "success");
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(`Wiederherstellung fehlgeschlagen: ${err.detail || res.statusText}`, "error");
+        }
+      } catch (err) {
+        showToast(`Wiederherstellung fehlgeschlagen: ${err.message}`, "error");
+      } finally {
+        backupFileInput.value = "";
+      }
     };
   }
 }
