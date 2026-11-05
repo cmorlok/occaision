@@ -7,6 +7,8 @@ if (typeof document === "undefined") {
   };
 }
 
+const api = (typeof window !== "undefined" && window.api) ? window.api : (typeof require !== "undefined" ? require("./api.js") : {});
+
 let currentDraft = null;
 let drafts = [];
 let settings = null;
@@ -125,12 +127,9 @@ let systemConfig = null;
 
 async function init() {
   try {
-    const pairRes = await fetch("/api/auth/pair", { method: "POST" });
-    if (pairRes.ok) {
-      const pairData = await pairRes.json();
-      if (pairData.token) {
-        window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairData.token }), "*");
-      }
+    const pairData = await api.pairAuth().catch(() => null);
+    if (pairData && pairData.token) {
+      window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairData.token }), "*");
     }
   } catch (_) {}
   await loadSettings();
@@ -141,12 +140,10 @@ async function init() {
 
 async function loadSystemConfig() {
   try {
-    const res = await fetch("/api/config");
-    if (res.ok) {
-      systemConfig = await res.json();
-      
-      // Dynamically populate available models from server
-      if (cfgGeminiModel && systemConfig.available_models && systemConfig.available_models.length > 0) {
+    systemConfig = await api.getConfig();
+    
+    // Dynamically populate available models from server
+    if (cfgGeminiModel && systemConfig.available_models && systemConfig.available_models.length > 0) {
         cfgGeminiModel.innerHTML = "";
         systemConfig.available_models.forEach(m => {
           const opt = document.createElement("option");
@@ -166,7 +163,6 @@ async function loadSystemConfig() {
         cfgEurRate.value = systemConfig.eur_to_chf_rate;
       }
       updateKeyStatusUI();
-    }
   } catch (err) {
     console.error("Failed to load system config", err);
   }
@@ -272,40 +268,23 @@ async function saveSystemConfig() {
 
   try {
     btnSaveSettings.disabled = true;
-    const res = await fetch("/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      systemConfig = await res.json();
-      updateKeyStatusUI();
+    systemConfig = await api.updateConfig(payload);
+    updateKeyStatusUI();
 
-      // Also persist settings (enabled_price_sources, keep_tabs_open_after_search) in /api/settings
-      if (settings) {
-        const updatedSettings = Object.assign({}, settings, {
-          enabled_price_sources: enabledSources,
-          keep_tabs_open_after_search: keepTabsOpen,
-        });
-        const putRes = await fetch("/api/settings", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updatedSettings),
-        });
-        if (putRes.ok) {
-          settings = await putRes.json();
-        }
-      }
-      updatePriceSourcesVisibility();
-
-      closeSettingsModal();
-      showToast("Einstellungen erfolgreich gespeichert!", "success");
-    } else {
-      const err = await res.json().catch(() => ({}));
-      showToast(`Fehler beim Speichern: ${err.detail || "Serverfehler"}`, "error");
+    // Also persist settings (enabled_price_sources, keep_tabs_open_after_search) in /api/settings
+    if (settings) {
+      const updatedSettings = Object.assign({}, settings, {
+        enabled_price_sources: enabledSources,
+        keep_tabs_open_after_search: keepTabsOpen,
+      });
+      settings = await api.updateSettings(updatedSettings);
     }
+    updatePriceSourcesVisibility();
+
+    closeSettingsModal();
+    showToast("Einstellungen erfolgreich gespeichert!", "success");
   } catch (err) {
-    showToast(`Fehler: ${err.message}`, "error");
+    showToast(`Fehler beim Speichern: ${err.message}`, "error");
   } finally {
     btnSaveSettings.disabled = false;
   }
@@ -313,23 +292,20 @@ async function saveSystemConfig() {
 
 async function loadSettings() {
   try {
-    const res = await fetch("/api/settings");
-    if (res.ok) {
-      settings = await res.json();
-      updatePriceSourcesVisibility();
-      shippingPresetEl.innerHTML = "";
-      if (deShippingPresetEl) deShippingPresetEl.innerHTML = "";
-      settings.shipping_presets.forEach(p => {
-        const opt = document.createElement("option");
-        opt.value = p.id;
-        opt.textContent = p.label;
-        if (p.country === "DE") {
-          if (deShippingPresetEl) deShippingPresetEl.appendChild(opt);
-        } else {
-          shippingPresetEl.appendChild(opt);
-        }
-      });
-    }
+    settings = await api.getSettings();
+    updatePriceSourcesVisibility();
+    shippingPresetEl.innerHTML = "";
+    if (deShippingPresetEl) deShippingPresetEl.innerHTML = "";
+    settings.shipping_presets.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.label;
+      if (p.country === "DE") {
+        if (deShippingPresetEl) deShippingPresetEl.appendChild(opt);
+      } else {
+        shippingPresetEl.appendChild(opt);
+      }
+    });
   } catch (err) {
     console.error("Failed to load settings", err);
   }
@@ -338,18 +314,11 @@ async function loadSettings() {
 async function ensureDraft() {
   if (currentDraft) return currentDraft;
   try {
-    const res = await fetch("/api/drafts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_notes: "" })
-    });
-    if (res.ok) {
-      currentDraft = await res.json();
-      drafts = [currentDraft, ...drafts.filter(d => d.id !== currentDraft.id)];
-      renderDraftList();
-      populateForm();
-      return currentDraft;
-    }
+    currentDraft = await api.createDraft({ user_notes: "" });
+    drafts = [currentDraft, ...drafts.filter(d => d.id !== currentDraft.id)];
+    renderDraftList();
+    populateForm();
+    return currentDraft;
   } catch (err) {
     console.error("Failed to auto-create draft", err);
   }
@@ -358,33 +327,28 @@ async function ensureDraft() {
 
 async function loadDrafts() {
   try {
-    const res = await fetch("/api/drafts");
-    if (res.ok) {
-      drafts = await res.json();
-      renderDraftList();
-      if (drafts.length > 0) {
-        if (!currentDraft || !drafts.some(d => d.id === currentDraft.id)) {
-          await selectDraft(drafts[0].id);
-        }
-      } else if (!currentDraft) {
-        await ensureDraft();
+    drafts = await api.listDrafts();
+    renderDraftList();
+    if (drafts.length > 0) {
+      if (!currentDraft || !drafts.some(d => d.id === currentDraft.id)) {
+        await selectDraft(drafts[0].id);
       }
-    } else {
-      const err = await res.json().catch(() => ({}));
-      if (err.error_code === "STORAGE_CORRUPTED") {
-        showToast(
-          "Datenbank-Datei beschädigt. Ein automatisches Backup wurde angelegt. Nutze die Wiederherstellung in den Einstellungen.",
-          "error",
-          {
-            duration: 15000,
-            actionText: "Einstellungen",
-            onAction: openSettingsModal,
-          }
-        );
-      }
+    } else if (!currentDraft) {
+      await ensureDraft();
     }
   } catch (err) {
     console.error("Failed to load drafts", err);
+    if (err.data && err.data.error_code === "STORAGE_CORRUPTED") {
+      showToast(
+        "Datenbank-Datei beschädigt. Ein automatisches Backup wurde angelegt. Nutze die Wiederherstellung in den Einstellungen.",
+        "error",
+        {
+          duration: 15000,
+          actionText: "Einstellungen",
+          onAction: openSettingsModal,
+        }
+      );
+    }
   }
 }
 
@@ -440,12 +404,9 @@ function renderDraftList() {
 
 async function selectDraft(draftId) {
   try {
-    const res = await fetch(`/api/drafts/${draftId}`);
-    if (res.ok) {
-      currentDraft = await res.json();
-      populateForm();
-      renderDraftList();
-    }
+    currentDraft = await api.getDraft(draftId);
+    populateForm();
+    renderDraftList();
   } catch (err) {
     console.error("Failed to fetch draft", err);
   }
@@ -705,11 +666,7 @@ async function changeImageMode(imageId, mode) {
   }
 
   try {
-    const res = await fetch(`/api/drafts/${currentDraft.id}/images/${imageId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active_mode: mode })
-    });
+    const res = await api.setVariant(currentDraft.id, imageId, mode);
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
@@ -736,9 +693,7 @@ async function deleteImage(imageId) {
     card.style.opacity = "0.5";
   }
   try {
-    const res = await fetch(`/api/drafts/${currentDraft.id}/images/${imageId}`, {
-      method: "DELETE"
-    });
+    const res = await api.deleteImage(currentDraft.id, imageId);
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
@@ -833,10 +788,7 @@ async function uploadFiles(files) {
     formData.append("files", f);
   }
   try {
-    const res = await fetch(`/api/drafts/${currentDraft.id}/images`, {
-      method: "POST",
-      body: formData
-    });
+    const res = await api.uploadImages(currentDraft.id, formData);
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
@@ -863,17 +815,10 @@ async function uploadFiles(files) {
 function setupEventListeners() {
   btnNewDraft.onclick = async () => {
     try {
-      const res = await fetch("/api/drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_notes: "" })
-      });
-      if (res.ok) {
-        const newD = await res.json();
-        currentDraft = newD;
-        await loadDrafts();
-        selectDraft(newD.id);
-      }
+      const newD = await api.createDraft({ user_notes: "" });
+      currentDraft = newD;
+      await loadDrafts();
+      selectDraft(newD.id);
     } catch (err) {
       console.error("Failed to create draft", err);
     }
@@ -931,11 +876,7 @@ function setupEventListeners() {
     if (!currentDraft) return;
     syncDraftFromForm();
     try {
-      const res = await fetch(`/api/drafts/${currentDraft.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(currentDraft)
-      });
+      const res = await api.updateDraft(currentDraft);
       if (res.ok) {
         currentDraft = await res.json();
         await loadDrafts();
@@ -950,7 +891,7 @@ function setupEventListeners() {
             actionText: "Neu laden",
             onAction: async () => {
               if (currentDraft && currentDraft.id) {
-                await loadDraft(currentDraft.id);
+                await selectDraft(currentDraft.id);
                 showToast("Entwurf neu geladen.", "info");
               }
             }
@@ -977,18 +918,12 @@ function setupEventListeners() {
     if (!currentDraft) return;
     syncDraftFromForm();
     // Save draft first
-    await fetch(`/api/drafts/${currentDraft.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentDraft)
-    });
+    await api.updateDraft(currentDraft);
 
     btnAnalyze.disabled = true;
     analyzeSpinner.classList.remove("hidden");
     try {
-      const res = await fetch(`/api/drafts/${currentDraft.id}/analyze`, {
-        method: "POST"
-      });
+      const res = await api.analyzeDraft(currentDraft.id);
       if (res.ok) {
         currentDraft = await res.json();
         await loadDrafts();
@@ -1024,7 +959,7 @@ function setupEventListeners() {
   if (btnExportBackup) {
     btnExportBackup.onclick = async () => {
       try {
-        const res = await fetch("/api/drafts/export");
+        const res = await api.exportDrafts();
         if (!res.ok) throw new Error(`Export fehlgeschlagen (${res.status})`);
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -1051,10 +986,7 @@ function setupEventListeners() {
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const res = await fetch("/api/drafts/import", {
-          method: "POST",
-          body: formData,
-        });
+        const res = await api.importDrafts(formData);
         if (res.ok) {
           const result = await res.json();
           await loadDrafts();
@@ -1366,11 +1298,7 @@ async function scrapePricesViaExtension() {
       currentDraft.price_analysis.verification_links = extResult.verification_links;
     }
 
-    const res = await fetch(`/api/drafts/${currentDraft.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentDraft),
-    });
+    const res = await api.updateDraft(currentDraft);
     if (res.ok) {
       currentDraft = await res.json();
       await loadDrafts();
@@ -1391,17 +1319,15 @@ async function scrapePricesViaExtension() {
 async function deleteDraft(draftId) {
   if (!confirm("Entwurf wirklich löschen?")) return;
   try {
-    const res = await fetch(`/api/drafts/${draftId}`, { method: "DELETE" });
-    if (res.ok) {
-      if (currentDraft && currentDraft.id === draftId) {
-        currentDraft = null;
-      }
-      await loadDrafts();
-      if (!currentDraft && drafts.length > 0) {
-        selectDraft(drafts[0].id);
-      } else if (drafts.length === 0) {
-        await ensureDraft();
-      }
+    await api.deleteDraft(draftId);
+    if (currentDraft && currentDraft.id === draftId) {
+      currentDraft = null;
+    }
+    await loadDrafts();
+    if (!currentDraft && drafts.length > 0) {
+      selectDraft(drafts[0].id);
+    } else if (drafts.length === 0) {
+      await ensureDraft();
     }
   } catch (err) {
     console.error("Delete draft error", err);

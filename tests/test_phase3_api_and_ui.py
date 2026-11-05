@@ -552,7 +552,18 @@ def test_frontend_api_client_contract():
         throw new Error('setVariant failed');
       }
 
-      // 5. Error handling rejection verification
+      // 5. Backup operations
+      await api.exportDrafts();
+      const call15 = recordedCalls[recordedCalls.length - 1];
+      if (call15.url !== '/api/drafts/export') throw new Error('exportDrafts failed');
+
+      await api.importDrafts(mockForm);
+      const call16 = recordedCalls[recordedCalls.length - 1];
+      if (call16.url !== '/api/drafts/import' || call16.options.method !== 'POST' || call16.options.body !== mockForm) {
+        throw new Error('importDrafts failed');
+      }
+
+      // 6. Error handling rejection verification
       global.fetch = async () => ({ ok: false, status: 404 });
       let threw = false;
       try {
