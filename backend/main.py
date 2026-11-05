@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -400,24 +401,59 @@ def create_app(
         return {"ok": True, "message": "Draft deleted"}
 
     # 4. Images
+    MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
+    MAX_FILES_PER_BATCH = 15
+
     @app.post("/api/drafts/{draft_id}/images", response_model=Draft)
     async def upload_images(draft_id: str, files: List[UploadFile] = File(...)):
+        if len(files) > MAX_FILES_PER_BATCH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximal {MAX_FILES_PER_BATCH} Bilder pro Upload erlaubt (erhalten: {len(files)}).",
+            )
         draft = storage.get_draft(draft_id)
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found")
 
         logger.info(f"[API] Empfange {len(files)} Bild(er) für Draft {draft_id}...")
-        for f in files:
-            content = await f.read()
-            draft_image = img_svc.process_upload(
-                draft_id=draft_id,
-                raw_bytes=content,
-                original_filename=f.filename or "upload.jpg",
-            )
-            draft.images.append(draft_image)
-            logger.info(f"[API] Bild {draft_image.id} ({f.filename}) zu Draft hinzugefügt.")
+        processed_images = []
+        try:
+            for f in files:
+                content = await f.read()
+                if len(content) > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"Datei '{f.filename}' überschreitet das Limit von 25 MB.",
+                    )
+                draft_image = await asyncio.to_thread(
+                    img_svc.process_upload,
+                    draft_id=draft_id,
+                    raw_bytes=content,
+                    original_filename=f.filename or "upload.jpg",
+                )
+                processed_images.append(draft_image)
+                logger.info(f"[API] Bild {draft_image.id} ({f.filename}) zu Draft hinzugefügt.")
+        except Exception as e:
+            for img in processed_images:
+                try:
+                    img_svc.delete_image(draft_id, img.id)
+                except Exception:
+                    pass
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(status_code=400, detail=f"Fehler beim Verarbeiten der Bilder: {e}")
 
-        return storage.update_draft(draft)
+        current_draft = storage.get_draft(draft_id)
+        if not current_draft:
+            for img in processed_images:
+                try:
+                    img_svc.delete_image(draft_id, img.id)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=404, detail="Draft was deleted during upload")
+
+        current_draft.images.extend(processed_images)
+        return storage.update_draft(current_draft)
 
     @app.delete("/api/drafts/{draft_id}/images/{image_id}", response_model=Draft)
     def delete_image(draft_id: str, image_id: str):

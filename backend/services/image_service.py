@@ -11,6 +11,7 @@ import pillow_heif
 from backend.models import DraftImage, ImageVariantMode
 
 pillow_heif.register_heif_opener()
+Image.MAX_IMAGE_PIXELS = 50_000_000
 
 logger = logging.getLogger("occaision.image")
 if not logger.handlers:

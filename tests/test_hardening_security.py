@@ -266,6 +266,57 @@ def test_empty_price_sources_preserved_and_has_extension_prices_semantics(temp_d
     assert has_usable_samples is False
 
 
+def test_upload_batch_limits_and_atomic_cleanup(temp_data_dir: Path):
+    from backend.services.image_service import ImageService
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=False)
+    storage = StorageService(data_dir=temp_data_dir)
+    image_service = ImageService(data_dir=temp_data_dir)
+    app = create_app(settings=test_settings, storage_service=storage, image_service=image_service)
+    client = TestClient(app)
+
+    draft = storage.create_draft(user_notes="Upload Limits Test")
+
+    # 1. Batch size limit (> 15 files)
+    oversized_batch = [("files", (f"img_{i}.jpg", b"fake", "image/jpeg")) for i in range(16)]
+    res_batch = client.post(f"/api/drafts/{draft.id}/images", files=oversized_batch)
+    assert res_batch.status_code == 400
+    assert "15" in res_batch.json()["detail"]
+
+    # 2. File size limit (> 25MB)
+    large_payload = b"X" * (25 * 1024 * 1024 + 10)
+    res_size = client.post(
+        f"/api/drafts/{draft.id}/images",
+        files=[("files", ("large.jpg", large_payload, "image/jpeg"))],
+    )
+    assert res_size.status_code == 413
+
+    # 3. Atomic rollback: file 1 valid, file 2 corrupt
+    import io
+    from PIL import Image
+    valid_img = Image.new("RGB", (100, 100), color=(10, 20, 30))
+    buf = io.BytesIO()
+    valid_img.save(buf, format="JPEG")
+    valid_bytes = buf.getvalue()
+
+    corrupt_bytes = b"not a real image"
+
+    res_atomic = client.post(
+        f"/api/drafts/{draft.id}/images",
+        files=[
+            ("files", ("valid.jpg", valid_bytes, "image/jpeg")),
+            ("files", ("corrupt.jpg", corrupt_bytes, "image/jpeg")),
+        ],
+    )
+    assert res_atomic.status_code == 400
+
+    # No leftover image files on disk
+    draft_img_dir = temp_data_dir / "images" / draft.id
+    if draft_img_dir.exists():
+        files_left = list(draft_img_dir.glob("*"))
+        assert len(files_left) == 0, f"Expected 0 orphaned files, found: {files_left}"
+
+
+
 
 
 
