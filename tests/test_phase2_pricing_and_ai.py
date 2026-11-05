@@ -1,6 +1,7 @@
 import json
 import logging
 from pathlib import Path
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
@@ -484,6 +485,45 @@ async def test_ai_filters_out_disabled_price_sources(temp_data_dir: Path):
         assert "eBay DE (Gebraucht & Beendet)" not in prompt_str
         assert "Idealo.de Neupreis" not in prompt_str
         assert "279.0" not in prompt_str
+
+
+def test_ai_service_model_discovery_offline_and_cache(monkeypatch):
+    svc = AIService(api_key="test_key")
+
+    # In test environment with dummy key, should return fallback models without touching client
+    models = svc.get_available_models()
+    assert len(models) >= 5
+    assert any(m["id"] == "gemini-3.8-flash" for m in models)
+
+    # With live-looking key, mock the Gemini client models.list()
+    svc.set_api_key("valid_live_api_key_12345")
+    mock_model = MagicMock()
+    mock_model.name = "models/gemini-3.8-flash"
+    mock_model.display_name = "Gemini 3.8 Flash"
+    mock_model.supported_actions = ["generateContent"]
+
+    mock_client = MagicMock()
+    mock_client.models.list.return_value = [mock_model]
+    svc._client = mock_client
+
+    # Force test env guard off temporarily to test remote success path & caching
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("OCCAISION_OFFLINE", "0")
+    with patch("sys.modules", {k: v for k, v in sys.modules.items() if k != "pytest"}):
+        res1 = svc.get_available_models()
+        assert len(res1) == 1
+        assert res1[0]["id"] == "gemini-3.8-flash"
+        assert mock_client.models.list.call_count == 1
+
+        # Second call must hit the TTL cache and NOT call models.list() again
+        res2 = svc.get_available_models()
+        assert res2 == res1
+        assert mock_client.models.list.call_count == 1
+
+        # Key change resets cache
+        svc.set_api_key("valid_live_api_key_67890")
+        assert svc._models_cache is None
+
 
 
 
