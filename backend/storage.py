@@ -126,16 +126,6 @@ class StorageService:
         return draft
 
     def update_draft(self, draft: Draft) -> Draft:
-        # Enforce limits as hard safeguards
-        if len(draft.ricardo.title) > 60:
-            draft.ricardo.title = draft.ricardo.title[:60].rstrip()
-        if len(draft.tutti.title) > 80:
-            draft.tutti.title = draft.tutti.title[:80].rstrip()
-        if len(draft.ebay_de.title) > 80:
-            draft.ebay_de.title = draft.ebay_de.title[:80].rstrip()
-        if len(draft.kleinanzeigen.title) > 65:
-            draft.kleinanzeigen.title = draft.kleinanzeigen.title[:65].rstrip()
-
         draft.updated_at = datetime.now(timezone.utc).isoformat()
         
         with self._lock:

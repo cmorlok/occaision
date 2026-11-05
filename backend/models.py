@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class DraftStatus(str, Enum):
@@ -151,6 +151,7 @@ class PriceAnalysis(BaseModel):
 
 
 class RicardoListing(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
     title: str = Field(default="")
     description: str = ""
     condition: ConditionType = ConditionType.GEBRAUCHT
@@ -163,11 +164,12 @@ class RicardoListing(BaseModel):
     @classmethod
     def truncate_title(cls, v: str) -> str:
         if isinstance(v, str) and len(v) > 60:
-            return v[:60]
+            return v[:60].rstrip()
         return v
 
 
 class TuttiListing(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
     title: str = Field(default="")
     category_suggestion: str = ""
     description: str = ""
@@ -178,11 +180,12 @@ class TuttiListing(BaseModel):
     @classmethod
     def truncate_title(cls, v: str) -> str:
         if isinstance(v, str) and len(v) > 80:
-            return v[:80]
+            return v[:80].rstrip()
         return v
 
 
 class EbayDEListing(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
     title: str = Field(default="")
     category_suggestion: str = ""
     description: str = ""
@@ -196,11 +199,12 @@ class EbayDEListing(BaseModel):
     @classmethod
     def truncate_title(cls, v: str) -> str:
         if isinstance(v, str) and len(v) > 80:
-            return v[:80]
+            return v[:80].rstrip()
         return v
 
 
 class KleinanzeigenListing(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
     title: str = Field(default="")
     category_suggestion: str = ""
     description: str = ""
@@ -213,7 +217,7 @@ class KleinanzeigenListing(BaseModel):
     @classmethod
     def truncate_title(cls, v: str) -> str:
         if isinstance(v, str) and len(v) > 65:
-            return v[:65]
+            return v[:65].rstrip()
         return v
 
 
