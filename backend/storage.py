@@ -1,16 +1,19 @@
 import json
+from pathlib import Path
 import shutil
 import tempfile
 import threading
+from typing import Any, Dict, List, Optional, Tuple
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from backend.config import get_logger
-from backend.models import Draft, PresetSettings
+from backend.models import Draft, DraftImage, ImageVariantMode, PresetSettings
 
 logger = get_logger("occaision.storage")
+
+MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
+MAX_FILES_PER_BATCH = 15
 
 
 class StorageError(Exception):
@@ -29,8 +32,16 @@ class RevisionConflictError(StorageError):
     pass
 
 
-class StorageService:
-    def __init__(self, data_dir: Path):
+class FileTooLargeError(StorageError):
+    pass
+
+
+class BatchLimitExceededError(StorageError):
+    pass
+
+
+class DraftStore:
+    def __init__(self, data_dir: Path, image_service: Optional[Any] = None):
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.images_dir = self.data_dir / "images"
@@ -39,6 +50,12 @@ class StorageService:
         self.drafts_file = self.data_dir / "drafts.json"
         self.settings_file = self.data_dir / "settings.json"
         self._lock = threading.RLock()
+
+        if image_service is not None:
+            self.image_service = image_service
+        else:
+            from backend.services.image_service import ImageService
+            self.image_service = ImageService(data_dir=self.data_dir)
 
         if not self.drafts_file.exists():
             self._write_json_atomic(self.drafts_file, [])
@@ -167,6 +184,140 @@ class StorageService:
 
         return True
 
+    def add_images(self, draft_id: str, files: List[Tuple[str, bytes]]) -> Draft:
+        """Process and append image uploads to a draft with batch limits and atomic rollback."""
+        if len(files) > MAX_FILES_PER_BATCH:
+            raise BatchLimitExceededError(
+                f"Maximal {MAX_FILES_PER_BATCH} Bilder pro Upload erlaubt (erhalten: {len(files)})."
+            )
+
+        with self._lock:
+            draft = self.get_draft(draft_id)
+            if not draft:
+                raise DraftNotFoundError(f"Draft {draft_id} not found")
+
+        processed_images: List[DraftImage] = []
+        try:
+            for filename, content in files:
+                if len(content) > MAX_FILE_SIZE:
+                    raise FileTooLargeError(
+                        f"Datei '{filename}' überschreitet das Limit von 25 MB."
+                    )
+                draft_image = self.image_service.process_upload(
+                    draft_id=draft_id,
+                    raw_bytes=content,
+                    original_filename=filename or "upload.jpg",
+                )
+                processed_images.append(draft_image)
+        except Exception as e:
+            # Atomic rollback on any processing or validation failure
+            for img in processed_images:
+                try:
+                    self.image_service.delete_image(draft_id, img.id)
+                except Exception:
+                    pass
+            raise e
+
+        with self._lock:
+            current_draft = self.get_draft(draft_id)
+            if not current_draft:
+                for img in processed_images:
+                    try:
+                        self.image_service.delete_image(draft_id, img.id)
+                    except Exception:
+                        pass
+                raise DraftNotFoundError("Draft was deleted during upload")
+
+            current_draft.images.extend(processed_images)
+            return self.update_draft(current_draft)
+
+    def delete_image(self, draft_id: str, image_id: str) -> Draft:
+        """Remove image from draft and delete underlying files."""
+        with self._lock:
+            draft = self.get_draft(draft_id)
+            if not draft:
+                raise DraftNotFoundError(f"Draft {draft_id} not found")
+
+            initial_len = len(draft.images)
+            draft.images = [img for img in draft.images if img.id != image_id]
+            if len(draft.images) == initial_len:
+                raise FileNotFoundError(f"Image {image_id} not found in draft {draft_id}")
+
+            self.image_service.delete_image(draft_id=draft_id, image_id=image_id)
+            return self.update_draft(draft)
+
+    def set_image_mode(self, draft_id: str, image_id: str, mode: ImageVariantMode) -> Draft:
+        """Switch active image mode, pre-generating cutout or blurred variant if needed."""
+        with self._lock:
+            draft = self.get_draft(draft_id)
+            if not draft:
+                raise DraftNotFoundError(f"Draft {draft_id} not found")
+            target_img = next((img for img in draft.images if img.id == image_id), None)
+            if not target_img:
+                raise FileNotFoundError(f"Image {image_id} not found in draft {draft_id}")
+
+        # Pre-generate variant outside write lock
+        variant_url = None
+        if mode == ImageVariantMode.CUTOUT:
+            self.image_service.get_or_create_cutout(draft_id=draft_id, image_id=image_id)
+            variant_url = f"/api/drafts/{draft_id}/images/{image_id}/cutout"
+        elif mode == ImageVariantMode.BLURRED:
+            self.image_service.get_or_create_blurred(draft_id=draft_id, image_id=image_id)
+            variant_url = f"/api/drafts/{draft_id}/images/{image_id}/blurred"
+
+        with self._lock:
+            current_draft = self.get_draft(draft_id)
+            if not current_draft:
+                raise DraftNotFoundError(f"Draft {draft_id} not found")
+            target_img = next((img for img in current_draft.images if img.id == image_id), None)
+            if not target_img:
+                raise FileNotFoundError(f"Image {image_id} not found in draft {draft_id}")
+
+            if variant_url and mode in (ImageVariantMode.CUTOUT, ImageVariantMode.BLURRED):
+                target_img.variants[mode] = variant_url
+
+            target_img.active_mode = mode
+            return self.update_draft(current_draft)
+
+    def get_image_file_path(self, draft_id: str, image_id: str, variant: str) -> Path:
+        """Resolve variant file path, lazily generating cached cutout/blur if missing."""
+        with self._lock:
+            draft = self.get_draft(draft_id)
+            if not draft:
+                raise DraftNotFoundError(f"Draft {draft_id} not found")
+            target_img = next((img for img in draft.images if img.id == image_id), None)
+            if not target_img:
+                raise FileNotFoundError(f"Image {image_id} not found in draft {draft_id}")
+            active_mode = target_img.active_mode.value
+
+        var_mode = active_mode if variant == "active" else variant
+        img_dir = self.images_dir / draft_id
+        file_path = img_dir / f"{image_id}_{var_mode}.jpg"
+
+        if not file_path.exists():
+            if var_mode == ImageVariantMode.CUTOUT.value:
+                file_path = self.image_service.get_or_create_cutout(draft_id=draft_id, image_id=image_id)
+            elif var_mode == ImageVariantMode.BLURRED.value:
+                file_path = self.image_service.get_or_create_blurred(draft_id=draft_id, image_id=image_id)
+            elif var_mode == "ai":
+                file_path = img_dir / f"{image_id}_ai.jpg"
+
+        if not file_path.exists():
+            raise FileNotFoundError(f"Image variant '{variant}' not found for image {image_id}")
+
+        return file_path
+
+    def get_ai_image_paths(self, draft_id: str) -> List[Path]:
+        """Return file paths for AI-downscaled image variants for the draft."""
+        with self._lock:
+            draft = self.get_draft(draft_id)
+            if not draft:
+                raise DraftNotFoundError(f"Draft {draft_id} not found")
+            images = list(draft.images)
+
+        img_dir = self.images_dir / draft_id
+        return [img_dir / f"{img.id}_ai.jpg" for img in images]
+
     def export_drafts_data(self) -> Dict[str, Any]:
         """Export all drafts and settings into a serializable backup payload."""
         with self._lock:
@@ -239,3 +390,7 @@ class StorageService:
         except Exception as e:
             logger.warning(f"[Storage] Error during orphan image cleanup: {e}")
         return cleaned_count
+
+
+# Backwards compatibility alias
+StorageService = DraftStore
