@@ -93,3 +93,22 @@ def test_host_header_and_cors_origin_validation(temp_data_dir: Path):
     allow_origin = res_untrusted_cors.headers.get("access-control-allow-origin")
     assert allow_origin != "*", "Wildcard CORS must never be returned"
     assert allow_origin != "https://malicious-site.example"
+
+
+def test_dashboard_csp_header(temp_data_dir: Path):
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=False)
+    app = create_app(settings=test_settings)
+    client = TestClient(app)
+
+    res = client.get("/")
+    assert res.status_code == 200
+    csp = res.headers.get("content-security-policy", "")
+    assert "default-src" in csp
+    assert "'self'" in csp
+
+
+def test_content_js_safe_description_rendering():
+    content_js = Path("extension/content.js").read_text(encoding="utf-8")
+    assert "editable.innerHTML = htmlVal" not in content_js, "content.js must not assign unescaped innerHTML in setDescriptionValue"
+    assert "createTextNode" in content_js, "content.js must use createTextNode for safe multiline insertion"
+

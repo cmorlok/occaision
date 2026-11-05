@@ -346,26 +346,51 @@ async function loadDrafts() {
 }
 
 function renderDraftList() {
-  draftListEl.innerHTML = "";
+  draftListEl.replaceChildren();
   drafts.forEach(d => {
     const item = document.createElement("div");
     item.className = `draft-item ${currentDraft && currentDraft.id === d.id ? "active" : ""}`;
-    item.onclick = () => selectDraft(d.id);
+    item.addEventListener("click", () => selectDraft(d.id));
 
     const title = d.identified_product || d.user_notes || d.ricardo.title || "Neuer Entwurf";
     const statusClass = `status-${d.status}`;
     const dateStr = new Date(d.updated_at).toLocaleDateString("de-CH", { hour: "2-digit", minute: "2-digit" });
 
-    item.innerHTML = `
-      <div class="draft-item-header">
-        <span class="draft-item-title" title="${title}">${title}</span>
-        <span class="status-badge ${statusClass}">${d.status}</span>
-      </div>
-      <div class="draft-item-footer">
-        <span>${dateStr}</span>
-        <button class="btn-delete-draft" title="Löschen" onclick="event.stopPropagation(); deleteDraft('${d.id}')">🗑️</button>
-      </div>
-    `;
+    const header = document.createElement("div");
+    header.className = "draft-item-header";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "draft-item-title";
+    titleSpan.title = title;
+    titleSpan.textContent = title;
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = `status-badge ${statusClass}`;
+    statusBadge.textContent = d.status;
+
+    header.appendChild(titleSpan);
+    header.appendChild(statusBadge);
+
+    const footer = document.createElement("div");
+    footer.className = "draft-item-footer";
+
+    const dateSpan = document.createElement("span");
+    dateSpan.textContent = dateStr;
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "btn-delete-draft";
+    deleteBtn.title = "Löschen";
+    deleteBtn.textContent = "🗑️";
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteDraft(d.id);
+    });
+
+    footer.appendChild(dateSpan);
+    footer.appendChild(deleteBtn);
+
+    item.appendChild(header);
+    item.appendChild(footer);
     draftListEl.appendChild(item);
   });
 }
@@ -403,9 +428,15 @@ function populateForm() {
 
   // Analysis / hints
   if (currentDraft.missing_photo_hints && currentDraft.missing_photo_hints.length > 0) {
-    missingHintsList.innerHTML = currentDraft.missing_photo_hints.map(h => `<li>${h}</li>`).join("");
+    missingHintsList.replaceChildren();
+    currentDraft.missing_photo_hints.forEach(h => {
+      const li = document.createElement("li");
+      li.textContent = h;
+      missingHintsList.appendChild(li);
+    });
     missingHintsBox.classList.remove("hidden");
   } else {
+    missingHintsList.replaceChildren();
     missingHintsBox.classList.add("hidden");
   }
 
@@ -550,7 +581,7 @@ function populateForm() {
 }
 
 function renderGallery() {
-  imageGalleryEl.innerHTML = "";
+  imageGalleryEl.replaceChildren();
   if (!currentDraft || !currentDraft.images) return;
 
   currentDraft.images.forEach(img => {
@@ -560,17 +591,41 @@ function renderGallery() {
     const cacheBuster = `?t=${Date.now()}`;
     const previewUrl = `/api/drafts/${currentDraft.id}/images/${img.id}/active${cacheBuster}`;
 
-    card.innerHTML = `
-      <img src="${previewUrl}" class="image-preview" alt="${img.original_filename}" />
-      <div class="image-card-controls">
-        <div class="mode-selectors">
-          <button class="btn-mode ${img.active_mode === 'optimized' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'optimized')">Original</button>
-          <button class="btn-mode ${img.active_mode === 'blurred' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'blurred')">Weichzeichnen</button>
-          <button class="btn-mode ${img.active_mode === 'cutout' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'cutout')">Hintergrund entfernen</button>
-        </div>
-        <button class="btn-del-img" onclick="deleteImage('${img.id}')">Bild löschen 🗑️</button>
-      </div>
-    `;
+    const previewImg = document.createElement("img");
+    previewImg.src = previewUrl;
+    previewImg.className = "image-preview";
+    previewImg.alt = img.original_filename || "Draft Image";
+
+    const controls = document.createElement("div");
+    controls.className = "image-card-controls";
+
+    const modeSelectors = document.createElement("div");
+    modeSelectors.className = "mode-selectors";
+
+    const modes = [
+      { mode: "optimized", label: "Original" },
+      { mode: "blurred", label: "Weichzeichnen" },
+      { mode: "cutout", label: "Hintergrund entfernen" },
+    ];
+
+    modes.forEach(m => {
+      const btn = document.createElement("button");
+      btn.className = `btn-mode ${img.active_mode === m.mode ? "active" : ""}`;
+      btn.textContent = m.label;
+      btn.addEventListener("click", () => changeImageMode(img.id, m.mode));
+      modeSelectors.appendChild(btn);
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn-del-img";
+    delBtn.textContent = "Bild löschen 🗑️";
+    delBtn.addEventListener("click", () => deleteImage(img.id));
+
+    controls.appendChild(modeSelectors);
+    controls.appendChild(delBtn);
+
+    card.appendChild(previewImg);
+    card.appendChild(controls);
     imageGalleryEl.appendChild(card);
   });
 }

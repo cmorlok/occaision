@@ -603,8 +603,18 @@ function setDescriptionValue(value, rootDoc) {
       if (iframeDoc) {
         const editable = iframeDoc.querySelector('.editable-text-area, [contenteditable="true"], body');
         if (editable) {
-          const htmlVal = value.replace(/\n/g, "<br>");
-          editable.innerHTML = htmlVal;
+          if (typeof editable.replaceChildren === "function") {
+            editable.replaceChildren();
+          } else {
+            while (editable.firstChild) editable.removeChild(editable.firstChild);
+          }
+          const lines = String(value || "").split("\n");
+          lines.forEach((line, idx) => {
+            editable.appendChild(iframeDoc.createTextNode(line));
+            if (idx < lines.length - 1) {
+              editable.appendChild(iframeDoc.createElement("br"));
+            }
+          });
           editable.dispatchEvent(new Event("input", { bubbles: true }));
           editable.dispatchEvent(new Event("change", { bubbles: true }));
           editable.dispatchEvent(new Event("blur", { bubbles: true }));
