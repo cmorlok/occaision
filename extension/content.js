@@ -834,6 +834,8 @@ function fetchDraftsList() {
         draftSelect.appendChild(opt);
       });
       activeDraft = currentDrafts[0];
+    } else if (response && (response.unauthorized || (response.error && response.error.includes("401")))) {
+      draftSelect.innerHTML = '<option value="">Nicht autorisiert (Bitte Dashboard 127.0.0.1:8000 öffnen)</option>';
     } else {
       draftSelect.innerHTML = '<option value="">Fehler beim Laden (Backend online?)</option>';
     }

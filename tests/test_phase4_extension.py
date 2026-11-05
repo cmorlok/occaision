@@ -845,3 +845,53 @@ def test_extension_content_dom_autofill_and_security():
     assert res.returncode == 0, f"Node test failed: {res.stderr}"
 
 
+def test_extension_unpaired_auth_handling():
+    content_file = Path("extension/content.js")
+    bg_file = Path("extension/background.js")
+    content_text = content_file.read_text(encoding="utf-8")
+    bg_text = bg_file.read_text(encoding="utf-8")
+
+    assert "Nicht autorisiert (Bitte Dashboard 127.0.0.1:8000 öffnen)" in content_text
+    assert "unauthorized: isAuth" in bg_text
+
+    node_script = """
+    global.BACKEND_BASE = "http://127.0.0.1:8000";
+    global.browser = {
+      storage: {
+        local: {
+          get: () => Promise.resolve({})
+        }
+      },
+      runtime: {
+        onMessage: {
+          addListener: (fn) => { global.__msgListener = fn; }
+        }
+      }
+    };
+    global.fetch = async (url) => {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "Unauthorized" })
+      };
+    };
+
+    require('./extension/background.js');
+
+    new Promise((resolve, reject) => {
+      global.__msgListener({ action: "LIST_DRAFTS" }, {}, (res) => {
+        if (!res) return reject(new Error("No response received"));
+        if (res.ok) return reject(new Error("Expected ok: false on 401"));
+        if (!res.unauthorized) return reject(new Error("Expected unauthorized: true on 401"));
+        resolve();
+      });
+    }).catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Node auth handling test failed: {res.stderr}"
+
+
+

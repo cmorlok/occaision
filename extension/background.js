@@ -1984,7 +1984,10 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
             return res.json();
           })
           .then(drafts => sendResponse({ ok: true, drafts }))
-          .catch(err => sendResponse({ ok: false, error: err.message }));
+          .catch(err => {
+            const isAuth = String(err.message).includes("401");
+            sendResponse({ ok: false, error: err.message, unauthorized: isAuth });
+          });
       });
       return true;
     }
@@ -1997,7 +2000,10 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
             return res.json();
           })
           .then(draft => sendResponse({ ok: true, draft }))
-          .catch(err => sendResponse({ ok: false, error: err.message }));
+          .catch(err => {
+            const isAuth = String(err.message).includes("401");
+            sendResponse({ ok: false, error: err.message, unauthorized: isAuth });
+          });
       });
       return true;
     }
