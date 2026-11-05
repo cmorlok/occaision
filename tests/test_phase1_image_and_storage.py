@@ -10,6 +10,7 @@ from backend.models import (
     MarketSourceStats,
     OfferType,
     PresetSettings,
+    ShippingPreset,
 )
 from backend.services.image_service import ImageService
 from backend.storage import StorageService
@@ -125,6 +126,9 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     assert len(settings.shipping_presets) >= 9
     assert any(p.country.value == "CH" for p in settings.shipping_presets)
     assert any(p.country.value == "DE" for p in settings.shipping_presets)
+    legacy_preset = ShippingPreset.model_validate({"id": "legacy_ch", "label": "Legacy", "cost_chf": 7.50, "currency": "CHF"})
+    assert legacy_preset.cost == 7.50
+    assert legacy_preset.cost_chf == 7.50
     assert settings.enabled_price_sources == [
         "ebay_de_sold",
         "kleinanzeigen",
