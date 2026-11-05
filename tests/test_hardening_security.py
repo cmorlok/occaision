@@ -18,6 +18,13 @@ def test_docker_compose_loopback_binding():
     assert "127.0.0.1:8000:8000" in content, "docker-compose.yml must bind port 8000 to 127.0.0.1 only"
     assert '"8000:8000"' not in content, "docker-compose.yml must not bind 8000 to 0.0.0.0"
 
+    # Also assert build_docker.sh script adheres to loopback invariant
+    script_path = Path("scripts/build_docker.sh")
+    assert script_path.exists()
+    script_content = script_path.read_text(encoding="utf-8")
+    assert "-p 127.0.0.1:8000:8000" in script_content
+    assert "-p 8000:8000" not in script_content
+
 
 def test_api_auth_rejection_and_token_acceptance(temp_data_dir: Path):
     test_settings = Settings(

@@ -39,9 +39,9 @@ echo -e "-----------------------------------------------------------------------
 echo -e "1. ${YELLOW}Container im Hintergrund starten:${NC}"
 echo -e "   ${BOLD}docker run -d \\${NC}"
 echo -e "     ${BOLD}--name occaision \\${NC}"
-echo -e "     ${BOLD}-p 8000:8000 \\${NC}"
+echo -e "     ${BOLD}-p 127.0.0.1:8000:8000 \\${NC}"
 echo -e "     ${BOLD}-v \"\$(pwd)/data:/app/data\" \\${NC}"
-echo -e "     ${BOLD}--env-file .env \\${NC}"
+echo -e "     ${BOLD}\$([ -f .env ] && echo \"--env-file .env \")\\${NC}"
 echo -e "     ${BOLD}--restart unless-stopped \\${NC}"
 echo -e "     ${BOLD}${FULL_IMAGE}${NC}\n"
 
