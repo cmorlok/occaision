@@ -39,13 +39,9 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Run Linter Checks
+      - name: Run All Checks (Lint & Test)
         run: |
-          make lint
-
-      - name: Run Pytest
-        run: |
-          pytest -v
+          make check
 
   build-and-release:
     name: Build & Publish Release

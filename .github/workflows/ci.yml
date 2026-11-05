@@ -32,13 +32,9 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Run Linter Checks
+      - name: Run All Checks (Lint & Test)
         run: |
-          make lint
-
-      - name: Run Test Suite
-        run: |
-          pytest -v
+          make check
 
       - name: Verify Extension Packaging
         run: |
