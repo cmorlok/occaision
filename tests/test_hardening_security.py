@@ -357,6 +357,37 @@ def test_extension_autofill_and_domain_safety():
     assert res.returncode == 0, f"Domain detection safety failed with code {res.returncode}"
 
 
+def test_storage_corrupted_exception_handler(temp_data_dir: Path):
+    test_settings = Settings(
+        data_dir=temp_data_dir,
+        gemini_api_key="test_key",
+        require_auth=False,
+    )
+    storage_service = StorageService(data_dir=temp_data_dir)
+    image_service = ImageService(data_dir=temp_data_dir)
+    app = create_app(
+        settings=test_settings,
+        storage_service=storage_service,
+        image_service=image_service,
+    )
+
+    # Corrupt the drafts.json file with non-JSON bytes
+    drafts_file = temp_data_dir / "drafts.json"
+    drafts_file.write_text("CORRUPTED_JSON_DATA{{{", encoding="utf-8")
+
+    client = TestClient(app)
+    res = client.get("/api/drafts")
+    assert res.status_code == 500
+    data = res.json()
+    assert data.get("error_code") == "STORAGE_CORRUPTED"
+    assert "Speicherdatei beschädigt" in data.get("detail", "")
+
+    # Assert automatic backup file was created
+    backups = list(temp_data_dir.glob("drafts.json.corrupt.*"))
+    assert len(backups) >= 1
+
+
+
 
 
 

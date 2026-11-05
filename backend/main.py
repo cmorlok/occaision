@@ -27,6 +27,7 @@ from backend.services.image_service import ImageService
 from backend.storage import (
     DraftNotFoundError,
     RevisionConflictError,
+    StorageCorruptedError,
     StorageService,
 )
 
@@ -255,6 +256,17 @@ def create_app(
                 "connect-src 'self' http://127.0.0.1:8000 http://localhost:8000;"
             )
         return response
+
+    @app.exception_handler(StorageCorruptedError)
+    def handle_storage_corrupted(request: Request, exc: StorageCorruptedError):
+        logger.critical(f"Storage corruption detected: {exc}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"Speicherdatei beschädigt. Ein automatisches Backup wurde angelegt: {exc}",
+                "error_code": "STORAGE_CORRUPTED",
+            },
+        )
 
     # 0. Pairing
     @app.post("/api/auth/pair")
