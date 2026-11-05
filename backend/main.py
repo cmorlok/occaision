@@ -513,7 +513,10 @@ def create_app(
 
         # 0. Load enabled price sources from settings
         preset_settings = storage.get_settings()
-        enabled_sources = getattr(preset_settings, "enabled_price_sources", None) or list(DEFAULT_PRICE_SOURCES)
+        if hasattr(preset_settings, "enabled_price_sources") and preset_settings.enabled_price_sources is not None:
+            enabled_sources = preset_settings.enabled_price_sources
+        else:
+            enabled_sources = list(DEFAULT_PRICE_SOURCES)
 
         # 1. Check if extension already fetched market prices
         pa = draft.price_analysis

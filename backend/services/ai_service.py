@@ -1,6 +1,7 @@
 import io
 import json
 import logging
+import math
 from pathlib import Path
 import re
 import sys
@@ -27,6 +28,16 @@ if not logger.handlers:
     _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
     logger.addHandler(_handler)
 logger.propagate = False
+
+
+def safe_price(val: Any, default: float = 0.0) -> float:
+    try:
+        n = float(val)
+        if math.isnan(n) or math.isinf(n) or n < 0:
+            return default
+        return round(n, 2)
+    except (ValueError, TypeError):
+        return default
 
 SWISS_LEGAL_DISCLAIMER = "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
 GERMAN_LEGAL_DISCLAIMER = (
@@ -339,10 +350,11 @@ class AIService:
             }
             if "ebay_de_sold" not in enabled_sources:
                 ebay_stats = None
-        has_extension_prices = bool(
-            (existing_pa and existing_pa.prices_fetched_via_extension)
-            or any(ms.sample_count > 0 for ms in market_sources.values())
+        has_usable_samples = any(
+            getattr(ms, "sample_count", 0) > 0 and getattr(ms, "median_price", None) is not None
+            for ms in market_sources.values()
         )
+        has_extension_prices = bool(has_usable_samples)
 
         if has_extension_prices and market_sources:
             logger.info(
@@ -476,12 +488,12 @@ class AIService:
             prices_fetched_via_extension=has_extension_prices,
             ch_new_price_chf=payload.get("ch_new_price_chf") or ch_new_fallback,
             de_new_price_eur=payload.get("de_new_price_eur") or de_new_fallback,
-            ricardo_start_chf=float(payload.get("ricardo_start_chf", 1.0)),
-            ricardo_buynow_chf=float(payload.get("ricardo_buynow_chf", 10.0)),
-            tutti_vhb_chf=float(payload.get("tutti_vhb_chf", 10.0)),
-            ebay_start_eur=float(payload.get("ebay_start_eur", 1.0)),
-            ebay_buynow_eur=float(payload.get("ebay_buynow_eur", 10.0)),
-            kleinanzeigen_vb_eur=float(payload.get("kleinanzeigen_vb_eur", 10.0)),
+            ricardo_start_chf=safe_price(payload.get("ricardo_start_chf"), 1.0),
+            ricardo_buynow_chf=safe_price(payload.get("ricardo_buynow_chf"), 10.0),
+            tutti_vhb_chf=safe_price(payload.get("tutti_vhb_chf"), 10.0),
+            ebay_start_eur=safe_price(payload.get("ebay_start_eur"), 1.0),
+            ebay_buynow_eur=safe_price(payload.get("ebay_buynow_eur"), 10.0),
+            kleinanzeigen_vb_eur=safe_price(payload.get("kleinanzeigen_vb_eur"), 10.0),
             reasoning=payload.get("reasoning", ""),
             verification_links=v_links,
         )
@@ -496,27 +508,27 @@ class AIService:
         draft.ricardo.title = payload.get("ricardo_title", draft.ricardo.title)
         draft.ricardo.description = payload.get("ricardo_description", draft.ricardo.description)
         draft.ricardo.condition = map_cond(payload.get("ricardo_condition"))
-        draft.ricardo.start_price_chf = float(payload.get("ricardo_start_chf", draft.ricardo.start_price_chf))
-        draft.ricardo.buynow_price_chf = float(payload.get("ricardo_buynow_chf", draft.ricardo.buynow_price_chf))
+        draft.ricardo.start_price_chf = safe_price(payload.get("ricardo_start_chf"), draft.ricardo.start_price_chf)
+        draft.ricardo.buynow_price_chf = safe_price(payload.get("ricardo_buynow_chf"), draft.ricardo.buynow_price_chf)
 
         draft.tutti.title = payload.get("tutti_title", draft.tutti.title)
         draft.tutti.category_suggestion = payload.get("tutti_category", draft.tutti.category_suggestion)
         draft.tutti.description = payload.get("tutti_description", draft.tutti.description)
         draft.tutti.condition = map_cond(payload.get("tutti_condition"))
-        draft.tutti.price_vhb_chf = float(payload.get("tutti_vhb_chf", draft.tutti.price_vhb_chf))
+        draft.tutti.price_vhb_chf = safe_price(payload.get("tutti_vhb_chf"), draft.tutti.price_vhb_chf)
 
         draft.ebay_de.title = payload.get("ebay_de_title", draft.ebay_de.title)
         draft.ebay_de.category_suggestion = payload.get("ebay_de_category", draft.ebay_de.category_suggestion)
         draft.ebay_de.description = payload.get("ebay_de_description", draft.ebay_de.description)
         draft.ebay_de.condition = map_cond(payload.get("ebay_de_condition"))
-        draft.ebay_de.start_price_eur = float(payload.get("ebay_start_eur", draft.ebay_de.start_price_eur))
-        draft.ebay_de.buynow_price_eur = float(payload.get("ebay_buynow_eur", draft.ebay_de.buynow_price_eur))
+        draft.ebay_de.start_price_eur = safe_price(payload.get("ebay_start_eur"), draft.ebay_de.start_price_eur)
+        draft.ebay_de.buynow_price_eur = safe_price(payload.get("ebay_buynow_eur"), draft.ebay_de.buynow_price_eur)
 
         draft.kleinanzeigen.title = payload.get("kleinanzeigen_title", draft.kleinanzeigen.title)
         draft.kleinanzeigen.category_suggestion = payload.get("kleinanzeigen_category", draft.kleinanzeigen.category_suggestion)
         draft.kleinanzeigen.description = payload.get("kleinanzeigen_description", draft.kleinanzeigen.description)
         draft.kleinanzeigen.condition = map_cond(payload.get("kleinanzeigen_condition"))
-        draft.kleinanzeigen.price_eur = float(payload.get("kleinanzeigen_vb_eur", draft.kleinanzeigen.price_eur))
+        draft.kleinanzeigen.price_eur = safe_price(payload.get("kleinanzeigen_vb_eur"), draft.kleinanzeigen.price_eur)
 
         draft.status = DraftStatus.READY
         return draft

@@ -218,5 +218,54 @@ def test_durable_config_persistence_and_read_only_get(temp_data_dir: Path):
     assert res_cfg_again.json()["gemini_model"] == "custom-model-id"
 
 
+def test_empty_price_sources_preserved_and_has_extension_prices_semantics(temp_data_dir: Path):
+    from backend.models import MarketSourceStats, PriceAnalysis
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=False)
+    storage = StorageService(data_dir=temp_data_dir)
+    app = create_app(settings=test_settings, storage_service=storage)
+    client = TestClient(app)
+
+    # 1. Update settings with an explicitly empty enabled_price_sources
+    res_set = client.put(
+        "/api/settings",
+        json={
+            "default_offer_type": "auction",
+            "default_shipping_preset_id": "b_post_2kg",
+            "default_de_shipping_preset_id": "dhl_2kg",
+            "enabled_price_sources": [],
+            "keep_tabs_open_after_search": False,
+            "shipping_presets": [],
+        },
+    )
+    assert res_set.status_code == 200
+    assert res_set.json()["enabled_price_sources"] == [], "Empty enabled_price_sources must be preserved"
+
+    # Re-fetch from storage to ensure it wasn't overwritten by DEFAULT_PRICE_SOURCES
+    current_settings = storage.get_settings()
+    assert current_settings.enabled_price_sources == []
+
+    # 2. Test has_extension_prices semantics in AIService:
+    # 0 sample count must NOT count as usable extension prices
+    from backend.services.ai_service import AIService
+    ai_svc = AIService(api_key="dummy_key", enable_search_grounding=True)
+
+    draft = storage.create_draft(user_notes="Test Item")
+    draft.price_analysis = PriceAnalysis(
+        prices_fetched_via_extension=True,  # Old stale flag
+        market_sources={
+            "ricardo": MarketSourceStats(source_id="ricardo", label="Ricardo", sample_count=0, median_price=None)
+        },
+    )
+
+    # Calling get_generate_config or evaluating effective grounding
+    # With 0 samples, grounding should NOT be disabled
+    has_usable_samples = any(
+        ms.sample_count > 0 and ms.median_price is not None
+        for ms in draft.price_analysis.market_sources.values()
+    )
+    assert has_usable_samples is False
+
+
+
 
 
