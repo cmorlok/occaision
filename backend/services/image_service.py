@@ -98,11 +98,23 @@ class ImageService:
         opt_img = self.create_optimized_variant(clean_img)
         ai_img = self.create_ai_input_variant(clean_img)
 
-        opt_path = draft_img_dir / f"{image_id}_optimized.jpg"
-        ai_path = draft_img_dir / f"{image_id}_ai.jpg"
+        opt_path = resolve_safe_path(draft_img_dir, f"{image_id}_optimized.jpg")
+        ai_path = resolve_safe_path(draft_img_dir, f"{image_id}_ai.jpg")
 
-        opt_img.save(opt_path, format="JPEG", quality=90, optimize=True)
-        ai_img.save(ai_path, format="JPEG", quality=85, optimize=True)
+        created_paths: list[Path] = []
+        try:
+            opt_img.save(opt_path, format="JPEG", quality=90, optimize=True)
+            created_paths.append(opt_path)
+            ai_img.save(ai_path, format="JPEG", quality=85, optimize=True)
+            created_paths.append(ai_path)
+        except Exception:
+            for p in created_paths:
+                try:
+                    if p.exists() and not p.is_symlink():
+                        p.unlink()
+                except OSError:
+                    pass
+            raise
 
         variants = {
             ImageVariantMode.OPTIMIZED: f"/api/drafts/{draft_id}/images/{image_id}/optimized"
@@ -142,7 +154,15 @@ class ImageService:
             # Composite foreground onto clean neutral light-gray/white (#F8F9FA) canvas
             bg = Image.new("RGB", rgba.size, (248, 249, 250))
             bg.paste(rgba, mask=rgba.split()[3])
-            bg.save(cutout_path, format="JPEG", quality=90, optimize=True)
+            try:
+                bg.save(cutout_path, format="JPEG", quality=90, optimize=True)
+            except Exception:
+                try:
+                    if cutout_path.exists() and not cutout_path.is_symlink():
+                        cutout_path.unlink()
+                except OSError:
+                    pass
+                raise
             elapsed = time.time() - t0
             logger.info(f"[ImageService] Hintergrund erfolgreich entfernt in {elapsed:.2f}s -> {cutout_path.name}")
             return cutout_path
@@ -166,7 +186,15 @@ class ImageService:
             rgba = self.extract_foreground(opt_img)
             blurred_bg = opt_img.filter(ImageFilter.GaussianBlur(radius=18))
             composited = Image.composite(opt_img, blurred_bg, rgba.split()[3])
-            composited.save(blurred_path, format="JPEG", quality=90, optimize=True)
+            try:
+                composited.save(blurred_path, format="JPEG", quality=90, optimize=True)
+            except Exception:
+                try:
+                    if blurred_path.exists() and not blurred_path.is_symlink():
+                        blurred_path.unlink()
+                except OSError:
+                    pass
+                raise
             elapsed = time.time() - t0
             logger.info(f"[ImageService] Hintergrund erfolgreich weichgezeichnet in {elapsed:.2f}s -> {blurred_path.name}")
             return blurred_path

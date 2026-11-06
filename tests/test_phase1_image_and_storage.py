@@ -409,4 +409,35 @@ def test_import_oversized_payload_rejected(temp_data_dir: Path):
     assert res2.status_code == 413
 
 
+def test_upload_failure_orphan_cleanup(temp_data_dir: Path, synthetic_exif_jpeg: bytes, monkeypatch):
+    image_service = ImageService(data_dir=temp_data_dir, mask_extractor=dummy_mask_extractor)
+    draft_id = "draft_orphan_test"
+
+    # Make ai_img.save fail to simulate disk full or serialization failure
+    orig_save = Image.Image.save
+    call_count = 0
+
+    def faulty_save(self, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:  # First save (optimized) succeeds, second save (ai) fails
+            raise IOError("Simulated disk error during secondary variant write")
+        return orig_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(Image.Image, "save", faulty_save)
+
+    with pytest.raises(IOError, match="Simulated disk error"):
+        image_service.process_upload(
+            draft_id=draft_id,
+            raw_bytes=synthetic_exif_jpeg,
+            original_filename="fail_test.jpg",
+        )
+
+    # Ensure no residual image files were left behind in the draft images folder
+    draft_img_dir = temp_data_dir / "images" / draft_id
+    leftover_files = list(draft_img_dir.glob("*"))
+    assert leftover_files == [], f"Expected 0 leftover files, found: {leftover_files}"
+
+
+
 
