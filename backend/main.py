@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from backend import __version__
 from backend.config import Settings, get_logger
 from backend.config import settings as default_settings
 from backend.models import (
@@ -271,7 +272,7 @@ def create_app(
 
     app = FastAPI(
         title="OccAIsion",
-        version="1.0.0",
+        version=__version__,
     )
     auth_token = get_or_create_auth_token(cfg.data_dir)
     active_analyses: set[str] = set()
@@ -441,7 +442,7 @@ def create_app(
             "model": cfg.gemini_model,
             "api_key_configured": bool(cfg.gemini_api_key and cfg.gemini_api_key.strip()),
             "data_dir_writable": os.access(cfg.data_dir, os.W_OK),
-            "version": "1.1.0",
+            "version": __version__,
         }
 
     # 2. Settings

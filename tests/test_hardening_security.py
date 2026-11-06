@@ -397,6 +397,36 @@ def test_storage_corrupted_exception_handler(temp_data_dir: Path):
     assert len(backups) >= 1
 
 
+def test_unified_version_and_workflow_security(temp_data_dir: Path):
+    import backend
+    from backend.main import create_app
+
+    # 1. Version unity
+    assert backend.__version__ == "1.1.0"
+
+    app = create_app()
+    assert app.version == backend.__version__
+
+    client = TestClient(app)
+    health = client.get("/api/health").json()
+    assert health["version"] == backend.__version__
+
+    manifest = json.loads(Path("extension/manifest.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == backend.__version__
+
+    # 2. Workflow hardening
+    release_workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    assert "contents: read" in release_workflow
+    assert "contents: write" in release_workflow  # Scoped to build-and-release job
+    # Shell injection guard: inputs must not be directly inlined in run commands
+    assert 'RAW_TAG="${{ github.event.inputs.tag }}"' not in release_workflow
+    assert 'INPUT_TAG: ${{ github.event.inputs.tag }}' in release_workflow
+
+    ci_workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "contents: read" in ci_workflow
+
+
+
 
 
 

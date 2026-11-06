@@ -6,6 +6,7 @@ Context: [`DEVELOPMENT.md`](DEVELOPMENT.md) (setup, builds, testing), [`REQUIREM
 
 - Canonical project name: **`OccAIsion`** (slug: `occaision`, artifact: `dist/occaision.zip`, container: `occaision`).
 - Maintain neutral user-facing branding: exclude third-party marketplace names (Tutti, Ricardo, eBay, Kleinanzeigen, Idealo, Toppreise, Digitec, Galaxus) from UI text, manifest metadata, package names, and build artifacts. Confine them strictly to internal scrapers, URL routes, and DOM selectors.
+- Version source of truth: `backend.__version__ = "1.1.0"`. `main.py` and `manifest.json` align with this version.
 
 ## Architecture & Extension Boundaries
 
