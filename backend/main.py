@@ -5,6 +5,7 @@ import logging
 import os
 import secrets
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -617,6 +618,43 @@ def create_app(
             return storage.import_drafts_data(payload, overwrite=overwrite)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
+
+    @app.get("/api/backup/export")
+    def export_complete_backup():
+        archive_path = storage.create_backup_archive()
+        return FileResponse(
+            archive_path,
+            filename=archive_path.name,
+            media_type="application/zip",
+        )
+
+    @app.post("/api/backup/restore")
+    async def restore_complete_backup(file: UploadFile = File(...)):
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="Keine Datei hochgeladen.")
+
+        temp_zip = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name)
+        try:
+            chunks = []
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            temp_zip.write_bytes(b"".join(chunks))
+
+            return storage.restore_backup_archive(temp_zip)
+        except (ValueError, PathTraversalError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error(f"[API] Restore fehlgeschlagen: {e}")
+            raise HTTPException(status_code=500, detail=f"Wiederherstellung fehlgeschlagen: {e}")
+        finally:
+            if temp_zip.exists():
+                try:
+                    temp_zip.unlink()
+                except OSError:
+                    pass
 
     @app.get("/api/drafts/{draft_id}", response_model=Draft)
     def get_draft(draft_id: str):

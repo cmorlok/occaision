@@ -1,8 +1,10 @@
+import hashlib
 import json
 import shutil
 import tempfile
 import threading
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,7 +18,7 @@ from backend.models import (
     UpdateDraftRequest,
     validate_identifier,
 )
-from backend.path_utils import resolve_safe_path
+from backend.path_utils import PathTraversalError, resolve_safe_path
 
 logger = get_logger("occaision.storage")
 
@@ -458,22 +460,227 @@ class DraftStore:
             self._write_json_atomic(self.drafts_file, merged_list)
             return {"imported_count": imported_count, "total_count": len(merged_list)}
 
-    def cleanup_orphaned_images(self) -> int:
-        """Scan self.images_dir and delete any folder whose draft ID no longer exists."""
+    def create_backup_archive(self, target_path: Optional[Path] = None) -> Path:
+        """Create a complete, photo-inclusive ZIP backup archive containing drafts, settings, images, and manifest with checksums."""
+        now_str = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        if target_path is None:
+            dest = self.data_dir / f"occaision_backup_{now_str}.zip"
+        else:
+            dest = Path(target_path)
+
+        with self._lock:
+            drafts_raw = self._load_drafts_raw()
+            settings = self.get_settings()
+
+            drafts_bytes = json.dumps(drafts_raw, indent=2, ensure_ascii=False).encode("utf-8")
+            settings_bytes = json.dumps(settings.model_dump(), indent=2, ensure_ascii=False).encode("utf-8")
+
+            files_map: Dict[str, bytes] = {
+                "drafts.json": drafts_bytes,
+                "settings.json": settings_bytes,
+            }
+
+            checksums: Dict[str, str] = {
+                "drafts.json": hashlib.sha256(drafts_bytes).hexdigest(),
+                "settings.json": hashlib.sha256(settings_bytes).hexdigest(),
+            }
+
+            # Collect all image files
+            if self.images_dir.exists():
+                for draft_folder in self.images_dir.iterdir():
+                    if draft_folder.is_dir() and not draft_folder.is_symlink():
+                        try:
+                            validate_identifier(draft_folder.name, "draft_id")
+                        except ValueError:
+                            continue
+                        for img_file in draft_folder.iterdir():
+                            if img_file.is_file() and not img_file.is_symlink():
+                                rel_path = f"images/{draft_folder.name}/{img_file.name}"
+                                b = img_file.read_bytes()
+                                files_map[rel_path] = b
+                                checksums[rel_path] = hashlib.sha256(b).hexdigest()
+
+            manifest = {
+                "format": "occaision_backup_v1",
+                "version": 1,
+                "app_version": "1.1.0",
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+                "files": checksums,
+            }
+            manifest_bytes = json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8")
+
+            with tempfile.NamedTemporaryFile("wb", dir=str(self.data_dir), delete=False, suffix=".zip") as tf:
+                temp_zip_path = Path(tf.name)
+                with zipfile.ZipFile(tf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                    zf.writestr("manifest.json", manifest_bytes)
+                    for path_str, data_bytes in files_map.items():
+                        zf.writestr(path_str, data_bytes)
+
+            temp_zip_path.replace(dest)
+            return dest
+
+    def restore_backup_archive(self, archive_path: Path) -> Dict[str, Any]:
+        """Validate and restore drafts, settings, and photos from a ZIP backup archive with atomic rollback."""
+        archive_path = Path(archive_path)
+        if not archive_path.exists() or not zipfile.is_zipfile(archive_path):
+            raise ValueError("Ungültige Backup-Datei: Kein gültiges ZIP-Archiv.")
+
+        staging_dir = self.data_dir / ".restore_staging"
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
+        staging_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                # 1. Path safety check for zip slip
+                for info in zf.infolist():
+                    name = info.filename
+                    if name.startswith("/") or "\\" in name or ".." in name.split("/"):
+                        raise PathTraversalError(f"Gefährlicher Pfad im Backup-Archiv gefunden: {name!r}")
+                    if not (
+                        name == "manifest.json"
+                        or name == "drafts.json"
+                        or name == "settings.json"
+                        or name.startswith("images/")
+                    ):
+                        raise ValueError(f"Unerwarteter Dateipfad im Archiv: {name}")
+
+                zf.extractall(staging_dir)
+
+            # 2. Check manifest
+            manifest_file = staging_dir / "manifest.json"
+            if not manifest_file.exists():
+                raise ValueError("Ungültiges Archiv: 'manifest.json' fehlt.")
+
+            try:
+                manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+            except Exception as e:
+                raise ValueError(f"Korrupte manifest.json: {e}") from e
+
+            if manifest.get("format") != "occaision_backup_v1":
+                raise ValueError(f"Nicht unterstütztes Backup-Format: {manifest.get('format')}")
+
+            expected_checksums = manifest.get("files", {})
+
+            # 3. Verify checksums of all files
+            for rel_path, expected_hash in expected_checksums.items():
+                target_file = staging_dir / rel_path
+                if not target_file.exists():
+                    raise ValueError(f"Datei '{rel_path}' aus Manifest nicht im Archiv gefunden.")
+                computed_hash = hashlib.sha256(target_file.read_bytes()).hexdigest()
+                if computed_hash != expected_hash:
+                    raise ValueError(f"Prüfsummenfehler für '{rel_path}': Archiv beschädigt oder manipuliert.")
+
+            # 4. Validate drafts.json
+            drafts_file = staging_dir / "drafts.json"
+            if not drafts_file.exists():
+                raise ValueError("drafts.json fehlt im Archiv.")
+            try:
+                raw_drafts = json.loads(drafts_file.read_text(encoding="utf-8"))
+            except Exception as e:
+                raise ValueError(f"Ungültiges JSON in drafts.json: {e}") from e
+
+            validated_drafts = []
+            seen_draft_ids = set()
+            for d in raw_drafts:
+                vd = Draft.model_validate(d)
+                if vd.id in seen_draft_ids:
+                    raise ValueError(f"Doppelte Draft-ID {vd.id} im Backup gefunden.")
+                seen_draft_ids.add(vd.id)
+                validated_drafts.append(vd)
+
+            # 5. Validate settings.json
+            settings_file = staging_dir / "settings.json"
+            if settings_file.exists():
+                try:
+                    PresetSettings.model_validate(json.loads(settings_file.read_text(encoding="utf-8")))
+                except Exception as e:
+                    raise ValueError(f"Ungültige Einstellungen im Backup: {e}") from e
+
+            # 6. Commit transactionally under lock
+            with self._lock:
+                # Backup current state for rollback
+                pre_restore = self.data_dir / ".pre_restore_backup"
+                if pre_restore.exists():
+                    shutil.rmtree(pre_restore, ignore_errors=True)
+                pre_restore.mkdir(parents=True, exist_ok=True)
+
+                if self.drafts_file.exists():
+                    shutil.copy2(self.drafts_file, pre_restore / "drafts.json")
+                if self.settings_file.exists():
+                    shutil.copy2(self.settings_file, pre_restore / "settings.json")
+                if self.images_dir.exists():
+                    shutil.copytree(self.images_dir, pre_restore / "images", dirs_exist_ok=True)
+
+                try:
+                    # Apply drafts & settings
+                    shutil.copy2(drafts_file, self.drafts_file)
+                    if settings_file.exists():
+                        shutil.copy2(settings_file, self.settings_file)
+
+                    # Apply images
+                    staged_images = staging_dir / "images"
+                    if staged_images.exists():
+                        self.images_dir.mkdir(parents=True, exist_ok=True)
+                        for d_dir in staged_images.iterdir():
+                            if d_dir.is_dir():
+                                dest_d = resolve_safe_path(self.images_dir, d_dir.name)
+                                if dest_d.exists():
+                                    shutil.rmtree(dest_d, ignore_errors=True)
+                                shutil.copytree(d_dir, dest_d)
+
+                    shutil.rmtree(pre_restore, ignore_errors=True)
+                except Exception as commit_err:
+                    # Rollback
+                    logger.error(f"[Storage] Fehler beim Anwenden des Backups, führe Rollback durch: {commit_err}")
+                    if (pre_restore / "drafts.json").exists():
+                        shutil.copy2(pre_restore / "drafts.json", self.drafts_file)
+                    if (pre_restore / "settings.json").exists():
+                        shutil.copy2(pre_restore / "settings.json", self.settings_file)
+                    if (pre_restore / "images").exists():
+                        shutil.rmtree(self.images_dir, ignore_errors=True)
+                        shutil.copytree(pre_restore / "images", self.images_dir)
+                    shutil.rmtree(pre_restore, ignore_errors=True)
+                    raise commit_err
+
+            total_images = sum(len(d.images) for d in validated_drafts)
+            return {
+                "ok": True,
+                "restored_drafts": len(validated_drafts),
+                "restored_images": total_images,
+            }
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+
+    def cleanup_orphaned_images(self, quarantine: bool = True) -> int:
+        """Scan self.images_dir and move any folder whose draft ID no longer exists to quarantine."""
         with self._lock:
             existing_ids = {d.id for d in self.list_drafts()}
         cleaned_count = 0
         if not self.images_dir.exists():
             return 0
+
+        quarantine_dir = self.data_dir / "quarantine"
+        if quarantine:
+            quarantine_dir.mkdir(parents=True, exist_ok=True)
+
         try:
             for entry in list(self.images_dir.iterdir()):
                 if entry.is_dir() and not entry.is_symlink() and entry.name not in existing_ids:
                     try:
                         validate_identifier(entry.name, "draft_id")
                         safe_entry = resolve_safe_path(self.images_dir, entry.name)
-                        shutil.rmtree(safe_entry, ignore_errors=True)
+                        if quarantine:
+                            dest_q = quarantine_dir / entry.name
+                            if dest_q.exists():
+                                now_tag = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                                dest_q = quarantine_dir / f"{entry.name}_{now_tag}"
+                            shutil.move(str(safe_entry), str(dest_q))
+                            logger.info(f"[Storage] Moved orphaned image directory to quarantine: {entry.name} -> {dest_q.name}")
+                        else:
+                            shutil.rmtree(safe_entry, ignore_errors=True)
+                            logger.info(f"[Storage] Cleaned up orphaned image directory: {entry.name}")
                         cleaned_count += 1
-                        logger.info(f"[Storage] Cleaned up orphaned image directory: {entry.name}")
                     except Exception as err:
                         logger.warning(f"[Storage] Skipping unsafe or invalid orphaned folder {entry.name}: {err}")
         except Exception as e:
