@@ -33,15 +33,22 @@ class ImageService:
 
     def clean_and_orient(self, raw_bytes: bytes) -> Image.Image:
         """Open, orient according to EXIF, convert to RGB, and discard all metadata."""
-        with Image.open(io.BytesIO(raw_bytes)) as loaded_img:
-            oriented = ImageOps.exif_transpose(loaded_img)
-            if oriented is None:
-                oriented = loaded_img
-            rgb_conv = oriented.convert("RGB")
-            # Create a completely fresh image with pixel copy to guarantee no EXIF tags survive
-            clean_img = Image.new("RGB", rgb_conv.size)
-            clean_img.paste(rgb_conv, (0, 0))
-            return clean_img
+        try:
+            with Image.open(io.BytesIO(raw_bytes)) as loaded_img:
+                if loaded_img.width * loaded_img.height > Image.MAX_IMAGE_PIXELS:
+                    raise ValueError(
+                        f"Bildabmessungen zu gross ({loaded_img.width}x{loaded_img.height}px). Limit: 50 MP."
+                    )
+                oriented = ImageOps.exif_transpose(loaded_img)
+                if oriented is None:
+                    oriented = loaded_img
+                rgb_conv = oriented.convert("RGB")
+                # Create a completely fresh image with pixel copy to guarantee no EXIF tags survive
+                clean_img = Image.new("RGB", rgb_conv.size)
+                clean_img.paste(rgb_conv, (0, 0))
+                return clean_img
+        except Image.DecompressionBombError as e:
+            raise ValueError(f"Bildabmessungen überschreiten das Sicherheitslimit: {e}") from e
 
     def create_optimized_variant(self, clean_img: Image.Image) -> Image.Image:
         """Auto-contrast and downscale max dimension to 2048px."""

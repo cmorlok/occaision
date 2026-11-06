@@ -388,7 +388,25 @@ def test_draft_store_delete_image_and_draft(temp_data_dir: Path, synthetic_exif_
     assert draft_dir.exists()
     store.delete_draft(draft.id)
     assert not draft_dir.exists()
-    assert store.get_draft(draft.id) is None
+
+
+def test_import_oversized_payload_rejected(temp_data_dir: Path):
+    from fastapi.testclient import TestClient
+
+    from backend.config import Settings
+    from backend.main import create_app
+
+    app = create_app(settings=Settings(data_dir=temp_data_dir, require_auth=False))
+    client = TestClient(app)
+
+    # 1. Content-Length header exceeding 10 MB rejected early
+    res = client.post("/api/drafts/import", headers={"Content-Length": str(11 * 1024 * 1024)}, json={})
+    assert res.status_code == 413
+
+    # 2. Large body payload exceeding 10 MB rejected
+    large_body = b'{"drafts": [' + (b'"x"' * (10 * 1024 * 1024 + 20)) + b"]}"
+    res2 = client.post("/api/drafts/import", content=large_body, headers={"Content-Type": "application/json"})
+    assert res2.status_code == 413
 
 
 

@@ -31,6 +31,8 @@ from backend.path_utils import PathTraversalError
 from backend.services.ai_service import AIService
 from backend.services.image_service import ImageService
 from backend.storage import (
+    MAX_FILE_SIZE,
+    MAX_FILES_PER_BATCH,
     BatchLimitExceededError,
     DraftNotFoundError,
     DraftStore,
@@ -41,6 +43,9 @@ from backend.storage import (
 )
 
 logger = get_logger("occaision.api")
+
+MAX_IMPORT_SIZE = 10 * 1024 * 1024  # 10 MB
+UPLOAD_CHUNK_SIZE = 256 * 1024       # 256 KB streaming chunks
 
 
 def configure_logging(level_name: Optional[str] = None):
@@ -559,13 +564,37 @@ def create_app(
         overwrite: bool = False,
         file: Optional[UploadFile] = None,
     ):
+        cl = request.headers.get("content-length")
+        if cl:
+            try:
+                if int(cl) > MAX_IMPORT_SIZE:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Import-Payload überschreitet das Limit von 10 MB.",
+                    )
+            except ValueError:
+                pass
+
         content_type = request.headers.get("content-type", "")
         if "multipart/form-data" in content_type:
             form = await request.form()
             upload = form.get("file")
             if not upload or not hasattr(upload, "read"):
                 raise HTTPException(status_code=400, detail="Keine Datei 'file' im Upload gefunden.")
-            content_bytes = await upload.read()
+            chunks = []
+            total = 0
+            while True:
+                chunk = await upload.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_IMPORT_SIZE:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail="Import-Datei überschreitet das Limit von 10 MB.",
+                    )
+                chunks.append(chunk)
+            content_bytes = b"".join(chunks)
             try:
                 payload = json.loads(content_bytes.decode("utf-8"))
             except Exception as e:
@@ -573,8 +602,14 @@ def create_app(
             if form.get("overwrite") in ("true", "1", True):
                 overwrite = True
         else:
+            body_bytes = await request.body()
+            if len(body_bytes) > MAX_IMPORT_SIZE:
+                raise HTTPException(
+                    status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail="Import-Body überschreitet das Limit von 10 MB.",
+                )
             try:
-                payload = await request.json()
+                payload = json.loads(body_bytes.decode("utf-8"))
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Ungültiges JSON im Request-Body: {e}")
 
@@ -619,11 +654,30 @@ def create_app(
     # 4. Images
     @app.post("/api/drafts/{draft_id}/images", response_model=Draft)
     async def upload_images(draft_id: str, files: List[UploadFile] = File(...)):
+        # 1. Enforce batch file count BEFORE reading any contents into memory
+        if len(files) > MAX_FILES_PER_BATCH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximal {MAX_FILES_PER_BATCH} Bilder pro Upload erlaubt (erhalten: {len(files)}).",
+            )
+
         logger.info(f"[API] Empfange {len(files)} Bild(er) für Draft {draft_id}...")
         file_payloads: List[Tuple[str, bytes]] = []
         for f in files:
-            content = await f.read()
-            file_payloads.append((f.filename or "upload.jpg", content))
+            chunks = []
+            total_size = 0
+            while True:
+                chunk = await f.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > MAX_FILE_SIZE:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"Datei '{f.filename or 'upload.jpg'}' überschreitet das Limit von 25 MB.",
+                    )
+                chunks.append(chunk)
+            file_payloads.append((f.filename or "upload.jpg", b"".join(chunks)))
 
         try:
             return await asyncio.to_thread(storage.add_images, draft_id, file_payloads)
