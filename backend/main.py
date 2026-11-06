@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -155,6 +156,72 @@ class UpdateSystemConfigRequest(BaseModel):
     gemini_model: Optional[str] = None
     enable_search_grounding: Optional[bool] = None
     eur_to_chf_rate: Optional[float] = None
+
+
+def merge_analysis_results(base: Draft, current: Draft, analyzed: Draft) -> Draft:
+    """Merge AI analysis results into current draft preserving any fields modified by the user."""
+    # Ricardo
+    if current.ricardo.title == base.ricardo.title:
+        current.ricardo.title = analyzed.ricardo.title
+    if current.ricardo.description == base.ricardo.description:
+        current.ricardo.description = analyzed.ricardo.description
+    if current.ricardo.condition == base.ricardo.condition:
+        current.ricardo.condition = analyzed.ricardo.condition
+    if current.ricardo.start_price_chf == base.ricardo.start_price_chf:
+        current.ricardo.start_price_chf = analyzed.ricardo.start_price_chf
+    if current.ricardo.buynow_price_chf == base.ricardo.buynow_price_chf:
+        current.ricardo.buynow_price_chf = analyzed.ricardo.buynow_price_chf
+
+    # Tutti
+    if current.tutti.title == base.tutti.title:
+        current.tutti.title = analyzed.tutti.title
+    if current.tutti.description == base.tutti.description:
+        current.tutti.description = analyzed.tutti.description
+    if current.tutti.category_suggestion == base.tutti.category_suggestion:
+        current.tutti.category_suggestion = analyzed.tutti.category_suggestion
+    if current.tutti.condition == base.tutti.condition:
+        current.tutti.condition = analyzed.tutti.condition
+    if current.tutti.price_vhb_chf == base.tutti.price_vhb_chf:
+        current.tutti.price_vhb_chf = analyzed.tutti.price_vhb_chf
+
+    # eBay DE
+    if current.ebay_de.title == base.ebay_de.title:
+        current.ebay_de.title = analyzed.ebay_de.title
+    if current.ebay_de.description == base.ebay_de.description:
+        current.ebay_de.description = analyzed.ebay_de.description
+    if current.ebay_de.category_suggestion == base.ebay_de.category_suggestion:
+        current.ebay_de.category_suggestion = analyzed.ebay_de.category_suggestion
+    if current.ebay_de.condition == base.ebay_de.condition:
+        current.ebay_de.condition = analyzed.ebay_de.condition
+    if current.ebay_de.start_price_eur == base.ebay_de.start_price_eur:
+        current.ebay_de.start_price_eur = analyzed.ebay_de.start_price_eur
+    if current.ebay_de.buynow_price_eur == base.ebay_de.buynow_price_eur:
+        current.ebay_de.buynow_price_eur = analyzed.ebay_de.buynow_price_eur
+
+    # Kleinanzeigen
+    if current.kleinanzeigen.title == base.kleinanzeigen.title:
+        current.kleinanzeigen.title = analyzed.kleinanzeigen.title
+    if current.kleinanzeigen.description == base.kleinanzeigen.description:
+        current.kleinanzeigen.description = analyzed.kleinanzeigen.description
+    if current.kleinanzeigen.category_suggestion == base.kleinanzeigen.category_suggestion:
+        current.kleinanzeigen.category_suggestion = analyzed.kleinanzeigen.category_suggestion
+    if current.kleinanzeigen.condition == base.kleinanzeigen.condition:
+        current.kleinanzeigen.condition = analyzed.kleinanzeigen.condition
+    if current.kleinanzeigen.price_eur == base.kleinanzeigen.price_eur:
+        current.kleinanzeigen.price_eur = analyzed.kleinanzeigen.price_eur
+    if current.kleinanzeigen.price_type == base.kleinanzeigen.price_type:
+        current.kleinanzeigen.price_type = analyzed.kleinanzeigen.price_type
+
+    # Identified product
+    if not current.identified_product or current.identified_product == base.identified_product:
+        current.identified_product = analyzed.identified_product
+
+    # Hints, Price Analysis & Status
+    current.price_analysis = analyzed.price_analysis
+    current.missing_photo_hints = analyzed.missing_photo_hints
+    current.status = analyzed.status
+
+    return current
 
 
 def create_app(
@@ -635,12 +702,24 @@ def create_app(
 
             # 3. Run AI analysis
             try:
-                analyzed_draft = await ai_svc.analyze_draft(
+                ai_coro = ai_svc.analyze_draft(
                     draft=draft,
                     image_paths=ai_image_paths,
                     ebay_stats=ebay_stats,
                     enabled_sources=enabled_sources,
                 )
+                if inspect.isawaitable(ai_coro):
+                    analyzed_draft = await asyncio.wait_for(ai_coro, timeout=90.0)
+                else:
+                    analyzed_draft = ai_coro
+            except asyncio.TimeoutError:
+                logger.error(f"[API] KI-Analyse für Draft {draft_id} überschritt das Timeout (90s).")
+                raise HTTPException(
+                    status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                    detail="Zeitüberschreitung bei der KI-Analyse (Timeout nach 90 Sekunden). Bitte erneut versuchen.",
+                )
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.error(f"[API] KI-Analyse fehlgeschlagen: {e}")
                 err_str = str(e)
@@ -669,17 +748,15 @@ def create_app(
             if not current:
                 raise HTTPException(status_code=404, detail="Draft was deleted during analysis")
 
-            current.ricardo = analyzed_draft.ricardo
-            current.tutti = analyzed_draft.tutti
-            current.ebay_de = analyzed_draft.ebay_de
-            current.kleinanzeigen = analyzed_draft.kleinanzeigen
-            current.price_analysis = analyzed_draft.price_analysis
-            current.status = analyzed_draft.status
-            current.missing_photo_hints = analyzed_draft.missing_photo_hints
-            if analyzed_draft.identified_product and not current.identified_product:
-                current.identified_product = analyzed_draft.identified_product
+            merged = merge_analysis_results(base=draft, current=current, analyzed=analyzed_draft)
 
-            return storage.update_draft(current)
+            try:
+                return storage.update_draft(merged)
+            except RevisionConflictError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"Konflikt beim Speichern der Analyse: Der Entwurf wurde zwischenzeitlich anderweitig geändert ({e}). Bitte erneut versuchen.",
+                )
         finally:
             with active_analyses_lock:
                 active_analyses.discard(draft_id)
