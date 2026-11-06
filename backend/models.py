@@ -155,6 +155,9 @@ class MarketSourceStats(BaseModel):
     login_required: bool = False
     error: Optional[str] = None
     items: Optional[List[Dict[str, Any]]] = None
+    captured_at: Optional[str] = None
+    query: Optional[str] = None
+    confidence: Optional[float] = None
 
 
 class VerificationLinks(BaseModel):

@@ -660,6 +660,34 @@ function findIdealoProductsInNextData(obj) {
   return items;
 }
 
+function calculateTokenOverlap(query, candidateTitle) {
+  if (!query || !candidateTitle) return 0.0;
+  const tokenize = s => s.toLowerCase().replace(/[^a-z0-9äöüß]/gi, " ").split(/\s+/).filter(w => w.length > 1);
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return 1.0;
+  const tTokens = new Set(tokenize(candidateTitle));
+  let matchCount = 0;
+  for (const t of qTokens) {
+    if (tTokens.has(t)) matchCount++;
+  }
+  return Math.round((matchCount / qTokens.length) * 100) / 100;
+}
+
+function selectBestMatchingItem(items, query) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  if (!query || items.length === 1) return items[0];
+  let bestItem = items[0];
+  let bestScore = -1;
+  for (const item of items) {
+    const score = calculateTokenOverlap(query, item.title || "");
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
+    }
+  }
+  return bestItem;
+}
+
 function extractIdealoItems(html, priceNodes = [], idealoCards = []) {
   const items = [];
 
@@ -1125,6 +1153,9 @@ function computeSourceStats(
     login_required: Boolean(extra.login_required),
     error: extra.error || null,
     items: extra.items || null,
+    captured_at: new Date().toISOString(),
+    query: extra.query || "",
+    confidence: extra.confidence !== undefined ? extra.confidence : 1.0,
   };
 }
 
@@ -1828,26 +1859,30 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
       extra.items = kleinanzeigenItems;
       logKleinanzeigenExtractedItems(kleinanzeigenItems);
     }
+    extra.query = query || "";
   } else if (sourceConfig.id === "idealo") {
     if (idealoItems && idealoItems.length > 0) {
       extra.items = idealoItems;
       logIdealoExtractedItems(idealoItems);
-      // For Idealo: The first card (.sr-resultList_* .sr-detailedPriceInfo__price_*) is the primary product's best new price!
-      prices = [idealoItems[0].price];
+      const matched = selectBestMatchingItem(idealoItems, query);
+      extra.confidence = matched ? calculateTokenOverlap(query, matched.title || "") : 1.0;
+      prices = matched ? [matched.price] : [idealoItems[0].price];
     }
   } else if (sourceConfig.id === "toppreise") {
     if (toppreiseItems && toppreiseItems.length > 0) {
       extra.items = toppreiseItems;
       logToppreiseExtractedItems(toppreiseItems);
-      // For Toppreise: The first product in the list or product page is the primary product's best new price!
-      prices = [toppreiseItems[0].price];
+      const matched = selectBestMatchingItem(toppreiseItems, query);
+      extra.confidence = matched ? calculateTokenOverlap(query, matched.title || "") : 1.0;
+      prices = matched ? [matched.price] : [toppreiseItems[0].price];
     }
   } else if (sourceConfig.id === "digitec") {
     if (digitecItems && digitecItems.length > 0) {
       extra.items = digitecItems;
       logDigitecExtractedItems(digitecItems);
-      // For Galaxus/Digitec: The first product in the list or product page is the primary product's best new price!
-      prices = [digitecItems[0].price];
+      const matched = selectBestMatchingItem(digitecItems, query);
+      extra.confidence = matched ? calculateTokenOverlap(query, matched.title || "") : 1.0;
+      prices = matched ? [matched.price] : [digitecItems[0].price];
     }
   } else if (sourceConfig.id === "ricardo") {
     if (ricardoItems && ricardoItems.length > 0) {
@@ -2074,6 +2109,8 @@ if (typeof module !== "undefined" && module.exports) {
     logRicardoExtractedItems,
     extractTuttiItems,
     logTuttiExtractedItems,
+    calculateTokenOverlap,
+    selectBestMatchingItem,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,

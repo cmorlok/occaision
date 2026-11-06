@@ -941,5 +941,102 @@ def test_content_handles_unauthorized_draft_list():
     assert res.returncode == 0, f"Content script auth UX test failed: {res.stderr}"
 
 
+def test_ricardo_offer_type_and_shipping_preset():
+    node_script = """
+    const content = require('./extension/content.js');
+
+    // 1. Ricardo offer_type mapping in getPlatformData
+    const auctionDraft = {
+      ricardo: { title: 'Item 1', offer_type: 'auction', start_price_chf: 1.0, buynow_price_chf: 20.0 }
+    };
+    const fixedDraft = {
+      ricardo: { title: 'Item 2', offer_type: 'fixed_price', buynow_price_chf: 50.0 }
+    };
+
+    const d1 = content.getPlatformData(auctionDraft, 'ricardo');
+    if (d1.priceType !== 'auction') throw new Error('Expected auction priceType, got: ' + d1.priceType);
+
+    const d2 = content.getPlatformData(fixedDraft, 'ricardo');
+    if (d2.priceType !== 'fixed_price') throw new Error('Expected fixed_price priceType, got: ' + d2.priceType);
+
+    // 2. fillRicardoShipping pickup_allowed logic
+    let clickedPickup = 0;
+    const mockPickupSwitch = {
+      checked: false,
+      click: () => { clickedPickup++; mockPickupSwitch.checked = !mockPickupSwitch.checked; }
+    };
+    const mockShippingSwitch = {
+      checked: true,
+      click: () => {}
+    };
+
+    global.document = {
+      querySelector: (sel) => {
+        if (sel.includes('value="Pickup"')) return mockPickupSwitch;
+        if (sel.includes('value="Shipping"')) return mockShippingSwitch;
+        return null;
+      },
+      querySelectorAll: () => []
+    };
+
+    // When pickup_allowed is false, pickupSwitch should not be activated
+    const noPickupDraft = {
+      ricardo: { shipping_preset_id: 'b_post_2kg', pickup_allowed: false }
+    };
+    content.fillRicardoShipping(noPickupDraft).then(() => {
+      if (mockPickupSwitch.checked) throw new Error('Pickup should not be checked when pickup_allowed is false');
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Ricardo offer type / shipping test failed: {res.stderr}"
+
+
+def test_price_token_overlap_matching_and_provenance():
+    node_script = """
+    const bg = require('./extension/background.js');
+
+    // 1. Token overlap test
+    const q = 'Bose QuietComfort 45';
+    const cand1 = 'Bose QuietComfort 45 Wireless Noise Cancelling Kopfhörer';
+    const cand2 = 'Bose Noise Cancelling 700 Kopfhörer';
+    const cand3 = 'Logitech MX Master 3S';
+
+    const s1 = bg.calculateTokenOverlap(q, cand1);
+    const s2 = bg.calculateTokenOverlap(q, cand2);
+    const s3 = bg.calculateTokenOverlap(q, cand3);
+
+    if (s1 < 0.9) throw new Error('Expected s1 to be near 1.0, got: ' + s1);
+    if (s2 >= s1) throw new Error('Expected cand1 to rank higher than cand2');
+    if (s3 > 0.1) throw new Error('Expected cand3 to have near 0 overlap, got: ' + s3);
+
+    // 2. selectBestMatchingItem
+    const items = [
+      { title: cand3, price: 99.0 },
+      { title: cand2, price: 219.0 },
+      { title: cand1, price: 189.0 }
+    ];
+    const best = bg.selectBestMatchingItem(items, q);
+    if (!best || best.title !== cand1) {
+      throw new Error('Expected best item to be cand1, got: ' + JSON.stringify(best));
+    }
+
+    // 3. computeSourceStats provenance metadata
+    const stats = bg.computeSourceStats(
+      { id: 'idealo', label: 'Idealo', currency: 'EUR' },
+      [189.0],
+      'https://www.idealo.de/test',
+      'tab',
+      0.94,
+      { query: q, confidence: 0.95 }
+    );
+    if (!stats.captured_at) throw new Error('Missing captured_at timestamp in stats');
+    if (stats.query !== q) throw new Error('Missing query in stats, got: ' + stats.query);
+    if (stats.confidence !== 0.95) throw new Error('Missing confidence in stats, got: ' + stats.confidence);
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Token overlap / provenance test failed: {res.stderr}"
+
+
+
 
 

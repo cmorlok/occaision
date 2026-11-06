@@ -87,7 +87,18 @@ async function fillRicardoPrices(draft, data) {
     }
   }
 
-  if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined) {
+  // Handle Ricardo Offer Type (auction vs fixed_price)
+  if (data && data.priceType === "fixed_price") {
+    const fixedPriceTab = Array.from(document.querySelectorAll('button[role="tab"], input[type="radio"], [role="radio"]')).find(el =>
+      /fixpreis|sofort-?kauf/i.test(el.textContent || el.value || "")
+    );
+    if (fixedPriceTab && (!fixedPriceTab.checked && fixedPriceTab.getAttribute('aria-selected') !== 'true')) {
+      fixedPriceTab.click();
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
+  if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined && data.priceType !== "fixed_price") {
     setNativeValue(startPriceInput, formatPrice(data.startPrice));
   }
 
@@ -190,10 +201,19 @@ async function fillRicardoShipping(draft) {
     await new Promise(r => setTimeout(r, 250));
   }
 
-  // Ensure Pickup is also enabled if pickup is allowed (standard for Ricardo)
-  if (pickupSwitch && !isPickupChecked()) {
-    pickupSwitch.click();
-    await new Promise(r => setTimeout(r, 100));
+  // Ensure Pickup matches pickupAllowed (defaults to true if unspecified)
+  const pickupAllowed = draft?.ricardo?.pickup_allowed !== undefined
+    ? draft.ricardo.pickup_allowed
+    : (draft?.preset_settings?.pickup_allowed !== undefined ? draft.preset_settings.pickup_allowed : true);
+
+  if (pickupSwitch) {
+    if (pickupAllowed && !isPickupChecked()) {
+      pickupSwitch.click();
+      await new Promise(r => setTimeout(r, 100));
+    } else if (!pickupAllowed && isPickupChecked()) {
+      pickupSwitch.click();
+      await new Promise(r => setTimeout(r, 100));
+    }
   }
 
   // 3. Check if standard default (Paket bis 2kg, Economy, 9.00 CHF) is what we need
@@ -256,6 +276,12 @@ async function fillRicardoShipping(draft) {
     } else {
       targetWeightRegex = /2\s*kg/i;
       targetCost = 9.00;
+    }
+
+    // Dynamic override from draft shipping presets if provided
+    const draftCost = draft?.shipping_presets?.[presetId]?.cost_chf ?? draft?.ricardo?.shipping_cost_chf;
+    if (draftCost !== undefined && draftCost !== null) {
+      targetCost = Number(draftCost);
     }
 
     if (targetWeightRegex) {
@@ -534,7 +560,7 @@ function getPlatformData(draft, platform) {
       startPrice: draft.ricardo ? draft.ricardo.start_price_chf : 1.0,
       buyNowPrice: draft.ricardo ? draft.ricardo.buynow_price_chf : 10.0,
       currency: "CHF",
-      priceType: "auction"
+      priceType: draft.ricardo && draft.ricardo.offer_type ? draft.ricardo.offer_type : "auction"
     };
   } else if (p === "tutti") {
     return {
