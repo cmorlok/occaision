@@ -48,6 +48,7 @@ from backend.storage import (
 logger = get_logger("occaision.api")
 
 MAX_IMPORT_SIZE = 10 * 1024 * 1024  # 10 MB
+MAX_BACKUP_SIZE = 500 * 1024 * 1024  # 500 MB maximum backup archive size
 UPLOAD_CHUNK_SIZE = 256 * 1024       # 256 KB streaming chunks
 
 
@@ -636,18 +637,26 @@ def create_app(
             raise HTTPException(status_code=400, detail="Keine Datei hochgeladen.")
 
         temp_zip = Path(tempfile.NamedTemporaryFile(delete=False, suffix=".zip").name)
+        total_size = 0
         try:
-            chunks = []
-            while True:
-                chunk = await file.read(UPLOAD_CHUNK_SIZE)
-                if not chunk:
-                    break
-                chunks.append(chunk)
-            temp_zip.write_bytes(b"".join(chunks))
+            with open(temp_zip, "wb") as f:
+                while True:
+                    chunk = await file.read(UPLOAD_CHUNK_SIZE)
+                    if not chunk:
+                        break
+                    total_size += len(chunk)
+                    if total_size > MAX_BACKUP_SIZE:
+                        raise HTTPException(
+                            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                            detail=f"Backup-Archiv überschreitet maximal zulässige Grösse von {MAX_BACKUP_SIZE // (1024 * 1024)} MB.",
+                        )
+                    f.write(chunk)
 
             return storage.restore_backup_archive(temp_zip)
         except (ValueError, PathTraversalError) as e:
             raise HTTPException(status_code=400, detail=str(e))
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"[API] Restore fehlgeschlagen: {e}")
             raise HTTPException(status_code=500, detail=f"Wiederherstellung fehlgeschlagen: {e}")

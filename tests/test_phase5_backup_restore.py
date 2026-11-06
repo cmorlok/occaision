@@ -141,3 +141,22 @@ def test_backup_restore_api_endpoints(tmp_path: Path):
     data = res_restore.json()
     assert data["ok"] is True
     assert data["restored_drafts"] == 1
+
+
+def test_backup_restore_oversize_rejected(tmp_path: Path, monkeypatch):
+    import backend.main as b_main
+    monkeypatch.setattr(b_main, "MAX_BACKUP_SIZE", 500)  # 500 bytes limit
+
+    settings = Settings(data_dir=tmp_path, require_auth=False)
+    store = DraftStore(data_dir=tmp_path)
+    app = create_app(settings=settings, draft_store=store)
+    client = TestClient(app)
+
+    oversize_payload = b"A" * 1024  # 1 KB > 500 bytes
+    res = client.post(
+        "/api/backup/restore",
+        files={"file": ("huge_backup.zip", oversize_payload, "application/zip")},
+    )
+    assert res.status_code == 413
+    assert "überschreitet maximal zulässige Grösse" in res.json()["detail"]
+
