@@ -22,7 +22,9 @@ from backend.models import (
     Draft,
     ImageVariantMode,
     PresetSettings,
+    UpdateDraftRequest,
 )
+from backend.path_utils import PathTraversalError
 from backend.services.ai_service import AIService
 from backend.services.image_service import ImageService
 from backend.storage import (
@@ -457,25 +459,33 @@ def create_app(
 
     @app.get("/api/drafts/{draft_id}", response_model=Draft)
     def get_draft(draft_id: str):
-        draft = storage.get_draft(draft_id)
+        try:
+            draft = storage.get_draft(draft_id)
+        except (ValueError, PathTraversalError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
         if not draft:
             raise HTTPException(status_code=404, detail="Draft not found")
         return draft
 
     @app.put("/api/drafts/{draft_id}", response_model=Draft)
-    def update_draft(draft_id: str, updated_draft: Draft):
-        if draft_id != updated_draft.id:
+    def update_draft(draft_id: str, updated_draft: UpdateDraftRequest):
+        if updated_draft.id and updated_draft.id != draft_id:
             raise HTTPException(status_code=400, detail="Draft ID mismatch")
         try:
-            return storage.update_draft(updated_draft)
+            return storage.update_draft_fields(draft_id, updated_draft)
         except DraftNotFoundError:
             raise HTTPException(status_code=404, detail="Draft not found")
         except RevisionConflictError as e:
             raise HTTPException(status_code=409, detail=str(e))
+        except (ValueError, PathTraversalError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     @app.delete("/api/drafts/{draft_id}")
     def delete_draft(draft_id: str):
-        success = storage.delete_draft(draft_id)
+        try:
+            success = storage.delete_draft(draft_id)
+        except (ValueError, PathTraversalError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
         if not success:
             raise HTTPException(status_code=404, detail="Draft not found")
         return {"ok": True, "message": "Draft deleted"}
@@ -530,6 +540,8 @@ def create_app(
             return FileResponse(file_path, media_type="image/jpeg")
         except (DraftNotFoundError, FileNotFoundError):
             raise HTTPException(status_code=404, detail="Image variant not found")
+        except (ValueError, PathTraversalError) as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     # 5. Analysis
     @app.post("/api/drafts/{draft_id}/analyze", response_model=Draft)

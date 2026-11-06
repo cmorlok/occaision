@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from backend.config import get_logger
-from backend.models import Draft, DraftImage, ImageVariantMode, PresetSettings
+from backend.models import (
+    Draft,
+    DraftImage,
+    ImageVariantMode,
+    PresetSettings,
+    UpdateDraftRequest,
+    validate_identifier,
+)
+from backend.path_utils import resolve_safe_path
 
 logger = get_logger("occaision.storage")
 
@@ -111,6 +119,7 @@ class DraftStore:
             return drafts
 
     def get_draft(self, draft_id: str) -> Optional[Draft]:
+        validate_identifier(draft_id, "draft_id")
         with self._lock:
             raw_list = self._load_drafts_raw()
             for d in raw_list:
@@ -143,6 +152,7 @@ class DraftStore:
         return draft
 
     def update_draft(self, draft: Draft) -> Draft:
+        validate_identifier(draft.id, "draft_id")
         draft.updated_at = datetime.now(timezone.utc).isoformat()
 
         with self._lock:
@@ -168,7 +178,56 @@ class DraftStore:
             self._write_json_atomic(self.drafts_file, raw_list)
         return draft
 
+    def update_draft_fields(self, draft_id: str, updates: UpdateDraftRequest) -> Draft:
+        validate_identifier(draft_id, "draft_id")
+        with self._lock:
+            raw_list = self._load_drafts_raw()
+            found_idx = None
+            existing_item = None
+            for idx, item in enumerate(raw_list):
+                if item.get("id") == draft_id:
+                    found_idx = idx
+                    existing_item = item
+                    break
+            if found_idx is None:
+                raise DraftNotFoundError(f"Draft {draft_id} does not exist (cannot update)")
+
+            current_draft = Draft.model_validate(existing_item)
+            existing_rev = current_draft.revision
+            if updates.revision is not None and updates.revision != existing_rev:
+                raise RevisionConflictError(
+                    f"Conflict updating draft {draft_id}: expected revision {existing_rev}, got {updates.revision}"
+                )
+
+            # Apply only user-editable fields
+            if updates.user_notes is not None:
+                current_draft.user_notes = updates.user_notes
+            if updates.identified_product is not None:
+                current_draft.identified_product = updates.identified_product
+            if updates.status is not None:
+                current_draft.status = updates.status
+            if updates.missing_photo_hints is not None:
+                current_draft.missing_photo_hints = updates.missing_photo_hints
+            if updates.price_analysis is not None:
+                current_draft.price_analysis = updates.price_analysis
+            if updates.ricardo is not None:
+                current_draft.ricardo = updates.ricardo
+            if updates.tutti is not None:
+                current_draft.tutti = updates.tutti
+            if updates.ebay_de is not None:
+                current_draft.ebay_de = updates.ebay_de
+            if updates.kleinanzeigen is not None:
+                current_draft.kleinanzeigen = updates.kleinanzeigen
+
+            current_draft.updated_at = datetime.now(timezone.utc).isoformat()
+            current_draft.revision = existing_rev + 1
+
+            raw_list[found_idx] = current_draft.model_dump()
+            self._write_json_atomic(self.drafts_file, raw_list)
+        return current_draft
+
     def delete_draft(self, draft_id: str) -> bool:
+        validate_identifier(draft_id, "draft_id")
         with self._lock:
             raw_list = self._load_drafts_raw()
             initial_len = len(raw_list)
@@ -177,9 +236,9 @@ class DraftStore:
                 return False
             self._write_json_atomic(self.drafts_file, raw_list)
 
-        # Cleanup image folder
-        draft_img_dir = self.images_dir / draft_id
-        if draft_img_dir.exists():
+        # Cleanup image folder safely
+        draft_img_dir = resolve_safe_path(self.images_dir, draft_id)
+        if draft_img_dir.exists() and draft_img_dir.is_dir() and not draft_img_dir.is_symlink():
             shutil.rmtree(draft_img_dir, ignore_errors=True)
 
         return True
@@ -281,6 +340,13 @@ class DraftStore:
 
     def get_image_file_path(self, draft_id: str, image_id: str, variant: str) -> Path:
         """Resolve variant file path, lazily generating cached cutout/blur if missing."""
+        validate_identifier(draft_id, "draft_id")
+        validate_identifier(image_id, "image_id")
+
+        allowed_variants = {m.value for m in ImageVariantMode} | {"active", "ai"}
+        if variant not in allowed_variants:
+            raise ValueError(f"Invalid image variant: {variant!r}. Allowed: {sorted(allowed_variants)}")
+
         with self._lock:
             draft = self.get_draft(draft_id)
             if not draft:
@@ -291,8 +357,8 @@ class DraftStore:
             active_mode = target_img.active_mode.value
 
         var_mode = active_mode if variant == "active" else variant
-        img_dir = self.images_dir / draft_id
-        file_path = img_dir / f"{image_id}_{var_mode}.jpg"
+        img_dir = resolve_safe_path(self.images_dir, draft_id)
+        file_path = resolve_safe_path(img_dir, f"{image_id}_{var_mode}.jpg")
 
         if not file_path.exists():
             if var_mode == ImageVariantMode.CUTOUT.value:
@@ -300,7 +366,7 @@ class DraftStore:
             elif var_mode == ImageVariantMode.BLURRED.value:
                 file_path = self.image_service.get_or_create_blurred(draft_id=draft_id, image_id=image_id)
             elif var_mode == "ai":
-                file_path = img_dir / f"{image_id}_ai.jpg"
+                file_path = resolve_safe_path(img_dir, f"{image_id}_ai.jpg")
 
         if not file_path.exists():
             raise FileNotFoundError(f"Image variant '{variant}' not found for image {image_id}")
@@ -309,14 +375,19 @@ class DraftStore:
 
     def get_ai_image_paths(self, draft_id: str) -> List[Path]:
         """Return file paths for AI-downscaled image variants for the draft."""
+        validate_identifier(draft_id, "draft_id")
         with self._lock:
             draft = self.get_draft(draft_id)
             if not draft:
                 raise DraftNotFoundError(f"Draft {draft_id} not found")
             images = list(draft.images)
 
-        img_dir = self.images_dir / draft_id
-        return [img_dir / f"{img.id}_ai.jpg" for img in images]
+        img_dir = resolve_safe_path(self.images_dir, draft_id)
+        paths = []
+        for img in images:
+            validate_identifier(img.id, "image_id")
+            paths.append(resolve_safe_path(img_dir, f"{img.id}_ai.jpg"))
+        return paths
 
     def export_drafts_data(self) -> Dict[str, Any]:
         """Export all drafts and settings into a serializable backup payload."""
@@ -343,11 +414,24 @@ class DraftStore:
 
         # Validate each draft through Draft model
         validated_drafts: List[Draft] = []
+        seen_draft_ids = set()
         for item in raw_imported_drafts:
             try:
-                validated_drafts.append(Draft.model_validate(item))
+                draft = Draft.model_validate(item)
             except Exception as e:
                 raise ValueError(f"Ungültiger Entwurf im Import: {e}") from e
+
+            if draft.id in seen_draft_ids:
+                raise ValueError(f"Doppelte Draft-ID im Import gefunden: {draft.id}")
+            seen_draft_ids.add(draft.id)
+
+            seen_img_ids = set()
+            for img in draft.images:
+                if img.id in seen_img_ids:
+                    raise ValueError(f"Doppelte Bild-ID '{img.id}' in Entwurf {draft.id} gefunden.")
+                seen_img_ids.add(img.id)
+
+            validated_drafts.append(draft)
 
         imported_settings_data = data.get("settings")
         with self._lock:
@@ -383,10 +467,15 @@ class DraftStore:
             return 0
         try:
             for entry in list(self.images_dir.iterdir()):
-                if entry.is_dir() and entry.name not in existing_ids:
-                    shutil.rmtree(entry, ignore_errors=True)
-                    cleaned_count += 1
-                    logger.info(f"[Storage] Cleaned up orphaned image directory: {entry.name}")
+                if entry.is_dir() and not entry.is_symlink() and entry.name not in existing_ids:
+                    try:
+                        validate_identifier(entry.name, "draft_id")
+                        safe_entry = resolve_safe_path(self.images_dir, entry.name)
+                        shutil.rmtree(safe_entry, ignore_errors=True)
+                        cleaned_count += 1
+                        logger.info(f"[Storage] Cleaned up orphaned image directory: {entry.name}")
+                    except Exception as err:
+                        logger.warning(f"[Storage] Skipping unsafe or invalid orphaned folder {entry.name}: {err}")
         except Exception as e:
             logger.warning(f"[Storage] Error during orphan image cleanup: {e}")
         return cleaned_count

@@ -8,7 +8,8 @@ import pillow_heif
 from PIL import Image, ImageFilter, ImageOps
 
 from backend.config import get_logger
-from backend.models import DraftImage, ImageVariantMode
+from backend.models import DraftImage, ImageVariantMode, validate_identifier
+from backend.path_utils import resolve_safe_path
 
 pillow_heif.register_heif_opener()
 Image.MAX_IMAGE_PIXELS = 50_000_000
@@ -73,7 +74,8 @@ class ImageService:
         return rgba
 
     def _get_draft_image_dir(self, draft_id: str) -> Path:
-        dir_path = self.images_dir / draft_id
+        validate_identifier(draft_id, "draft_id")
+        dir_path = resolve_safe_path(self.images_dir, draft_id)
         dir_path.mkdir(parents=True, exist_ok=True)
         return dir_path
 
@@ -114,13 +116,15 @@ class ImageService:
         return draft_img
 
     def get_or_create_cutout(self, draft_id: str, image_id: str) -> Path:
+        validate_identifier(draft_id, "draft_id")
+        validate_identifier(image_id, "image_id")
         draft_img_dir = self._get_draft_image_dir(draft_id)
-        cutout_path = draft_img_dir / f"{image_id}_cutout.jpg"
+        cutout_path = resolve_safe_path(draft_img_dir, f"{image_id}_cutout.jpg")
         if cutout_path.exists():
             logger.info(f"[ImageService] Freigestelltes Bild existiert bereits im Cache: {cutout_path.name}")
             return cutout_path
 
-        opt_path = draft_img_dir / f"{image_id}_optimized.jpg"
+        opt_path = resolve_safe_path(draft_img_dir, f"{image_id}_optimized.jpg")
         if not opt_path.exists():
             raise FileNotFoundError(f"Optimized image not found: {opt_path}")
 
@@ -137,13 +141,15 @@ class ImageService:
             return cutout_path
 
     def get_or_create_blurred(self, draft_id: str, image_id: str) -> Path:
+        validate_identifier(draft_id, "draft_id")
+        validate_identifier(image_id, "image_id")
         draft_img_dir = self._get_draft_image_dir(draft_id)
-        blurred_path = draft_img_dir / f"{image_id}_blurred.jpg"
+        blurred_path = resolve_safe_path(draft_img_dir, f"{image_id}_blurred.jpg")
         if blurred_path.exists():
             logger.info(f"[ImageService] Weichgezeichnetes Bild existiert bereits im Cache: {blurred_path.name}")
             return blurred_path
 
-        opt_path = draft_img_dir / f"{image_id}_optimized.jpg"
+        opt_path = resolve_safe_path(draft_img_dir, f"{image_id}_optimized.jpg")
         if not opt_path.exists():
             raise FileNotFoundError(f"Optimized image not found: {opt_path}")
 
@@ -159,13 +165,18 @@ class ImageService:
             return blurred_path
 
     def delete_image(self, draft_id: str, image_id: str) -> bool:
+        validate_identifier(draft_id, "draft_id")
+        validate_identifier(image_id, "image_id")
         logger.info(f"[ImageService] Lösche Bilddateien für {image_id} (Draft: {draft_id})...")
         draft_img_dir = self._get_draft_image_dir(draft_id)
         deleted_any = False
-        for p in draft_img_dir.glob(f"{image_id}_*"):
-            try:
-                p.unlink()
-                deleted_any = True
-            except OSError:
-                pass
+        known_suffixes = ["optimized.jpg", "ai.jpg", "cutout.jpg", "blurred.jpg"]
+        for suffix in known_suffixes:
+            p = resolve_safe_path(draft_img_dir, f"{image_id}_{suffix}")
+            if p.exists() and p.is_file() and not p.is_symlink():
+                try:
+                    p.unlink()
+                    deleted_any = True
+                except OSError:
+                    pass
         return deleted_any

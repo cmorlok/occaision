@@ -1,7 +1,18 @@
+import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def validate_identifier(val: str, field_name: str = "id") -> str:
+    if not isinstance(val, str) or not ID_PATTERN.match(val):
+        raise ValueError(
+            f"Invalid {field_name}: must be 1-64 characters matching [a-zA-Z0-9_-], got {val!r}"
+        )
+    return val
 
 
 class DraftStatus(str, Enum):
@@ -45,6 +56,11 @@ class ShippingPreset(BaseModel):
     cost: float = 0.0         # Cost in local currency (CHF for CH, EUR for DE)
     currency: str = "CHF"     # "CHF" or "EUR"
     pickup_allowed: bool = True
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        return validate_identifier(v, "preset_id")
 
     @property
     def cost_chf(self) -> float:
@@ -108,6 +124,11 @@ class DraftImage(BaseModel):
     width: int
     height: int
     exif_stripped: bool = True
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        return validate_identifier(v, "image_id")
 
 
 class EbaySoldStats(BaseModel):
@@ -248,3 +269,31 @@ class Draft(BaseModel):
     tutti: TuttiListing = Field(default_factory=TuttiListing)
     ebay_de: EbayDEListing = Field(default_factory=EbayDEListing)
     kleinanzeigen: KleinanzeigenListing = Field(default_factory=KleinanzeigenListing)
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        return validate_identifier(v, "draft_id")
+
+
+class UpdateDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: Optional[str] = None
+    user_notes: Optional[str] = None
+    identified_product: Optional[str] = None
+    status: Optional[DraftStatus] = None
+    missing_photo_hints: Optional[List[str]] = None
+    price_analysis: Optional[PriceAnalysis] = None
+    ricardo: Optional[RicardoListing] = None
+    tutti: Optional[TuttiListing] = None
+    ebay_de: Optional[EbayDEListing] = None
+    kleinanzeigen: Optional[KleinanzeigenListing] = None
+    revision: Optional[int] = None
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return validate_identifier(v, "draft_id")
+        return v

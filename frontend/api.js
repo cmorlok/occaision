@@ -64,10 +64,23 @@ const api = {
   },
 
   async updateDraft(draft) {
+    const payload = {
+      id: draft.id,
+      user_notes: draft.user_notes,
+      identified_product: draft.identified_product,
+      status: draft.status,
+      missing_photo_hints: draft.missing_photo_hints,
+      price_analysis: draft.price_analysis,
+      ricardo: draft.ricardo,
+      tutti: draft.tutti,
+      ebay_de: draft.ebay_de,
+      kleinanzeigen: draft.kleinanzeigen,
+      revision: draft.revision,
+    };
     return fetch(`/api/drafts/${encodeURIComponent(draft.id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(draft),
+      body: JSON.stringify(payload),
     });
   },
 
