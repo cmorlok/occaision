@@ -279,8 +279,17 @@ def create_app(
     auth_token = get_or_create_auth_token(cfg.data_dir)
     active_analyses: set[str] = set()
     active_analyses_lock = threading.Lock()
+    analysis_semaphores: dict[asyncio.AbstractEventLoop, asyncio.Semaphore] = {}
     pairing_codes: dict[str, float] = {}
     pairing_lock = threading.Lock()
+
+    def get_analysis_semaphore() -> asyncio.Semaphore:
+        loop = asyncio.get_running_loop()
+        sem = analysis_semaphores.get(loop)
+        if sem is None:
+            sem = asyncio.Semaphore(2)
+            analysis_semaphores[loop] = sem
+        return sem
 
     def is_trusted_origin(origin: Optional[str]) -> bool:
         if not origin:
@@ -815,16 +824,18 @@ def create_app(
 
             # 3. Run AI analysis
             try:
-                ai_coro = ai_svc.analyze_draft(
-                    draft=draft,
-                    image_paths=ai_image_paths,
-                    ebay_stats=ebay_stats,
-                    enabled_sources=enabled_sources,
-                )
-                if inspect.isawaitable(ai_coro):
-                    analyzed_draft = await asyncio.wait_for(ai_coro, timeout=90.0)
-                else:
-                    analyzed_draft = ai_coro
+                sem = get_analysis_semaphore()
+                async with sem:
+                    ai_coro = ai_svc.analyze_draft(
+                        draft=draft,
+                        image_paths=ai_image_paths,
+                        ebay_stats=ebay_stats,
+                        enabled_sources=enabled_sources,
+                    )
+                    if inspect.isawaitable(ai_coro):
+                        analyzed_draft = await asyncio.wait_for(ai_coro, timeout=90.0)
+                    else:
+                        analyzed_draft = ai_coro
             except asyncio.TimeoutError:
                 logger.error(f"[API] KI-Analyse für Draft {draft_id} überschritt das Timeout (90s).")
                 raise HTTPException(

@@ -2,6 +2,7 @@ import asyncio
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.config import Settings
@@ -93,3 +94,43 @@ def test_analysis_timeout_returns_504(temp_data_dir: Path):
         res = client.post(f"/api/drafts/{draft.id}/analyze")
         assert res.status_code == 504
         assert "Timeout" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_global_analysis_semaphore_throttles_concurrency(temp_data_dir: Path):
+    from httpx import ASGITransport, AsyncClient
+
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=False)
+    storage = StorageService(data_dir=temp_data_dir)
+    image_service = ImageService(data_dir=temp_data_dir)
+    app = create_app(settings=test_settings, storage_service=storage, image_service=image_service)
+
+    d1 = storage.create_draft(user_notes="Draft 1")
+    d2 = storage.create_draft(user_notes="Draft 2")
+    d3 = storage.create_draft(user_notes="Draft 3")
+
+    concurrent_active = 0
+    max_observed_concurrent = 0
+
+    async def mock_analyzing(draft, *args, **kwargs):
+        nonlocal concurrent_active, max_observed_concurrent
+        concurrent_active += 1
+        max_observed_concurrent = max(max_observed_concurrent, concurrent_active)
+        await asyncio.sleep(0.05)
+        concurrent_active -= 1
+        return draft
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=mock_analyzing):
+            r1, r2, r3 = await asyncio.gather(
+                client.post(f"/api/drafts/{d1.id}/analyze"),
+                client.post(f"/api/drafts/{d2.id}/analyze"),
+                client.post(f"/api/drafts/{d3.id}/analyze"),
+            )
+            assert r1.status_code == 200
+            assert r2.status_code == 200
+            assert r3.status_code == 200
+
+    assert max_observed_concurrent <= 2
+
