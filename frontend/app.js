@@ -128,8 +128,8 @@ let systemConfig = null;
 async function init() {
   try {
     const pairData = await api.pairAuth().catch(() => null);
-    if (pairData && pairData.token) {
-      window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairData.token }), "*");
+    if (pairData && pairData.token && typeof window !== "undefined") {
+      window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairData.token }), window.location.origin);
     }
   } catch (_) {}
   await loadSettings();

@@ -11,9 +11,21 @@ async function parseResponse(res, defaultErrorMsg) {
 }
 
 const api = {
-  async pairAuth() {
-    const res = await fetch("/api/auth/pair", { method: "POST" });
+  async pairAuth(pairingCode = null) {
+    const options = {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    };
+    if (pairingCode) {
+      options.body = JSON.stringify({ pairing_code: pairingCode });
+    }
+    const res = await fetch("/api/auth/pair", options);
     return parseResponse(res, "Pairing failed");
+  },
+
+  async createPairingCode() {
+    const res = await fetch("/api/auth/pairing-code", { method: "POST" });
+    return parseResponse(res, "Failed to create pairing code");
   },
 
   async getConfig() {

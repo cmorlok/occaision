@@ -5,6 +5,8 @@ import os
 import secrets
 import sys
 import threading
+import time
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -140,6 +142,10 @@ class CreateDraftRequest(BaseModel):
     identified_product: str = ""
 
 
+class PairRequest(BaseModel):
+    pairing_code: Optional[str] = None
+
+
 class PatchImageModeRequest(BaseModel):
     active_mode: ImageVariantMode
 
@@ -196,6 +202,23 @@ def create_app(
     auth_token = get_or_create_auth_token(cfg.data_dir)
     active_analyses: set[str] = set()
     active_analyses_lock = threading.Lock()
+    pairing_codes: dict[str, float] = {}
+    pairing_lock = threading.Lock()
+
+    def is_trusted_origin(origin: Optional[str]) -> bool:
+        if not origin:
+            return False
+        try:
+            parsed = urllib.parse.urlsplit(origin)
+        except Exception:
+            return False
+
+        if parsed.scheme == "moz-extension":
+            return bool(parsed.netloc or parsed.path)
+        if parsed.scheme in ("http", "https"):
+            host = (parsed.hostname or "").lower()
+            return host in {"127.0.0.1", "localhost", "testserver"}
+        return False
 
     @app.middleware("http")
     async def validate_host_header(request: Request, call_next):
@@ -234,7 +257,7 @@ def create_app(
             or not path.startswith("/api/")
         ):
             response = await call_next(request)
-            if path in ("/", "/api/health", "/health"):
+            if path == "/":
                 response.set_cookie(
                     key="occaision_token",
                     value=auth_token,
@@ -288,15 +311,51 @@ def create_app(
         )
 
     # 0. Pairing
+    @app.post("/api/auth/pairing-code")
+    def create_pairing_code(request: Request):
+        now = time.time()
+        with pairing_lock:
+            # Prune expired codes
+            expired = [c for c, exp in pairing_codes.items() if exp < now]
+            for c in expired:
+                del pairing_codes[c]
+
+            code = f"{secrets.randbelow(900000) + 100000:06d}"
+            pairing_codes[code] = now + 60.0
+        return {"ok": True, "pairing_code": code, "expires_in": 60}
+
     @app.post("/api/auth/pair")
-    def pair_extension(request: Request):
+    def pair_extension(request: Request, body: Optional[PairRequest] = None):
         origin = request.headers.get("origin")
-        if origin and not (
-            origin.startswith("http://127.0.0.1")
-            or origin.startswith("http://localhost")
-            or origin.startswith("moz-extension://")
-        ):
+        if not is_trusted_origin(origin):
             raise HTTPException(status_code=403, detail="Untrusted origin")
+
+        # 1. If already authenticated via session cookie or bearer token, pairing succeeds immediately
+        auth_header = request.headers.get("authorization", "")
+        has_bearer = auth_header.startswith("Bearer ") and secrets.compare_digest(
+            auth_header[7:].strip(), auth_token
+        )
+        cookie_token = request.cookies.get("occaision_token", "")
+        has_cookie = bool(cookie_token and secrets.compare_digest(cookie_token, auth_token))
+
+        if has_bearer or has_cookie or not cfg.require_auth:
+            return {"ok": True, "token": auth_token}
+
+        # 2. Otherwise, valid single-use pairing code is required
+        if not body or not body.pairing_code:
+            raise HTTPException(status_code=401, detail="Valid pairing code required")
+
+        code = body.pairing_code.strip()
+        now = time.time()
+        with pairing_lock:
+            exp = pairing_codes.get(code)
+            if not exp or exp < now:
+                if code in pairing_codes:
+                    del pairing_codes[code]
+                raise HTTPException(status_code=401, detail="Invalid or expired pairing code")
+            # Single-use: consume immediately
+            del pairing_codes[code]
+
         return {"ok": True, "token": auth_token}
 
     # 1. Health

@@ -1035,8 +1035,9 @@ async function executeStep2(draft) {
 function sendToPage(payloadObj) {
   if (typeof window === "undefined") return;
   try {
-    // Send as JSON string to bypass Firefox Xray compartment restrictions on Object properties
-    window.postMessage(JSON.stringify(payloadObj), "*");
+    // Target current dashboard origin to prevent token/message interception
+    const targetOrigin = (window.location && window.location.origin && window.location.origin !== "null") ? window.location.origin : "*";
+    window.postMessage(JSON.stringify(payloadObj), targetOrigin);
   } catch (e) {
     console.warn("[OccAIsion] postMessage warning:", e);
   }
@@ -1052,6 +1053,7 @@ function setupDashboardBridge() {
 
   window.addEventListener("message", event => {
     if (!event || !event.data) return;
+    if (typeof window !== "undefined" && window.location && event.origin && event.origin !== window.location.origin) return;
 
     let msg = event.data;
     if (typeof msg === "string") {
