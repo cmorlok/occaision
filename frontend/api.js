@@ -136,6 +136,17 @@ const api = {
       body: formData,
     });
   },
+
+  async exportBackup() {
+    return fetch("/api/backup/export");
+  },
+
+  async restoreBackup(formData) {
+    return fetch("/api/backup/restore", {
+      method: "POST",
+      body: formData,
+    });
+  },
 };
 
 if (typeof window !== "undefined") {

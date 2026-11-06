@@ -498,14 +498,14 @@
         <div class="form-group" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;">
           <label><strong>Datensicherung & Wiederherstellung:</strong></label>
           <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
-            <button id="btn-export-backup" type="button" class="btn btn-secondary">📥 Entwürfe exportieren (Backup)</button>
+            <button id="btn-export-backup" type="button" class="btn btn-secondary">📥 Vollständiges Backup exportieren (.zip)</button>
             <label class="btn btn-secondary" style="margin: 0; cursor: pointer;">
-              📤 Backup wiederherstellen
-              <input type="file" id="backup-file-input" accept=".json" style="display: none;" />
+              📤 Backup wiederherstellen (.zip / .json)
+              <input type="file" id="backup-file-input" accept=".zip,.json" style="display: none;" />
             </label>
           </div>
           <span class="field-hint">
-            Exportiert alle Entwürfe als JSON-Backup oder stellt Entwürfe aus einer vorherigen Sicherung wieder her.
+            Sichert alle Entwürfe inklusive Fotos und Einstellungen als vollständiges ZIP-Archiv. Unterstützt auch die Wiederherstellung früherer JSON-Metadaten.
           </span>
         </div>
 

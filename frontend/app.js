@@ -1000,7 +1000,7 @@ function setupEventListeners() {
   if (btnExportBackup) {
     btnExportBackup.onclick = async () => {
       try {
-        const res = await api.exportDrafts();
+        const res = await api.exportBackup();
         if (!res.ok) throw new Error(`Export fehlgeschlagen (${res.status})`);
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -1008,12 +1008,12 @@ function setupEventListeners() {
         a.href = url;
         const disp = res.headers.get("content-disposition") || "";
         const match = disp.match(/filename="?([^"]+)"?/);
-        a.download = match ? match[1] : `occaision_backup_${Date.now()}.json`;
+        a.download = match ? match[1] : `occaision_backup_${Date.now()}.zip`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        showToast("Backup erfolgreich heruntergeladen.", "success");
+        showToast("Vollständiges Backup (.zip) erfolgreich heruntergeladen.", "success");
       } catch (err) {
         showToast(`Export fehlgeschlagen: ${err.message}`, "error");
       }
@@ -1024,14 +1024,17 @@ function setupEventListeners() {
     backupFileInput.onchange = async (e) => {
       const file = e.target.files && e.target.files[0];
       if (!file) return;
+      const isZip = file.name.toLowerCase().endsWith(".zip");
       const formData = new FormData();
       formData.append("file", file);
       try {
-        const res = await api.importDrafts(formData);
+        const res = isZip ? await api.restoreBackup(formData) : await api.importDrafts(formData);
         if (res.ok) {
           const result = await res.json();
           await loadDrafts();
-          showToast(`Backup wiederhergestellt: ${result.imported_count} Entwürfe importiert.`, "success");
+          await loadSettings();
+          const count = result.restored_drafts ?? result.imported_count ?? 0;
+          showToast(`Backup erfolgreich wiederhergestellt (${count} Entwürfe geladen).`, "success");
         } else {
           const err = await res.json().catch(() => ({}));
           showToast(`Wiederherstellung fehlgeschlagen: ${err.detail || res.statusText}`, "error");
