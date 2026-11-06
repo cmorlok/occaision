@@ -367,6 +367,37 @@ def create_app(
                 content={"detail": "Authentication required"},
             )
 
+        # CSRF Defense: Cookie-authenticated mutating requests must originate from trusted origin
+        if has_cookie and not has_bearer and request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            if request.headers.get("sec-fetch-site") == "cross-site":
+                return JSONResponse(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    content={"detail": "Cross-site request rejected"},
+                )
+            origin = request.headers.get("origin")
+            if origin:
+                if not is_trusted_origin(origin):
+                    return JSONResponse(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        content={"detail": f"Untrusted origin: {origin}"},
+                    )
+            else:
+                referer = request.headers.get("referer")
+                if referer:
+                    try:
+                        parsed_ref = urllib.parse.urlsplit(referer)
+                        ref_origin = f"{parsed_ref.scheme}://{parsed_ref.netloc}"
+                        if not is_trusted_origin(ref_origin):
+                            return JSONResponse(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                content={"detail": f"Untrusted referer origin: {ref_origin}"},
+                            )
+                    except Exception:
+                        return JSONResponse(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            content={"detail": "Invalid referer header"},
+                        )
+
         return await call_next(request)
 
     @app.middleware("http")

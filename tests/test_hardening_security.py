@@ -426,6 +426,65 @@ def test_unified_version_and_workflow_security(temp_data_dir: Path):
     assert "contents: read" in ci_workflow
 
 
+def test_csrf_cookie_mutation_origin_validation(temp_data_dir: Path):
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=True)
+    storage = StorageService(data_dir=temp_data_dir)
+    image_service = ImageService(data_dir=temp_data_dir)
+    app = create_app(settings=test_settings, storage_service=storage, image_service=image_service)
+    client = TestClient(app)
+    token = (temp_data_dir / "auth_token.txt").read_text(encoding="utf-8").strip()
+
+    # 1. Cookie-authenticated POST with untrusted Origin is blocked
+    client.cookies.set("occaision_token", token)
+    res_bad_origin = client.post(
+        "/api/auth/pairing-code",
+        headers={"Origin": "https://malicious-site.com"},
+    )
+    assert res_bad_origin.status_code == 403
+    assert "Untrusted origin" in res_bad_origin.json()["detail"]
+
+    # 2. Cookie-authenticated POST with Sec-Fetch-Site: cross-site is blocked
+    res_cross_site = client.post(
+        "/api/auth/pairing-code",
+        headers={"Sec-Fetch-Site": "cross-site"},
+    )
+    assert res_cross_site.status_code == 403
+    assert "Cross-site request rejected" in res_cross_site.json()["detail"]
+
+    # 3. Cookie-authenticated POST with untrusted Referer is blocked
+    res_bad_referer = client.post(
+        "/api/auth/pairing-code",
+        headers={"Referer": "https://phishing.site/index.html"},
+    )
+    assert res_bad_referer.status_code == 403
+    assert "Untrusted referer origin" in res_bad_referer.json()["detail"]
+
+    # 4. Cookie-authenticated POST with trusted Origin succeeds
+    res_trusted = client.post(
+        "/api/auth/pairing-code",
+        headers={"Origin": "http://127.0.0.1:8000"},
+    )
+    assert res_trusted.status_code == 200
+    assert res_trusted.json()["ok"] is True
+
+    # 5. Bearer-authenticated POST ignores cross-site Origin (non-ambient credentials)
+    client.cookies.clear()
+    res_bearer = client.post(
+        "/api/auth/pairing-code",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Origin": "https://malicious-site.com",
+        },
+    )
+    assert res_bearer.status_code == 200
+
+    # 6. Cookie-authenticated GET is safe from CSRF mutation checks
+    client.cookies.set("occaision_token", token)
+    res_get = client.get("/api/drafts", headers={"Origin": "https://malicious-site.com"})
+    assert res_get.status_code == 200
+
+
+
 
 
 
