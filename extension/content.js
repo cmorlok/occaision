@@ -458,6 +458,133 @@ async function autoSelectTuttiCategory(suggestion, productTitle) {
   return { ok: finalCheck, status: finalCheck ? "selected" : "manual_selection_required" };
 }
 
+// eBay.de Prelist, Condition Dialog & Listing Helpers
+async function handleEbayPrelistStep1(draft, data, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return false;
+
+  const keywordInput = doc.querySelector(
+    'input[id*="search-textbox" i], input[id*="simplified-keyword" i], input.sell-search-simplified__textbox, input[name="keyword"], input.textbox__control[maxlength="80"]'
+  );
+  if (keywordInput && (!keywordInput.value || keywordInput.value.trim() === "")) {
+    const textToFill = (data && data.title) || (draft && (draft.identified_product || draft.user_notes)) || "";
+    if (textToFill) {
+      setNativeValue(keywordInput, textToFill);
+      const nextBtn = doc.querySelector(
+        'button.sell-search-simplified__next-action, button[class*="sell-search-simplified"][class*="next-action"]'
+      );
+      if (nextBtn) {
+        nextBtn.removeAttribute("disabled");
+        nextBtn.disabled = false;
+        try {
+          nextBtn.click();
+        } catch (_) {}
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+async function handleEbayConditionDialog(condition, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return false;
+
+  const condVal = (condition || "gebraucht").toLowerCase();
+  let targetCode = "3000"; // default: Gebraucht (3000)
+  if (condVal.includes("neu") && !condVal.includes("neuwertig") && !condVal.includes("sonstige")) {
+    targetCode = "1000";
+  } else if (condVal.includes("neuwertig") || condVal.includes("wie neu") || condVal.includes("sonstige")) {
+    targetCode = "1500";
+  } else if (condVal.includes("defekt") || condVal.includes("ersatzteil")) {
+    targetCode = "7000";
+  }
+
+  const radio = doc.querySelector(
+    `input[type="radio"][name="condition"][value="${targetCode}"], input[type="radio"][name="condition"][value*="${targetCode.slice(0, 2)}"]`
+  ) || doc.querySelector('input[type="radio"][name="condition"][value="3000"]');
+
+  if (radio) {
+    radio.checked = true;
+    if (typeof radio.click === "function") radio.click();
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
+    radio.dispatchEvent(new Event("input", { bubbles: true }));
+
+    const continueBtn = doc.querySelector(
+      "button.condition-dialog-radix__continue-btn, button[class*='condition-dialog'][class*='continue']"
+    );
+    if (continueBtn) {
+      continueBtn.removeAttribute("disabled");
+      continueBtn.disabled = false;
+      try {
+        continueBtn.click();
+      } catch (_) {}
+    }
+    return true;
+  }
+  return false;
+}
+
+async function fillEbayDEPricesAndFormat(draft, data, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return;
+
+  const d = data || getPlatformData(draft, "ebay_de");
+  const isFixedPrice = d.priceType === "fixed_price" || d.priceType === "fixed";
+
+  // 1. Format
+  const formatSelect = doc.querySelector('select[name="format"], select[id*="format" i]');
+  if (formatSelect) {
+    const targetVal = isFixedPrice ? "FixedPrice" : "ChineseAuction";
+    formatSelect.value = targetVal;
+    formatSelect.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const formatBtn = formatSelect.parentElement?.querySelector(".listbox-button__control, button");
+    if (formatBtn) {
+      formatBtn.textContent = isFixedPrice ? "Sofort-Kaufen" : "Auktion";
+    }
+  }
+
+  // 2. Prices
+  if (!isFixedPrice) {
+    const startPriceInput = doc.querySelector(
+      'input[name="startPrice"], input[name*="startPrice" i], input[id*="start-price" i], input[id*="start_price" i], input[aria-label*="Startpreis" i], input[data-testid*="start-price" i]'
+    );
+    if (startPriceInput && d.startPrice !== null && d.startPrice !== undefined) {
+      setNativeValue(startPriceInput, String(d.startPrice).replace(".", ","));
+    }
+  }
+
+  const buynowPriceInput = doc.querySelector(
+    'input[name="price"], input[name*="buyNowPrice" i], input[name*="buyItNowPrice" i], input[id*="buy-now-price" i], input[id*="buy_now" i], input[aria-label*="Sofort-Kaufen" i], input[data-testid*="buy-now-price" i]'
+  );
+  if (buynowPriceInput && d.buyNowPrice !== null && d.buyNowPrice !== undefined) {
+    setNativeValue(buynowPriceInput, String(d.buyNowPrice).replace(".", ","));
+  }
+}
+
+async function fillEbayDEShipping(draft, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return;
+
+  const presetId = draft?.ebay_de?.shipping_preset_id || "";
+  const isPickupOnly = presetId === "pickup_only_de" || draft?.ricardo?.shipping_preset_id === "pickup_only";
+
+  const buttons = Array.from(doc.querySelectorAll(".summary__shipping button, button[class*='toggle-button']"));
+  if (isPickupOnly) {
+    const pickupBtn = buttons.find(b => /nur abholung/i.test(b.textContent || ""));
+    if (pickupBtn && pickupBtn.getAttribute("aria-pressed") !== "true") {
+      pickupBtn.click();
+    }
+  } else {
+    const shipBtn = buttons.find(b => /versand und abholung/i.test(b.textContent || "")) ||
+                    buttons.find(b => /nur versand/i.test(b.textContent || ""));
+    if (shipBtn && shipBtn.getAttribute("aria-pressed") !== "true") {
+      shipBtn.click();
+    }
+  }
+}
+
 // Firefox Xray-Safe File Injector for HTMLInputElement and react-dropzone
 function injectFilesIntoInput(fileInput, imagePayloads) {
   if (!fileInput || !imagePayloads || imagePayloads.length === 0) return;
@@ -576,12 +703,14 @@ function getPlatformData(draft, platform) {
   } else if (p === "ebay_de") {
     return {
       title: draft.ebay_de ? draft.ebay_de.title : "",
+      category: draft.ebay_de ? draft.ebay_de.category_suggestion : "",
       description: draft.ebay_de ? draft.ebay_de.description : "",
       condition: draft.ebay_de ? draft.ebay_de.condition : "",
       startPrice: draft.ebay_de ? draft.ebay_de.start_price_eur : 1.0,
       buyNowPrice: draft.ebay_de ? draft.ebay_de.buynow_price_eur : 10.0,
       currency: "EUR",
-      priceType: draft.ebay_de ? draft.ebay_de.offer_type : "auction"
+      priceType: draft.ebay_de ? draft.ebay_de.offer_type : "auction",
+      shippingPresetId: draft.ebay_de ? draft.ebay_de.shipping_preset_id : "dhl_2kg"
     };
   } else if (p === "kleinanzeigen") {
     return {
@@ -610,18 +739,11 @@ function setDescriptionValue(value, rootDoc) {
   const doc = rootDoc || (typeof document !== "undefined" ? document : null);
   if (!doc) return false;
 
-  // 1. Textarea search
-  const textarea = doc.querySelector(
-    '#pstad-descrptn, #pstad-descr, textarea[name*="description" i], textarea[name="body"], textarea[id*="description" i], textarea[placeholder*="beschreibung" i], textarea[data-testid*="description" i]'
-  );
-  if (textarea) {
-    setNativeValue(textarea, value);
-    return true;
-  }
+  let filled = false;
 
-  // 2. Same-origin iframe search (e.g. eBay.de)
+  // 1. Same-origin iframe search (e.g. eBay.de Rich-Text-Editor)
   const iframes = doc.querySelectorAll(
-    'iframe.ux-action-menu__iframe, iframe[id*="desc" i], iframe[title*="Beschreibung" i], iframe[title*="description" i]'
+    'iframe#se-rte-frame__summary, iframe.ux-action-menu__iframe, iframe[id*="desc" i], iframe[title*="Beschreibung" i], iframe[title*="description" i]'
   );
   for (const iframe of iframes) {
     try {
@@ -644,7 +766,7 @@ function setDescriptionValue(value, rootDoc) {
           editable.dispatchEvent(new Event("input", { bubbles: true }));
           editable.dispatchEvent(new Event("change", { bubbles: true }));
           editable.dispatchEvent(new Event("blur", { bubbles: true }));
-          return true;
+          filled = true;
         }
       }
     } catch (e) {
@@ -652,16 +774,27 @@ function setDescriptionValue(value, rootDoc) {
     }
   }
 
-  // 3. Direct contenteditable editor in document
-  const contentEditable = doc.querySelector('[contenteditable="true"]');
-  if (contentEditable) {
-    contentEditable.textContent = value;
-    contentEditable.dispatchEvent(new Event("input", { bubbles: true }));
-    contentEditable.dispatchEvent(new Event("blur", { bubbles: true }));
-    return true;
+  // 2. Textarea search (standard or raw editor sync)
+  const textareas = doc.querySelectorAll(
+    '#pstad-descrptn, #pstad-descr, textarea[name*="description" i], textarea[name="body"], textarea[id*="description" i], textarea[placeholder*="beschreibung" i], textarea[data-testid*="description" i]'
+  );
+  for (const textarea of textareas) {
+    setNativeValue(textarea, value);
+    filled = true;
   }
 
-  return false;
+  // 3. Direct contenteditable editor in document
+  if (!filled) {
+    const contentEditable = doc.querySelector('[contenteditable="true"]');
+    if (contentEditable) {
+      contentEditable.textContent = value;
+      contentEditable.dispatchEvent(new Event("input", { bubbles: true }));
+      contentEditable.dispatchEvent(new Event("blur", { bubbles: true }));
+      filled = true;
+    }
+  }
+
+  return filled;
 }
 
 // Smart-Panel UI Creation & State
@@ -674,8 +807,12 @@ function createSmartPanel() {
   if (document.getElementById("ai-listing-smart-panel")) return;
 
   const platform = detectPlatform();
-  const step1BtnText = platform === "tutti" ? "▶ Schritt 1: Kategorie & Bilder" : "▶ Schritt 1: Bilder & Titel einfügen";
-  const step2BtnText = platform === "tutti" ? "▶ Schritt 2: Alle Textfelder einfügen" : "▶ Schritt 2: Beschreibung, Zustand & Preis";
+  const step1BtnText = platform === "tutti"
+    ? "▶ Schritt 1: Kategorie & Bilder"
+    : (platform === "ebay_de" ? "▶ Schritt 1: Suche, Bilder & Titel" : "▶ Schritt 1: Bilder & Titel einfügen");
+  const step2BtnText = platform === "tutti"
+    ? "▶ Schritt 2: Alle Textfelder einfügen"
+    : (platform === "ebay_de" ? "▶ Schritt 2: Beschreibung, Preise & Versand" : "▶ Schritt 2: Beschreibung, Zustand & Preis");
 
   panelElement = document.createElement("div");
   panelElement.id = "ai-listing-smart-panel";
@@ -763,7 +900,9 @@ function bindPanelEvents() {
     }
     const platform = detectPlatform();
     step1Btn.disabled = true;
-    step1Btn.textContent = platform === "tutti" ? "⏳ Wähle Kategorie & lade Bilder..." : "⏳ Lade Bilder & fülle Titel...";
+    step1Btn.textContent = platform === "tutti"
+      ? "⏳ Wähle Kategorie & lade Bilder..."
+      : (platform === "ebay_de" ? "⏳ Suche Produkt / Lade Bilder & Titel..." : "⏳ Lade Bilder & fülle Titel...");
     try {
       await executeStep1(activeDraft);
       if (platform === "tutti") {
@@ -773,13 +912,22 @@ function bindPanelEvents() {
         } else {
           step1Btn.textContent = "⚠ Bitte Kategorie manuell wählen";
         }
+      } else if (platform === "ebay_de") {
+        const prelistInput = document.querySelector('input[id*="search-textbox" i], input[id*="simplified-keyword" i]');
+        if (prelistInput) {
+          step1Btn.textContent = "✓ Produktsuche ausgefüllt";
+        } else {
+          step1Btn.textContent = "✓ Bilder & Titel eingefügt";
+        }
       } else {
         step1Btn.textContent = "✓ Bilder & Titel eingefügt";
       }
     } finally {
       step1Btn.disabled = false;
       setTimeout(() => {
-        step1Btn.textContent = platform === "tutti" ? "▶ Schritt 1: Kategorie & Bilder" : "▶ Schritt 1: Bilder & Titel einfügen";
+        step1Btn.textContent = platform === "tutti"
+          ? "▶ Schritt 1: Kategorie & Bilder"
+          : (platform === "ebay_de" ? "▶ Schritt 1: Suche, Bilder & Titel" : "▶ Schritt 1: Bilder & Titel einfügen");
       }, 4000);
     }
   };
@@ -800,7 +948,9 @@ function bindPanelEvents() {
     } finally {
       step2Btn.disabled = false;
       setTimeout(() => {
-        step2Btn.textContent = platform === "tutti" ? "▶ Schritt 2: Alle Textfelder einfügen" : "▶ Schritt 2: Beschreibung, Zustand & Preis";
+        step2Btn.textContent = platform === "tutti"
+          ? "▶ Schritt 2: Alle Textfelder einfügen"
+          : (platform === "ebay_de" ? "▶ Schritt 2: Beschreibung, Preise & Versand" : "▶ Schritt 2: Beschreibung, Zustand & Preis");
       }, 4000);
     }
   };
@@ -881,7 +1031,7 @@ async function executeStep1(draft) {
     });
 
     if (imagesResponse && imagesResponse.ok && imagesResponse.images && imagesResponse.images.length > 0) {
-      const fileInput = document.querySelector('input[type="file"]');
+      const fileInput = document.querySelector('input[type="file"]#fehelix-uploader, input[type="file"]');
       if (fileInput) {
         injectFilesIntoInput(fileInput, imagesResponse.images);
       }
@@ -890,30 +1040,44 @@ async function executeStep1(draft) {
     console.warn("[OccAIsion] Error fetching/injecting images in Step 1:", err);
   }
 
-  // 2. Platform specific assistance in Step 1: Category on Tutti
+  // 2. Platform specific assistance in Step 1: Category on Tutti / Prelist & Condition on eBay DE
   if (platform === "tutti") {
     try {
       await autoSelectTuttiCategory(data.category, draft.identified_product || data.title);
     } catch (err) {
       console.warn("[OccAIsion] Tutti category selection error:", err);
     }
+  } else if (platform === "ebay_de") {
+    try {
+      await handleEbayPrelistStep1(draft, data);
+      await handleEbayConditionDialog(data.condition);
+    } catch (err) {
+      console.warn("[OccAIsion] eBay DE prelist/condition error:", err);
+    }
   }
 
   // 3. Inject Title (if present in DOM)
   const titleInput = document.querySelector(
-    'input[name="subject"], #postad-title, #pstad-title, input[name="title"], input[name="pstad-title"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
+    'input[name="title"], input[name="subject"], #postad-title, #pstad-title, input[name="pstad-title"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
   );
   if (titleInput && data.title) {
     setNativeValue(titleInput, data.title);
   }
 
-  // 4. On Ricardo, if price/shipping fields are already present in DOM during Step 1, fill them as well
+  // 4. On Ricardo & eBay DE, if price/shipping fields are already present in DOM during Step 1, fill them as well
   if (platform === "ricardo") {
     try {
       await fillRicardoPrices(draft, data);
       await fillRicardoShipping(draft);
     } catch (e) {
       console.warn("[OccAIsion] Step 1 Ricardo price/shipping fill warning:", e);
+    }
+  } else if (platform === "ebay_de") {
+    try {
+      await fillEbayDEPricesAndFormat(draft, data);
+      await fillEbayDEShipping(draft);
+    } catch (e) {
+      console.warn("[OccAIsion] Step 1 eBay DE price/shipping fill warning:", e);
     }
   }
 }
@@ -923,7 +1087,7 @@ async function executeStep2(draft) {
   const platform = detectPlatform();
 
   // 1. Photos: If file input is present and has no files, inject images automatically
-  const fileInput = document.querySelector('input[type="file"]');
+  const fileInput = document.querySelector('input[type="file"]#fehelix-uploader, input[type="file"]');
   if (fileInput && (!fileInput.files || fileInput.files.length === 0)) {
     try {
       const imagesResponse = await new Promise(resolve => {
@@ -939,7 +1103,7 @@ async function executeStep2(draft) {
 
   // 2. Title: Fill if title input exists and is empty (crucial for Tutti where title is revealed after category selection)
   const titleInput = document.querySelector(
-    'input[name="subject"], #postad-title, #pstad-title, input[name="title"], input[name="pstad-title"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
+    'input[name="title"], input[name="subject"], #postad-title, #pstad-title, input[name="pstad-title"], input[name*="title" i], input[id*="title" i], input[aria-label*="Titel" i], input[placeholder*="titel" i], input[data-testid*="title" i]'
   );
   if (titleInput && data.title && (!titleInput.value || titleInput.value.trim() === "")) {
     setNativeValue(titleInput, data.title);
@@ -974,6 +1138,12 @@ async function executeStep2(draft) {
         }
       });
       await new Promise(r => setTimeout(r, 120));
+    }
+  } else if (platform === "ebay_de") {
+    try {
+      await handleEbayConditionDialog(data.condition);
+    } catch (e) {
+      console.warn("[OccAIsion] eBay DE condition dialog warning:", e);
     }
   } else {
     const condEl = document.querySelector(
@@ -1011,24 +1181,19 @@ async function executeStep2(draft) {
     } catch (e) {
       console.warn("[OccAIsion] Ricardo shipping config warning:", e);
     }
+  } else if (platform === "ebay_de") {
+    try {
+      await fillEbayDEShipping(draft);
+    } catch (e) {
+      console.warn("[OccAIsion] eBay DE shipping config warning:", e);
+    }
   }
 
   // 6. Prices
   if (platform === "ricardo") {
     await fillRicardoPrices(draft, data);
   } else if (platform === "ebay_de") {
-    const startPriceInput = document.querySelector(
-      'input[name*="startPrice" i], input[id*="start-price" i], input[id*="start_price" i], input[aria-label*="Startpreis" i], input[data-testid*="start-price" i]'
-    );
-    if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined) {
-      setNativeValue(startPriceInput, data.startPrice);
-    }
-    const buynowPriceInput = document.querySelector(
-      'input[name*="buyNowPrice" i], input[name*="buyItNowPrice" i], input[id*="buy-now-price" i], input[id*="buy_now" i], input[aria-label*="Sofort-Kaufen" i], input[data-testid*="buy-now-price" i], input[name="price"]'
-    );
-    if (buynowPriceInput && data.buyNowPrice !== null && data.buyNowPrice !== undefined) {
-      setNativeValue(buynowPriceInput, data.buyNowPrice);
-    }
+    await fillEbayDEPricesAndFormat(draft, data);
   } else {
     // tutti or kleinanzeigen
     const priceInput = document.querySelector(
@@ -1552,6 +1717,10 @@ if (typeof module !== "undefined" && module.exports) {
     getPlatformData,
     fillRicardoPrices,
     fillRicardoShipping,
+    handleEbayPrelistStep1,
+    handleEbayConditionDialog,
+    fillEbayDEPricesAndFormat,
+    fillEbayDEShipping,
     fetchDraftsList,
   };
 }

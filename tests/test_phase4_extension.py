@@ -1065,5 +1065,126 @@ def test_scrape_all_price_sources_fault_tolerant():
 
 
 
+def test_extension_ebay_de_autofill_and_prelist_via_node():
+    node_script = """
+    const content = require('./extension/content.js');
+
+    // 1. Verify handleEbayPrelistStep1 (Step 1 keyword search)
+    let nextBtnClicked = false;
+    const mockPrelistDoc = {
+      querySelector: (sel) => {
+        if (sel.includes('search-textbox') || sel.includes('simplified-keyword')) {
+          return {
+            value: '',
+            dispatchEvent: () => {},
+          };
+        }
+        if (sel.includes('sell-search-simplified__next-action')) {
+          return {
+            disabled: true,
+            removeAttribute: (attr) => {},
+            click: () => { nextBtnClicked = true; }
+          };
+        }
+        return null;
+      }
+    };
+    (async () => {
+      const resPrelist = await content.handleEbayPrelistStep1(
+        { identified_product: 'LEGO Harry Potter Schloss Hogwarts' },
+        { title: 'LEGO Harry Potter 76435' },
+        mockPrelistDoc
+      );
+      if (!resPrelist || !nextBtnClicked) {
+        throw new Error('handleEbayPrelistStep1 failed to fill keyword or click next button');
+      }
+
+      // 2. Verify handleEbayConditionDialog
+      let continueBtnClicked = false;
+      const mockRadios = [
+        { name: 'condition', value: '1000', checked: false, dispatchEvent: () => {} },
+        { name: 'condition', value: '1500', checked: false, dispatchEvent: () => {} },
+        { name: 'condition', value: '3000', checked: false, dispatchEvent: () => {} },
+      ];
+      const mockConditionDoc = {
+        querySelector: (sel) => {
+          if (sel.includes('value="3000"')) return mockRadios[2];
+          if (sel.includes('value="1000"')) return mockRadios[0];
+          if (sel.includes('value="1500"')) return mockRadios[1];
+          if (sel.includes('condition-dialog-radix__continue-btn')) {
+            return {
+              disabled: true,
+              removeAttribute: () => {},
+              click: () => { continueBtnClicked = true; }
+            };
+          }
+          return null;
+        }
+      };
+      const resCond = await content.handleEbayConditionDialog('gebraucht', mockConditionDoc);
+      if (!resCond || !mockRadios[2].checked || !continueBtnClicked) {
+        throw new Error('handleEbayConditionDialog failed to select condition or click continue');
+      }
+
+      // 3. Verify fillEbayDEPricesAndFormat
+      let formatVal = '';
+      let startPriceVal = '';
+      let buyNowVal = '';
+      const mockPriceDoc = {
+        querySelector: (sel) => {
+          if (sel.includes('format')) {
+            return {
+              value: '',
+              dispatchEvent: () => {},
+              parentElement: { querySelector: () => ({ textContent: '' }) }
+            };
+          }
+          if (sel.includes('startPrice')) {
+            return {
+              value: '',
+              dispatchEvent: () => {}
+            };
+          }
+          if (sel.includes('price')) {
+            return {
+              value: '',
+              dispatchEvent: () => {}
+            };
+          }
+          return null;
+        }
+      };
+      await content.fillEbayDEPricesAndFormat(
+        {},
+        { priceType: 'auction', startPrice: 15.50, buyNowPrice: 45.00 },
+        mockPriceDoc
+      );
+
+      // 4. Verify fillEbayDEShipping
+      let clickedButtonText = '';
+      const mockShippingButtons = [
+        { textContent: 'Versand und Abholung', getAttribute: () => null, click: () => { clickedButtonText = 'Versand und Abholung'; } },
+        { textContent: 'Nur Abholung', getAttribute: () => null, click: () => { clickedButtonText = 'Nur Abholung'; } }
+      ];
+      const mockShippingDoc = {
+        querySelectorAll: (sel) => mockShippingButtons
+      };
+      await content.fillEbayDEShipping(
+        { ebay_de: { shipping_preset_id: 'pickup_only_de' } },
+        mockShippingDoc
+      );
+      if (clickedButtonText !== 'Nur Abholung') {
+        throw new Error('fillEbayDEShipping failed for pickup_only_de: got ' + clickedButtonText);
+      }
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"eBay DE extension autofill test failed: {res.stderr}"
+
+
+
 
 
