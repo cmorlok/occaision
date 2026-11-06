@@ -2095,6 +2095,32 @@ if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
       return true;
     }
 
+    if (request.action === "FETCH_EXTERNAL_IMAGE") {
+      const url = request.url;
+      if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+        sendResponse({ ok: false, error: "Invalid image URL" });
+        return true;
+      }
+      fetch(url)
+        .then(async res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const contentType = res.headers.get("content-type") || "image/jpeg";
+          const buf = await res.arrayBuffer();
+          const dataUrl = arrayBufferToBase64DataUrl(buf, contentType);
+          sendResponse({
+            ok: true,
+            dataUrl,
+            mimeType: contentType,
+            filename: request.filename || "standardbild_katalog.jpg"
+          });
+        })
+        .catch(err => {
+          console.warn("[OccAIsion] Error fetching external image:", err);
+          sendResponse({ ok: false, error: err.message });
+        });
+      return true;
+    }
+
     if (request.action === "SCRAPE_ALL_PRICE_SOURCES") {
       runDeduplicatedScrape(
         request.requestId || "",

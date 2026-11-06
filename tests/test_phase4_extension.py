@@ -78,6 +78,7 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "LIST_DRAFTS" in bg_js_code
     assert "GET_DRAFT" in bg_js_code
     assert "FETCH_DRAFT_IMAGES" in bg_js_code
+    assert "FETCH_EXTERNAL_IMAGE" in bg_js_code
 
     # 4. content.js Xray vision, native setter & Smart-Panel elements
     assert "wrappedJSObject" in content_js_code
@@ -90,6 +91,7 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "executeEbayStep2" in content_js_code
     assert "executeEbayStep3" in content_js_code
     assert "selectEbayProductMatch" in content_js_code
+    assert "extractEbayStockImageUrl" in content_js_code
     assert "ai-ext-draft-select" in content_js_code
     assert "clipboard" in content_js_code.lower()
     assert "condition" in content_js_code.lower()
@@ -1365,7 +1367,7 @@ def test_extension_ebay_de_3step_workflow_via_node():
         throw new Error('executeEbayStep1 did not select condition radio or continue button');
       }
 
-      // 3. Test executeEbayStep2 (Pure Image Injection)
+      // 3. Test executeEbayStep2 with Standardbild preservation
       let injectedFiles = null;
       const mockFileInput = {
         id: 'fehelix-uploader',
@@ -1376,14 +1378,34 @@ def test_extension_ebay_de_3step_workflow_via_node():
         parentElement: { dispatchEvent: () => {} }
       };
 
+      const mockStandardbildBtn = {
+        tagName: 'BUTTON',
+        getAttribute: (attr) => attr === 'style' ? "background-image:url('https://i.ebayimg.com/images/g/XCEAAOSwtdtmcaNG/s-l1600.jpg')" : null,
+        style: { backgroundImage: "url('https://i.ebayimg.com/images/g/XCEAAOSwtdtmcaNG/s-l1600.jpg')" },
+        closest: () => null,
+        querySelector: () => null
+      };
+
       const mockStep2Doc = {
         querySelector: (sel) => {
           if (sel.includes('fehelix-uploader') || sel.includes('type="file"')) {
             return mockFileInput;
           }
           return null;
+        },
+        querySelectorAll: (sel) => {
+          if (sel.includes('Standardbild') || sel.includes('pictureStock') || sel.includes('uploader-thumbnails-ux__image')) {
+            return [mockStandardbildBtn];
+          }
+          return [];
         }
       };
+
+      // Test extractEbayStockImageUrl
+      const extractedStockUrl = content.extractEbayStockImageUrl(mockStep2Doc);
+      if (extractedStockUrl !== 'https://i.ebayimg.com/images/g/XCEAAOSwtdtmcaNG/s-l1600.jpg') {
+        throw new Error('extractEbayStockImageUrl failed: got ' + extractedStockUrl);
+      }
 
       global.browser = {
         runtime: {
@@ -1396,14 +1418,24 @@ def test_extension_ebay_de_3step_workflow_via_node():
                   { filename: 'lego_back.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' }
                 ]
               });
+            } else if (msg.action === 'FETCH_EXTERNAL_IMAGE') {
+              cb({
+                ok: true,
+                filename: 'standardbild_katalog.jpg',
+                mimeType: 'image/jpeg',
+                dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+              });
             }
           }
         }
       };
 
       const resStep2 = await content.executeEbayStep2({ id: 'draft-123' }, mockStep2Doc);
-      if (!resStep2 || !resStep2.ok || resStep2.count !== 2) {
-        throw new Error('executeEbayStep2 failed: ' + JSON.stringify(resStep2));
+      if (!resStep2 || !resStep2.ok || resStep2.count !== 3 || !resStep2.hasStockImage) {
+        throw new Error('executeEbayStep2 failed to preserve Standardbild: ' + JSON.stringify(resStep2));
+      }
+      if (!resStep2.message.includes('Standardbild + 2 eigene Bilder')) {
+        throw new Error('Unexpected executeEbayStep2 message: ' + resStep2.message);
       }
 
       // 4. Test executeEbayStep3 (Title, Description, Format & Prices, Shipping)

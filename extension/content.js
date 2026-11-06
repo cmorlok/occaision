@@ -742,10 +742,67 @@ function selectEbayProductMatch(draft, data, rootDoc) {
   }
 
   if (bestMatch && highestScore >= 6) {
+    try {
+      const img = bestMatch.querySelector?.('img[src*="i.ebayimg.com"]') || bestMatch.querySelector?.('img');
+      const imgSrc = img?.getAttribute?.("src") || img?.src || "";
+      if (imgSrc && imgSrc.includes("i.ebayimg.com") && typeof sessionStorage !== "undefined") {
+        sessionStorage.setItem("ai_occaision_ebay_stock_img", imgSrc.replace(/\/s-l\d+\./i, "/s-l1600."));
+      }
+    } catch (_) {}
     return { button: bestMatch, score: highestScore, isMatch: true };
   }
 
   return { button: null, score: highestScore, isMatch: false };
+}
+
+function extractEbayStockImageUrl(rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return null;
+
+  // 1. Check for thumbnail button or tag with Standardbild / pictureStock
+  const candidates = [
+    ...Array.from(doc.querySelectorAll('button.uploader-thumbnails-ux__image[aria-label*="Standardbild" i]')),
+    ...Array.from(doc.querySelectorAll('button[_track*="pictureStock" i]')),
+    ...Array.from(doc.querySelectorAll('.uploader-thumbnails-ux__tag')),
+    ...Array.from(doc.querySelectorAll('button.uploader-thumbnails-ux__image')),
+    ...Array.from(doc.querySelectorAll('.imageEditor__image[style*="background-image"]'))
+  ];
+
+  for (const el of candidates) {
+    const target = (el.tagName !== "BUTTON" && typeof el.closest === "function" ? el.closest("button") : null) || el;
+    const style = target.getAttribute?.("style") || target.style?.backgroundImage || "";
+    const m = style.match(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/i);
+    if (m && m[1] && m[1].includes("i.ebayimg.com")) {
+      return m[1].replace(/\/s-l\d+\./i, "/s-l1600.");
+    }
+    const img = target.querySelector?.('img[src*="i.ebayimg.com"]') || (target.tagName === "IMG" ? target : null);
+    if (img && img.src && img.src.includes("i.ebayimg.com")) {
+      return img.src.replace(/\/s-l\d+\./i, "/s-l1600.");
+    }
+  }
+
+  // 2. Check within uploader grid
+  const uploaderGrid = doc.querySelector('.uploader-thumbnails-ux, .main-photo, [class*="uploader-thumbnails"]');
+  if (uploaderGrid) {
+    const styleEls = Array.from(uploaderGrid.querySelectorAll('[style*="background-image"]'));
+    for (const el of styleEls) {
+      const style = el.getAttribute?.("style") || el.style?.backgroundImage || "";
+      const m = style.match(/url\(['"]?(https?:\/\/[^'")]+)['"]?\)/i);
+      if (m && m[1] && m[1].includes("i.ebayimg.com")) {
+        return m[1].replace(/\/s-l\d+\./i, "/s-l1600.");
+      }
+    }
+  }
+
+  // 3. Fallback to cached URL from Step 1
+  if (typeof sessionStorage !== "undefined") {
+    try {
+      const cached = sessionStorage.getItem("ai_occaision_ebay_stock_img");
+      if (cached) return cached;
+    } catch (_) {}
+  }
+
+  return null;
 }
 
 const EBAY_AUTO_KEY = "ai_occaision_ebay_auto_step1";
@@ -827,16 +884,61 @@ async function executeEbayStep2(draft, rootDoc) {
   }
 
   try {
+    // 1. Fetch user draft images from backend
     const imagesResponse = await new Promise(resolve => {
       browserApi.runtime.sendMessage({ action: "FETCH_DRAFT_IMAGES", draftId: draft.id }, resolve);
     });
 
-    if (imagesResponse && imagesResponse.ok && imagesResponse.images && imagesResponse.images.length > 0) {
-      injectFilesIntoInput(fileInput, imagesResponse.images);
+    const userImages = (imagesResponse && imagesResponse.ok && imagesResponse.images) || [];
+    const uploadQueue = [];
+    let preservedStockImage = false;
+
+    // 2. Check if there is an eBay Standardbild to preserve before uploading own images
+    let stockImageUrl = extractEbayStockImageUrl(doc);
+    if (!stockImageUrl && typeof sessionStorage !== "undefined") {
+      try {
+        stockImageUrl = sessionStorage.getItem("ai_occaision_ebay_stock_img");
+      } catch (_) {}
+    }
+
+    if (stockImageUrl) {
+      try {
+        const stockRes = await new Promise(resolve => {
+          browserApi.runtime.sendMessage(
+            { action: "FETCH_EXTERNAL_IMAGE", url: stockImageUrl, filename: "standardbild_katalog.jpg" },
+            resolve
+          );
+        });
+        if (stockRes && stockRes.ok && stockRes.dataUrl) {
+          uploadQueue.push({
+            id: "ebay_stock_image",
+            filename: stockRes.filename || "standardbild_katalog.jpg",
+            mimeType: stockRes.mimeType || "image/jpeg",
+            dataUrl: stockRes.dataUrl
+          });
+          preservedStockImage = true;
+          console.log("[OccAIsion] Standardbild erfolgreich zwischengespeichert und für Upload vorbereitet.");
+        }
+      } catch (errStock) {
+        console.warn("[OccAIsion] Standardbild konnte nicht abgerufen werden:", errStock);
+      }
+    }
+
+    // 3. Append draft images
+    for (const img of userImages) {
+      uploadQueue.push(img);
+    }
+
+    if (uploadQueue.length > 0) {
+      injectFilesIntoInput(fileInput, uploadQueue);
+      const msg = preservedStockImage
+        ? `Standardbild + ${userImages.length} eigene Bilder hochgeladen`
+        : `${userImages.length} Bilder hochgeladen`;
       return {
         ok: true,
-        count: imagesResponse.images.length,
-        message: `${imagesResponse.images.length} Bilder hochgeladen`
+        count: uploadQueue.length,
+        hasStockImage: preservedStockImage,
+        message: msg
       };
     } else {
       return { ok: false, message: "Keine Bilder im Entwurf vorhanden" };
@@ -2143,6 +2245,7 @@ if (typeof module !== "undefined" && module.exports) {
     handleEbayPrelistStep1,
     handleEbayConditionDialog,
     selectEbayProductMatch,
+    extractEbayStockImageUrl,
     executeEbayStep1,
     executeEbayStep2,
     executeEbayStep3,
