@@ -1,7 +1,9 @@
 // Content Script for OccAIsion Smart-Panel
 // Injected into ricardo.ch and tutti.ch listing creation wizards.
 
-const browserApi = typeof browser !== "undefined" ? browser : (typeof chrome !== "undefined" ? chrome : null);
+const browserApi = new Proxy({}, {
+  get: (target, prop) => (typeof browser !== "undefined" ? browser : (typeof chrome !== "undefined" ? chrome : null))?.[prop]
+});
 
 // Helper: Convert Data URL to Uint8Array
 function dataUrlToUint8Array(dataUrl) {
@@ -590,14 +592,16 @@ function injectFilesIntoInput(fileInput, imagePayloads) {
   if (!fileInput || !imagePayloads || imagePayloads.length === 0) return;
 
   try {
-    const dt = new DataTransfer();
+    const dt = typeof DataTransfer !== "undefined" ? new DataTransfer() : { items: { add: () => {} }, files: [] };
 
     for (const img of imagePayloads) {
       const bytes = dataUrlToUint8Array(img.dataUrl);
-      const file = new File([bytes], img.filename || "image.jpg", {
-        type: img.mimeType || "image/jpeg",
-        lastModified: Date.now()
-      });
+      const file = typeof File !== "undefined"
+        ? new File([bytes], img.filename || "image.jpg", {
+            type: img.mimeType || "image/jpeg",
+            lastModified: Date.now()
+          })
+        : { name: img.filename || "image.jpg", type: img.mimeType || "image/jpeg" };
       dt.items.add(file);
     }
 
@@ -639,6 +643,185 @@ function injectFilesIntoInput(fileInput, imagePayloads) {
   } catch (err) {
     console.error("[OccAIsion] Error injecting files:", err);
   }
+}
+
+// eBay.de Multi-Step Prelist & Listing Functions
+function selectEbayProductMatch(draft, data, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return null;
+
+  const productButtons = Array.from(doc.querySelectorAll("button.product-button, button[class*='product-button']"));
+  if (productButtons.length === 0) return null;
+
+  const queryText = [
+    (data && data.title) || "",
+    (draft && draft.identified_product) || "",
+    (draft && draft.ebay_de && draft.ebay_de.title) || "",
+    (draft && draft.user_notes) || ""
+  ].join(" ").toLowerCase();
+
+  const numbersInQuery = queryText.match(/\b\d{3,}\b/g) || [];
+  const stopWords = new Set(["der", "die", "das", "und", "für", "mit", "von", "ein", "eine", "einer", "the", "and", "for", "with"]);
+  const wordsInQuery = queryText
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter(w => w.length >= 3 && !stopWords.has(w));
+
+  let bestMatch = null;
+  let highestScore = -1;
+
+  for (const btn of productButtons) {
+    const btnText = (btn.textContent || "").toLowerCase();
+    let score = 0;
+
+    for (const num of numbersInQuery) {
+      if (btnText.includes(num)) {
+        score += 15;
+      }
+    }
+
+    for (const w of wordsInQuery) {
+      if (btnText.includes(w)) {
+        score += 2;
+      }
+    }
+
+    if (score > highestScore) {
+      highestScore = score;
+      bestMatch = btn;
+    }
+  }
+
+  if (bestMatch && highestScore >= 6) {
+    return { button: bestMatch, score: highestScore, isMatch: true };
+  }
+
+  return { button: null, score: highestScore, isMatch: false };
+}
+
+async function executeEbayStep1(draft, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return { ok: false, message: "Kein Dokument gefunden" };
+
+  const data = getPlatformData(draft, "ebay_de");
+  const actions = [];
+
+  // 1. Keyword search (Start page ebay-01)
+  const prelistFilled = await handleEbayPrelistStep1(draft, data, doc);
+  if (prelistFilled) {
+    actions.push("Titel eingegeben");
+    let poll = 0;
+    while (poll < 2000 && !doc.querySelector("button.product-button, button.prelist-radix__next-action, .condition-dialog-radix, input[name='condition']")) {
+      await new Promise(r => setTimeout(r, 200));
+      poll += 200;
+    }
+  }
+
+  // 2. Product selection from catalog (ebay-02)
+  const productButtons = doc.querySelectorAll("button.product-button, button[class*='product-button']");
+  const fallbackBtn = doc.querySelector("button.prelist-radix__next-action, button[class*='prelist-radix'][class*='next-action']");
+  if (productButtons.length > 0 || fallbackBtn) {
+    const match = selectEbayProductMatch(draft, data, doc);
+    if (match && match.isMatch && match.button) {
+      try {
+        match.button.removeAttribute?.("disabled");
+        match.button.disabled = false;
+        if (typeof match.button.click === "function") match.button.click();
+        actions.push("Produkt gewählt");
+      } catch (_) {}
+    } else if (fallbackBtn) {
+      try {
+        fallbackBtn.removeAttribute?.("disabled");
+        fallbackBtn.disabled = false;
+        if (typeof fallbackBtn.click === "function") fallbackBtn.click();
+        actions.push("Ohne passendes Produkt weiter");
+      } catch (_) {}
+    }
+    let poll = 0;
+    while (poll < 1500 && !doc.querySelector(".condition-dialog-radix, input[name='condition']")) {
+      await new Promise(r => setTimeout(r, 200));
+      poll += 200;
+    }
+  }
+
+  // 3. Condition dialog (ebay-03 / ebay-03b)
+  const conditionHandled = await handleEbayConditionDialog(data.condition, doc);
+  if (conditionHandled) {
+    actions.push("Zustand gewählt");
+  }
+
+  return {
+    ok: actions.length > 0,
+    actions,
+    message: actions.length > 0 ? actions.join(" → ") : "Keine Schritt-1-Elemente gefunden"
+  };
+}
+
+async function executeEbayStep2(draft, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return { ok: false, message: "Kein Dokument" };
+
+  const fileInput = doc.querySelector('input[type="file"]#fehelix-uploader, input[type="file"]');
+  if (!fileInput) {
+    return { ok: false, message: "Kein Bild-Upload-Feld gefunden (erst nach Zustand-Auswahl)" };
+  }
+
+  try {
+    const imagesResponse = await new Promise(resolve => {
+      browserApi.runtime.sendMessage({ action: "FETCH_DRAFT_IMAGES", draftId: draft.id }, resolve);
+    });
+
+    if (imagesResponse && imagesResponse.ok && imagesResponse.images && imagesResponse.images.length > 0) {
+      injectFilesIntoInput(fileInput, imagesResponse.images);
+      return {
+        ok: true,
+        count: imagesResponse.images.length,
+        message: `${imagesResponse.images.length} Bilder hochgeladen`
+      };
+    } else {
+      return { ok: false, message: "Keine Bilder im Entwurf vorhanden" };
+    }
+  } catch (err) {
+    console.warn("[OccAIsion] eBay Step 2 image upload error:", err);
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function executeEbayStep3(draft, rootDoc) {
+  const doc = rootDoc || (typeof document !== "undefined" ? document : null);
+  if (!doc) return { ok: false, message: "Kein Dokument" };
+
+  const data = getPlatformData(draft, "ebay_de");
+  const actions = [];
+
+  // 1. Title
+  const titleInput = doc.querySelector(
+    'input[name="title"], input[id*="TITLE" i], input[data-testid*="title" i], input.textbox__control[maxlength="80"]'
+  );
+  if (titleInput && data.title) {
+    setNativeValue(titleInput, data.title);
+    actions.push("Titel");
+  }
+
+  // 2. Description (RTE iframe & raw textarea)
+  if (data.description) {
+    const filled = setDescriptionValue(data.description, doc);
+    if (filled) actions.push("Beschreibung");
+  }
+
+  // 3. Format & Prices
+  await fillEbayDEPricesAndFormat(draft, data, doc);
+  actions.push("Preis & Format");
+
+  // 4. Shipping
+  await fillEbayDEShipping(draft, doc);
+  actions.push("Versand");
+
+  return {
+    ok: true,
+    actions,
+    message: actions.length > 0 ? `Eingefügt: ${actions.join(", ")}` : "Formular ausgefüllt"
+  };
 }
 
 // Platform detection
@@ -807,12 +990,41 @@ function createSmartPanel() {
   if (document.getElementById("ai-listing-smart-panel")) return;
 
   const platform = detectPlatform();
-  const step1BtnText = platform === "tutti"
-    ? "▶ Schritt 1: Kategorie & Bilder"
-    : (platform === "ebay_de" ? "▶ Schritt 1: Suche, Bilder & Titel" : "▶ Schritt 1: Bilder & Titel einfügen");
-  const step2BtnText = platform === "tutti"
-    ? "▶ Schritt 2: Alle Textfelder einfügen"
-    : (platform === "ebay_de" ? "▶ Schritt 2: Beschreibung, Preise & Versand" : "▶ Schritt 2: Beschreibung, Zustand & Preis");
+  let wizardActionsHtml = "";
+
+  if (platform === "ebay_de") {
+    wizardActionsHtml = `
+      <div class="ai-wizard-actions">
+        <button id="ai-ext-step1-btn" class="ai-btn ai-btn-primary" title="Titel suchen, Produkt im Katalog auswählen & Zustand bestätigen">
+          ▶ Schritt 1: Titel & Produkt-Auswahl
+        </button>
+        <button id="ai-ext-step2-btn" class="ai-btn ai-btn-amber" title="Fotos hochladen (Maske passt sich an)">
+          ▶ Schritt 2: Bilder hochladen
+        </button>
+        <button id="ai-ext-step3-btn" class="ai-btn ai-btn-secondary" title="Beschreibung, Preise und Versandoptionen einfügen">
+          ▶ Schritt 3: Angaben einfügen
+        </button>
+      </div>
+    `;
+  } else {
+    const step1BtnText = platform === "tutti"
+      ? "▶ Schritt 1: Kategorie & Bilder"
+      : "▶ Schritt 1: Bilder & Titel einfügen";
+    const step2BtnText = platform === "tutti"
+      ? "▶ Schritt 2: Alle Textfelder einfügen"
+      : "▶ Schritt 2: Beschreibung, Zustand & Preis";
+
+    wizardActionsHtml = `
+      <div class="ai-wizard-actions">
+        <button id="ai-ext-step1-btn" class="ai-btn ai-btn-primary">
+          ${step1BtnText}
+        </button>
+        <button id="ai-ext-step2-btn" class="ai-btn ai-btn-secondary">
+          ${step2BtnText}
+        </button>
+      </div>
+    `;
+  }
 
   panelElement = document.createElement("div");
   panelElement.id = "ai-listing-smart-panel";
@@ -834,14 +1046,7 @@ function createSmartPanel() {
         </div>
       </div>
 
-      <div class="ai-wizard-actions">
-        <button id="ai-ext-step1-btn" class="ai-btn ai-btn-primary">
-          ${step1BtnText}
-        </button>
-        <button id="ai-ext-step2-btn" class="ai-btn ai-btn-secondary">
-          ${step2BtnText}
-        </button>
-      </div>
+      ${wizardActionsHtml}
 
       <div class="ai-copy-fallbacks">
         <span class="ai-fallback-title">📋 1-Klick-Kopieren (Fallback):</span>
@@ -877,83 +1082,159 @@ function createSmartPanel() {
 function bindPanelEvents() {
   const collapseBtn = document.getElementById("ai-ext-collapse-btn");
   const panelBody = document.getElementById("ai-panel-body");
-  collapseBtn.onclick = () => {
-    panelBody.classList.toggle("ai-hidden");
-    collapseBtn.textContent = panelBody.classList.contains("ai-hidden") ? "▲" : "_";
-  };
+  if (collapseBtn && panelBody) {
+    collapseBtn.onclick = () => {
+      panelBody.classList.toggle("ai-hidden");
+      collapseBtn.textContent = panelBody.classList.contains("ai-hidden") ? "▲" : "_";
+    };
+  }
 
   const refreshBtn = document.getElementById("ai-ext-refresh-btn");
-  refreshBtn.onclick = fetchDraftsList;
+  if (refreshBtn) refreshBtn.onclick = fetchDraftsList;
 
   const draftSelect = document.getElementById("ai-ext-draft-select");
-  draftSelect.onchange = () => {
-    const selectedId = draftSelect.value;
-    activeDraft = currentDrafts.find(d => d.id === selectedId) || null;
-  };
+  if (draftSelect) {
+    draftSelect.onchange = () => {
+      const selectedId = draftSelect.value;
+      activeDraft = currentDrafts.find(d => d.id === selectedId) || null;
+    };
+  }
 
-  // Step 1: Category & Images
+  // Step 1: Category & Images (or Title & Prelist on eBay.de)
   const step1Btn = document.getElementById("ai-ext-step1-btn");
-  step1Btn.onclick = async () => {
-    if (!activeDraft) {
-      alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
-      return;
-    }
-    const platform = detectPlatform();
-    step1Btn.disabled = true;
-    step1Btn.textContent = platform === "tutti"
-      ? "⏳ Wähle Kategorie & lade Bilder..."
-      : (platform === "ebay_de" ? "⏳ Suche Produkt / Lade Bilder & Titel..." : "⏳ Lade Bilder & fülle Titel...");
-    try {
-      await executeStep1(activeDraft);
-      if (platform === "tutti") {
-        const listingTypeInput = document.querySelector('input[name="listingType"]');
-        if (listingTypeInput && listingTypeInput.value && listingTypeInput.value.trim() !== "") {
-          step1Btn.textContent = "✓ Kategorie & Bilder eingefügt";
-        } else {
-          step1Btn.textContent = "⚠ Bitte Kategorie manuell wählen";
+  if (step1Btn) {
+    step1Btn.onclick = async () => {
+      if (!activeDraft) {
+        alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
+        return;
+      }
+      const platform = detectPlatform();
+      step1Btn.disabled = true;
+
+      if (platform === "ebay_de") {
+        step1Btn.textContent = "⏳ Suche Produkt & wähle Zustand...";
+        try {
+          const res = await executeEbayStep1(activeDraft);
+          if (res && res.message) {
+            step1Btn.textContent = "✓ " + res.message;
+          } else {
+            step1Btn.textContent = "✓ Schritt 1 ausgeführt";
+          }
+        } catch (err) {
+          console.warn("[OccAIsion] eBay Step 1 error:", err);
+          step1Btn.textContent = "⚠ Fehler in Schritt 1";
+        } finally {
+          step1Btn.disabled = false;
+          setTimeout(() => {
+            step1Btn.textContent = "▶ Schritt 1: Titel & Produkt-Auswahl";
+          }, 4000);
         }
-      } else if (platform === "ebay_de") {
-        const prelistInput = document.querySelector('input[id*="search-textbox" i], input[id*="simplified-keyword" i]');
-        if (prelistInput) {
-          step1Btn.textContent = "✓ Produktsuche ausgefüllt";
+        return;
+      }
+
+      step1Btn.textContent = platform === "tutti"
+        ? "⏳ Wähle Kategorie & lade Bilder..."
+        : "⏳ Lade Bilder & fülle Titel...";
+      try {
+        await executeStep1(activeDraft);
+        if (platform === "tutti") {
+          const listingTypeInput = document.querySelector('input[name="listingType"]');
+          if (listingTypeInput && listingTypeInput.value && listingTypeInput.value.trim() !== "") {
+            step1Btn.textContent = "✓ Kategorie & Bilder eingefügt";
+          } else {
+            step1Btn.textContent = "⚠ Bitte Kategorie manuell wählen";
+          }
         } else {
           step1Btn.textContent = "✓ Bilder & Titel eingefügt";
         }
-      } else {
-        step1Btn.textContent = "✓ Bilder & Titel eingefügt";
+      } finally {
+        step1Btn.disabled = false;
+        setTimeout(() => {
+          step1Btn.textContent = platform === "tutti"
+            ? "▶ Schritt 1: Kategorie & Bilder"
+            : "▶ Schritt 1: Bilder & Titel einfügen";
+        }, 4000);
       }
-    } finally {
-      step1Btn.disabled = false;
-      setTimeout(() => {
-        step1Btn.textContent = platform === "tutti"
-          ? "▶ Schritt 1: Kategorie & Bilder"
-          : (platform === "ebay_de" ? "▶ Schritt 1: Suche, Bilder & Titel" : "▶ Schritt 1: Bilder & Titel einfügen");
-      }, 4000);
-    }
-  };
+    };
+  }
 
-  // Step 2: Description & Price & all other fields
+  // Step 2: Description & Price & all other fields (or Photos on eBay.de)
   const step2Btn = document.getElementById("ai-ext-step2-btn");
-  step2Btn.onclick = async () => {
-    if (!activeDraft) {
-      alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
-      return;
-    }
-    const platform = detectPlatform();
-    step2Btn.disabled = true;
-    step2Btn.textContent = "⏳ Fülle Textfelder aus...";
-    try {
-      await executeStep2(activeDraft);
-      step2Btn.textContent = "✓ Textfelder eingefügt";
-    } finally {
-      step2Btn.disabled = false;
-      setTimeout(() => {
-        step2Btn.textContent = platform === "tutti"
-          ? "▶ Schritt 2: Alle Textfelder einfügen"
-          : (platform === "ebay_de" ? "▶ Schritt 2: Beschreibung, Preise & Versand" : "▶ Schritt 2: Beschreibung, Zustand & Preis");
-      }, 4000);
-    }
-  };
+  if (step2Btn) {
+    step2Btn.onclick = async () => {
+      if (!activeDraft) {
+        alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
+        return;
+      }
+      const platform = detectPlatform();
+      step2Btn.disabled = true;
+
+      if (platform === "ebay_de") {
+        step2Btn.textContent = "⏳ Lade Bilder hoch...";
+        try {
+          const res = await executeEbayStep2(activeDraft);
+          if (res && res.ok && res.count) {
+            step2Btn.textContent = `✓ ${res.count} Bilder hochgeladen`;
+          } else if (res && res.message) {
+            step2Btn.textContent = (res.ok ? "✓ " : "⚠ ") + res.message;
+          } else {
+            step2Btn.textContent = "✓ Bilder hochgeladen";
+          }
+        } catch (err) {
+          console.warn("[OccAIsion] eBay Step 2 error:", err);
+          step2Btn.textContent = "⚠ Fehler beim Bild-Upload";
+        } finally {
+          step2Btn.disabled = false;
+          setTimeout(() => {
+            step2Btn.textContent = "▶ Schritt 2: Bilder hochladen";
+          }, 4000);
+        }
+        return;
+      }
+
+      step2Btn.textContent = "⏳ Fülle Textfelder aus...";
+      try {
+        await executeStep2(activeDraft);
+        step2Btn.textContent = "✓ Textfelder eingefügt";
+      } finally {
+        step2Btn.disabled = false;
+        setTimeout(() => {
+          step2Btn.textContent = platform === "tutti"
+            ? "▶ Schritt 2: Alle Textfelder einfügen"
+            : "▶ Schritt 2: Beschreibung, Zustand & Preis";
+        }, 4000);
+      }
+    };
+  }
+
+  // Step 3 (eBay.de): Form fields (Title, Description, Prices & Format, Shipping)
+  const step3Btn = document.getElementById("ai-ext-step3-btn");
+  if (step3Btn) {
+    step3Btn.onclick = async () => {
+      if (!activeDraft) {
+        alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
+        return;
+      }
+      step3Btn.disabled = true;
+      step3Btn.textContent = "⏳ Fülle restliche Angaben...";
+      try {
+        const res = await executeEbayStep3(activeDraft);
+        if (res && res.message) {
+          step3Btn.textContent = "✓ " + res.message;
+        } else {
+          step3Btn.textContent = "✓ Angaben eingefügt";
+        }
+      } catch (err) {
+        console.warn("[OccAIsion] eBay Step 3 error:", err);
+        step3Btn.textContent = "⚠ Fehler beim Einfügen";
+      } finally {
+        step3Btn.disabled = false;
+        setTimeout(() => {
+          step3Btn.textContent = "▶ Schritt 3: Angaben einfügen";
+        }, 4000);
+      }
+    };
+  }
 
   // 1-Click Copy fallbacks (navigator.clipboard)
   const copyCatBtn = document.getElementById("ai-copy-cat-btn");
@@ -965,29 +1246,41 @@ function bindPanelEvents() {
     };
   }
 
-  document.getElementById("ai-copy-title-btn").onclick = () => {
-    if (!activeDraft) return;
-    const data = getPlatformData(activeDraft);
-    navigator.clipboard.writeText(data.title || "");
-  };
+  const copyTitleBtn = document.getElementById("ai-copy-title-btn");
+  if (copyTitleBtn) {
+    copyTitleBtn.onclick = () => {
+      if (!activeDraft) return;
+      const data = getPlatformData(activeDraft);
+      navigator.clipboard.writeText(data.title || "");
+    };
+  }
 
-  document.getElementById("ai-copy-desc-btn").onclick = () => {
-    if (!activeDraft) return;
-    const data = getPlatformData(activeDraft);
-    navigator.clipboard.writeText(data.description || "");
-  };
+  const copyDescBtn = document.getElementById("ai-copy-desc-btn");
+  if (copyDescBtn) {
+    copyDescBtn.onclick = () => {
+      if (!activeDraft) return;
+      const data = getPlatformData(activeDraft);
+      navigator.clipboard.writeText(data.description || "");
+    };
+  }
 
-  document.getElementById("ai-copy-start-btn").onclick = () => {
-    if (!activeDraft) return;
-    const data = getPlatformData(activeDraft);
-    navigator.clipboard.writeText(String(data.startPrice || 1));
-  };
+  const copyStartBtn = document.getElementById("ai-copy-start-btn");
+  if (copyStartBtn) {
+    copyStartBtn.onclick = () => {
+      if (!activeDraft) return;
+      const data = getPlatformData(activeDraft);
+      navigator.clipboard.writeText(String(data.startPrice || 1));
+    };
+  }
 
-  document.getElementById("ai-copy-buynow-btn").onclick = () => {
-    if (!activeDraft) return;
-    const data = getPlatformData(activeDraft);
-    navigator.clipboard.writeText(String(data.buyNowPrice || 10));
-  };
+  const copyBuyNowBtn = document.getElementById("ai-copy-buynow-btn");
+  if (copyBuyNowBtn) {
+    copyBuyNowBtn.onclick = () => {
+      if (!activeDraft) return;
+      const data = getPlatformData(activeDraft);
+      navigator.clipboard.writeText(String(data.buyNowPrice || 10));
+    };
+  }
 }
 
 function fetchDraftsList() {
@@ -1022,6 +1315,9 @@ function fetchDraftsList() {
 
 async function executeStep1(draft) {
   const platform = detectPlatform();
+  if (platform === "ebay_de") {
+    return await executeEbayStep1(draft);
+  }
   const data = getPlatformData(draft);
 
   // 1. Fetch images through background worker (bypassing CORS)
@@ -1083,8 +1379,11 @@ async function executeStep1(draft) {
 }
 
 async function executeStep2(draft) {
-  const data = getPlatformData(draft);
   const platform = detectPlatform();
+  if (platform === "ebay_de") {
+    return await executeEbayStep3(draft);
+  }
+  const data = getPlatformData(draft);
 
   // 1. Photos: If file input is present and has no files, inject images automatically
   const fileInput = document.querySelector('input[type="file"]#fehelix-uploader, input[type="file"]');
@@ -1719,6 +2018,10 @@ if (typeof module !== "undefined" && module.exports) {
     fillRicardoShipping,
     handleEbayPrelistStep1,
     handleEbayConditionDialog,
+    selectEbayProductMatch,
+    executeEbayStep1,
+    executeEbayStep2,
+    executeEbayStep3,
     fillEbayDEPricesAndFormat,
     fillEbayDEShipping,
     fetchDraftsList,

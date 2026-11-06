@@ -111,6 +111,15 @@
   background: #1d4ed8;
 }
 
+.ai-btn-amber {
+  background: #d97706;
+  color: #ffffff;
+}
+
+.ai-btn-amber:hover {
+  background: #b45309;
+}
+
 .ai-btn-secondary {
   background: #059669;
   color: #ffffff;

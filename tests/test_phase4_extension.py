@@ -85,6 +85,11 @@ def test_extension_js_syntax_and_xray_and_cors_safeguards():
     assert "DataTransfer" in content_js_code
     assert "ai-ext-step1-btn" in content_js_code
     assert "ai-ext-step2-btn" in content_js_code
+    assert "ai-ext-step3-btn" in content_js_code
+    assert "executeEbayStep1" in content_js_code
+    assert "executeEbayStep2" in content_js_code
+    assert "executeEbayStep3" in content_js_code
+    assert "selectEbayProductMatch" in content_js_code
     assert "ai-ext-draft-select" in content_js_code
     assert "clipboard" in content_js_code.lower()
     assert "condition" in content_js_code.lower()
@@ -507,6 +512,21 @@ def test_extension_price_parser_and_stats_via_node():
 
 def test_extension_ricardo_price_autofill_via_node():
     node_script = """
+    global.browser = {
+      runtime: {
+        sendMessage: (msg, cb) => {
+          if (msg.action === 'FETCH_DRAFT_IMAGES') {
+            cb({
+              ok: true,
+              images: [
+                { filename: 'lego_front.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' },
+                { filename: 'lego_back.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' }
+              ]
+            });
+          }
+        }
+      }
+    };
     const content = require('./extension/content.js');
 
     (async () => {
@@ -591,6 +611,21 @@ def test_extension_ricardo_price_autofill_via_node():
 
 def test_extension_ricardo_shipping_autofill_via_node():
     node_script = """
+    global.browser = {
+      runtime: {
+        sendMessage: (msg, cb) => {
+          if (msg.action === 'FETCH_DRAFT_IMAGES') {
+            cb({
+              ok: true,
+              images: [
+                { filename: 'lego_front.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' },
+                { filename: 'lego_back.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' }
+              ]
+            });
+          }
+        }
+      }
+    };
     const content = require('./extension/content.js');
 
     (async () => {
@@ -719,6 +754,21 @@ def test_extension_ricardo_shipping_autofill_via_node():
 
 def test_extension_content_dom_autofill_and_security():
     node_script = """
+    global.browser = {
+      runtime: {
+        sendMessage: (msg, cb) => {
+          if (msg.action === 'FETCH_DRAFT_IMAGES') {
+            cb({
+              ok: true,
+              images: [
+                { filename: 'lego_front.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' },
+                { filename: 'lego_back.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' }
+              ]
+            });
+          }
+        }
+      }
+    };
     const content = require('./extension/content.js');
 
     // 1. Verify setNativeValue event dispatching and tracking
@@ -1067,6 +1117,21 @@ def test_scrape_all_price_sources_fault_tolerant():
 
 def test_extension_ebay_de_autofill_and_prelist_via_node():
     node_script = """
+    global.browser = {
+      runtime: {
+        sendMessage: (msg, cb) => {
+          if (msg.action === 'FETCH_DRAFT_IMAGES') {
+            cb({
+              ok: true,
+              images: [
+                { filename: 'lego_front.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' },
+                { filename: 'lego_back.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' }
+              ]
+            });
+          }
+        }
+      }
+    };
     const content = require('./extension/content.js');
 
     // 1. Verify handleEbayPrelistStep1 (Step 1 keyword search)
@@ -1183,6 +1248,282 @@ def test_extension_ebay_de_autofill_and_prelist_via_node():
     """
     res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
     assert res.returncode == 0, f"eBay DE extension autofill test failed: {res.stderr}"
+
+
+def test_extension_ebay_de_3step_workflow_via_node():
+    node_script = """
+    global.browser = {
+      runtime: {
+        sendMessage: (msg, cb) => {
+          if (msg.action === 'FETCH_DRAFT_IMAGES') {
+            cb({
+              ok: true,
+              images: [
+                { filename: 'lego_front.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' },
+                { filename: 'lego_back.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' }
+              ]
+            });
+          }
+        }
+      }
+    };
+    const content = require('./extension/content.js');
+
+    (async () => {
+      // 1. Test selectEbayProductMatch with model number scoring
+      let clickedProductIdx = -1;
+      const mockProductButtons = [
+        { textContent: 'LEGO Harry Potter: Schloss Hogwarts: die Große Halle (76435)', click: () => { clickedProductIdx = 0; } },
+        { textContent: 'LEGO Harry Potter: Die große Halle von Hogwarts (75954)', click: () => { clickedProductIdx = 1; } },
+        { textContent: 'LEGO Harry Potter: Schloss Hogwarts (71043)', click: () => { clickedProductIdx = 2; } },
+      ];
+      const mockCatalogDoc = {
+        querySelectorAll: (sel) => {
+          if (sel.includes('product-button')) return mockProductButtons;
+          return [];
+        }
+      };
+
+      const matchRes = content.selectEbayProductMatch(
+        { identified_product: 'LEGO Harry Potter Schloss Hogwarts 76435' },
+        { title: 'LEGO Harry Potter 76435' },
+        mockCatalogDoc
+      );
+      if (!matchRes || !matchRes.isMatch || matchRes.button !== mockProductButtons[0]) {
+        throw new Error('selectEbayProductMatch failed to match exact model 76435: ' + JSON.stringify(matchRes));
+      }
+
+      // 2. Test executeEbayStep1 (Keyword -> Catalog -> Condition Dialog)
+      let prelistKeyword = '';
+      let prelistNextClicked = false;
+      let conditionRadioChecked = false;
+      let conditionContinueClicked = false;
+
+      const mockStep1Doc = {
+        querySelector: (sel) => {
+          if (sel.includes('search-textbox') || sel.includes('simplified-keyword')) {
+            return {
+              value: '',
+              dispatchEvent: () => {},
+            };
+          }
+          if (sel.includes('sell-search-simplified__next-action')) {
+            return {
+              disabled: true,
+              removeAttribute: () => {},
+              click: () => { prelistNextClicked = true; }
+            };
+          }
+          if (sel.includes('value="3000"')) {
+            return {
+              name: 'condition',
+              value: '3000',
+              checked: false,
+              click: () => { conditionRadioChecked = true; },
+              dispatchEvent: () => {}
+            };
+          }
+          if (sel.includes('condition-dialog-radix__continue-btn')) {
+            return {
+              disabled: true,
+              removeAttribute: () => {},
+              click: () => { conditionContinueClicked = true; }
+            };
+          }
+          if (sel.includes('prelist-radix__next-action')) {
+            return {
+              click: () => {}
+            };
+          }
+          return null;
+        },
+        querySelectorAll: (sel) => {
+          if (sel.includes('product-button')) return mockProductButtons;
+          return [];
+        }
+      };
+
+      const step1Draft = {
+        identified_product: 'LEGO Harry Potter Schloss Hogwarts 76435',
+        ebay_de: {
+          title: 'LEGO Harry Potter Schloss Hogwarts 76435 OVP',
+          condition: 'gebraucht'
+        }
+      };
+
+      const resStep1 = await content.executeEbayStep1(step1Draft, mockStep1Doc);
+      if (!resStep1 || !resStep1.ok) {
+        throw new Error('executeEbayStep1 failed: ' + JSON.stringify(resStep1));
+      }
+      if (!prelistNextClicked) {
+        throw new Error('executeEbayStep1 did not click next after keyword search');
+      }
+      if (clickedProductIdx !== 0) {
+        throw new Error('executeEbayStep1 did not click matching product button: got idx ' + clickedProductIdx);
+      }
+      if (!conditionRadioChecked || !conditionContinueClicked) {
+        throw new Error('executeEbayStep1 did not select condition radio or continue button');
+      }
+
+      // 3. Test executeEbayStep2 (Pure Image Injection)
+      let injectedFiles = null;
+      const mockFileInput = {
+        id: 'fehelix-uploader',
+        type: 'file',
+        files: [],
+        dispatchEvent: () => {},
+        closest: () => null,
+        parentElement: { dispatchEvent: () => {} }
+      };
+
+      const mockStep2Doc = {
+        querySelector: (sel) => {
+          if (sel.includes('fehelix-uploader') || sel.includes('type="file"')) {
+            return mockFileInput;
+          }
+          return null;
+        }
+      };
+
+      global.browser = {
+        runtime: {
+          sendMessage: (msg, cb) => {
+            if (msg.action === 'FETCH_DRAFT_IMAGES') {
+              cb({
+                ok: true,
+                images: [
+                  { filename: 'lego_front.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' },
+                  { filename: 'lego_back.jpg', mimeType: 'image/jpeg', dataUrl: 'data:image/jpeg;base64,/9j/4AAQSkZJRg==' }
+                ]
+              });
+            }
+          }
+        }
+      };
+
+      const resStep2 = await content.executeEbayStep2({ id: 'draft-123' }, mockStep2Doc);
+      if (!resStep2 || !resStep2.ok || resStep2.count !== 2) {
+        throw new Error('executeEbayStep2 failed: ' + JSON.stringify(resStep2));
+      }
+
+      // 4. Test executeEbayStep3 (Title, Description, Format & Prices, Shipping)
+      let titleSet = '';
+      let formatSet = '';
+      let startPriceSet = '';
+      let buynowPriceSet = '';
+      let shippingSet = '';
+      let descSet = '';
+
+      const mockRteIframe = {
+        id: 'se-rte-frame__summary',
+        contentDocument: {
+          querySelector: () => ({
+            replaceChildren: () => {},
+            appendChild: (child) => { descSet += (child.textContent || ''); },
+            dispatchEvent: () => {}
+          }),
+          createTextNode: (t) => ({ textContent: t }),
+          createElement: () => ({ textContent: " " })
+        }
+      };
+
+      const mockShippingBtns = [
+        { textContent: 'Versand und Abholung', getAttribute: () => null, click: () => { shippingSet = 'versand_und_abholung'; } }
+      ];
+
+      const mockStep3Doc = {
+        querySelector: (sel) => {
+          if (sel.includes('input[name="title"]')) {
+            return {
+              value: '',
+              dispatchEvent: () => {}
+            };
+          }
+          if (sel.includes('format')) {
+            return {
+              value: '',
+              dispatchEvent: () => {},
+              parentElement: { querySelector: () => ({ textContent: '' }) }
+            };
+          }
+          if (sel.includes('startPrice')) {
+            return {
+              value: '',
+              dispatchEvent: () => {}
+            };
+          }
+          if (sel.includes('price')) {
+            return {
+              value: '',
+              dispatchEvent: () => {}
+            };
+          }
+          return null;
+        },
+        querySelectorAll: (sel) => {
+          if (sel.includes('iframe#se-rte-frame__summary')) return [mockRteIframe];
+          if (sel.includes('.summary__shipping button')) return mockShippingBtns;
+          return [];
+        }
+      };
+
+      const resStep3 = await content.executeEbayStep3(
+        {
+          ebay_de: {
+            title: 'LEGO Harry Potter 76435 Neu OVP',
+            description: 'Tolles Set in Originalverpackung.',
+            offer_type: 'auction',
+            start_price_eur: 49.99,
+            buynow_price_eur: 119.00,
+            shipping_preset_id: 'dhl_2kg'
+          }
+        },
+        mockStep3Doc
+      );
+
+      if (!resStep3 || !resStep3.ok) {
+        throw new Error('executeEbayStep3 failed: ' + JSON.stringify(resStep3));
+      }
+      if (shippingSet !== 'versand_und_abholung') {
+        throw new Error('executeEbayStep3 failed to configure shipping: got ' + shippingSet);
+      }
+      if (!descSet.includes('Tolles Set in Originalverpackung')) {
+        throw new Error('executeEbayStep3 failed to inject description into RTE iframe: got ' + descSet);
+      }
+
+      // 5. Test Smart Panel UI buttons: 3 steps on eBay DE vs 2 steps on Tutti/Ricardo
+      let appendedPanels = [];
+      global.document = {
+        getElementById: () => null,
+        createElement: (tag) => ({ id: '', className: '', innerHTML: '' }),
+        body: {
+          appendChild: (el) => { appendedPanels.push(el); }
+        }
+      };
+
+      // Test eBay DE
+      global.location = { hostname: 'www.ebay.de' };
+      content.createSmartPanel();
+      const ebayPanel = appendedPanels[appendedPanels.length - 1];
+      if (!ebayPanel || !ebayPanel.innerHTML.includes('ai-ext-step1-btn') || !ebayPanel.innerHTML.includes('ai-ext-step2-btn') || !ebayPanel.innerHTML.includes('ai-ext-step3-btn')) {
+        throw new Error('Expected 3 buttons for eBay DE Smart Panel, got: ' + ebayPanel?.innerHTML);
+      }
+
+      // Test Ricardo
+      global.location = { hostname: 'www.ricardo.ch' };
+      content.createSmartPanel();
+      const ricardoPanel = appendedPanels[appendedPanels.length - 1];
+      if (!ricardoPanel || !ricardoPanel.innerHTML.includes('ai-ext-step1-btn') || !ricardoPanel.innerHTML.includes('ai-ext-step2-btn') || ricardoPanel.innerHTML.includes('ai-ext-step3-btn')) {
+        throw new Error('Expected 2 buttons (and no step3) for Ricardo Smart Panel, got: ' + ricardoPanel?.innerHTML);
+      }
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"eBay DE 3-step workflow test failed: {res.stderr}"
+
 
 
 
