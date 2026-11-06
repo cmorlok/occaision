@@ -118,13 +118,17 @@ const btnExportBackup = document.getElementById("btn-export-backup");
 const backupFileInput = document.getElementById("backup-file-input");
 const toastContainer = document.getElementById("toast-container");
 
-function showToast(message, type = "info", options = {}) {
-  if (typeof window !== "undefined" && typeof window.showToast === "function") {
-    return window.showToast(message, type, options);
-  }
-  console.log(`[${type}] ${message}`);
-  return null;
-}
+const showToast = (typeof window !== "undefined" && typeof window.showToast === "function")
+  ? (...args) => window.showToast(...args)
+  : (message, type = "info", options = {}) => {
+      if (typeof require !== "undefined") {
+        try {
+          return require("./toast.js").showToast(message, type, options);
+        } catch (_) {}
+      }
+      console.log(`[${type}] ${message}`);
+      return null;
+    };
 
 let systemConfig = null;
 

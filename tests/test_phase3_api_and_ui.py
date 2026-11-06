@@ -667,6 +667,72 @@ def test_frontend_upload_validation():
     assert res.returncode == 0, f"Frontend upload validation failed: {res.stderr}"
 
 
+def test_frontend_scripts_browser_coexistence():
+    """Verify that api.js, toast.js, and app.js evaluate cleanly in a shared browser-like global context
+    without identifier redeclaration SyntaxErrors (e.g. redeclaration of const api) or recursive stack overflows."""
+    node_script = """
+    const vm = require('vm');
+    const fs = require('fs');
+
+    const createdElements = [];
+    const ctx = vm.createContext({
+      console: console,
+      setTimeout: setTimeout,
+      clearTimeout: clearTimeout,
+      document: {
+        getElementById: (id) => ({
+          id,
+          appendChild: (child) => { createdElements.push(child); },
+          addEventListener: () => {},
+          classList: { add: () => {}, remove: () => {} },
+          style: {},
+        }),
+        createElement: (tag) => ({
+          tag,
+          className: '',
+          textContent: '',
+          setAttribute: () => {},
+          appendChild: (c) => {},
+          classList: { add: () => {}, remove: () => {} },
+          style: {},
+          isConnected: true,
+          remove: () => {},
+        }),
+        addEventListener: () => {},
+      },
+    });
+    ctx.window = ctx;
+    ctx.addEventListener = () => {};
+
+    // 1. Load api.js
+    const apiCode = fs.readFileSync('./frontend/api.js', 'utf8');
+    vm.runInContext(apiCode, ctx);
+    if (!ctx.window.api || typeof ctx.window.api.listDrafts !== 'function') {
+      throw new Error('window.api not initialized properly by api.js');
+    }
+
+    // 2. Load toast.js
+    const toastCode = fs.readFileSync('./frontend/toast.js', 'utf8');
+    vm.runInContext(toastCode, ctx);
+    if (typeof ctx.window.showToast !== 'function') {
+      throw new Error('window.showToast not initialized properly by toast.js');
+    }
+
+    // 3. Load app.js in the exact same shared global context
+    const appCode = fs.readFileSync('./frontend/app.js', 'utf8');
+    vm.runInContext(appCode, ctx);
+
+    // 4. Verify toast execution inside app.js does not trigger recursion or call stack overflow
+    const toastResult = ctx.showToast('Test Toast Notification', 'success');
+    if (!toastResult || createdElements.length === 0) {
+      throw new Error('showToast did not create or return a toast element');
+    }
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Frontend scripts browser coexistence failed: {res.stderr}"
+
+
+
 
 
 
