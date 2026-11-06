@@ -87,7 +87,18 @@ async function fillRicardoPrices(draft, data) {
     }
   }
 
-  if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined) {
+  // Handle Ricardo Offer Type (auction vs fixed_price)
+  if (data && data.priceType === "fixed_price") {
+    const fixedPriceTab = Array.from(document.querySelectorAll('button[role="tab"], input[type="radio"], [role="radio"]')).find(el =>
+      /fixpreis|sofort-?kauf/i.test(el.textContent || el.value || "")
+    );
+    if (fixedPriceTab && (!fixedPriceTab.checked && fixedPriceTab.getAttribute('aria-selected') !== 'true')) {
+      fixedPriceTab.click();
+      await new Promise(r => setTimeout(r, 150));
+    }
+  }
+
+  if (startPriceInput && data.startPrice !== null && data.startPrice !== undefined && data.priceType !== "fixed_price") {
     setNativeValue(startPriceInput, formatPrice(data.startPrice));
   }
 
@@ -190,10 +201,19 @@ async function fillRicardoShipping(draft) {
     await new Promise(r => setTimeout(r, 250));
   }
 
-  // Ensure Pickup is also enabled if pickup is allowed (standard for Ricardo)
-  if (pickupSwitch && !isPickupChecked()) {
-    pickupSwitch.click();
-    await new Promise(r => setTimeout(r, 100));
+  // Ensure Pickup matches pickupAllowed (defaults to true if unspecified)
+  const pickupAllowed = draft?.ricardo?.pickup_allowed !== undefined
+    ? draft.ricardo.pickup_allowed
+    : (draft?.preset_settings?.pickup_allowed !== undefined ? draft.preset_settings.pickup_allowed : true);
+
+  if (pickupSwitch) {
+    if (pickupAllowed && !isPickupChecked()) {
+      pickupSwitch.click();
+      await new Promise(r => setTimeout(r, 100));
+    } else if (!pickupAllowed && isPickupChecked()) {
+      pickupSwitch.click();
+      await new Promise(r => setTimeout(r, 100));
+    }
   }
 
   // 3. Check if standard default (Paket bis 2kg, Economy, 9.00 CHF) is what we need
@@ -258,6 +278,12 @@ async function fillRicardoShipping(draft) {
       targetCost = 9.00;
     }
 
+    // Dynamic override from draft shipping presets if provided
+    const draftCost = draft?.shipping_presets?.[presetId]?.cost_chf ?? draft?.ricardo?.shipping_cost_chf;
+    if (draftCost !== undefined && draftCost !== null) {
+      targetCost = Number(draftCost);
+    }
+
     if (targetWeightRegex) {
       const weightChip = Array.from(dialog.querySelectorAll('[role="radio"], .MuiChip-root')).find(c =>
         targetWeightRegex.test(c.textContent || "")
@@ -312,7 +338,7 @@ async function fillMuiSelect(comboboxEl, matchFn) {
         )
       );
       if (options.length > 0) {
-        const match = options.find(matchFn) || options[0];
+        const match = options.find(matchFn);
         if (match) {
           match.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
           match.click();
@@ -490,28 +516,28 @@ function injectFilesIntoInput(fileInput, imagePayloads) {
 
 // Platform detection
 function isRicardo(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("ricardo.ch");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "ricardo.ch" || h.endsWith(".ricardo.ch");
 }
 
 function isTutti(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("tutti.ch");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "tutti.ch" || h.endsWith(".tutti.ch");
 }
 
 function isEbayDE(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("ebay.de");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "ebay.de" || h.endsWith(".ebay.de");
 }
 
 function isKleinanzeigen(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h.includes("kleinanzeigen.de");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "kleinanzeigen.de" || h.endsWith(".kleinanzeigen.de");
 }
 
 function isLocalDashboard(hostname) {
-  const h = hostname || (typeof location !== "undefined" ? location.hostname : "");
-  return h === "127.0.0.1" || h === "localhost" || h.includes("127.0.0.1") || h.includes("localhost");
+  const h = (hostname || (typeof location !== "undefined" ? location.hostname : "")).toLowerCase();
+  return h === "127.0.0.1" || h === "localhost";
 }
 
 function detectPlatform(hostname) {
@@ -534,7 +560,7 @@ function getPlatformData(draft, platform) {
       startPrice: draft.ricardo ? draft.ricardo.start_price_chf : 1.0,
       buyNowPrice: draft.ricardo ? draft.ricardo.buynow_price_chf : 10.0,
       currency: "CHF",
-      priceType: "auction"
+      priceType: draft.ricardo && draft.ricardo.offer_type ? draft.ricardo.offer_type : "auction"
     };
   } else if (p === "tutti") {
     return {
@@ -603,8 +629,18 @@ function setDescriptionValue(value, rootDoc) {
       if (iframeDoc) {
         const editable = iframeDoc.querySelector('.editable-text-area, [contenteditable="true"], body');
         if (editable) {
-          const htmlVal = value.replace(/\n/g, "<br>");
-          editable.innerHTML = htmlVal;
+          if (typeof editable.replaceChildren === "function") {
+            editable.replaceChildren();
+          } else {
+            while (editable.firstChild) editable.removeChild(editable.firstChild);
+          }
+          const lines = String(value || "").split("\n");
+          lines.forEach((line, idx) => {
+            editable.appendChild(iframeDoc.createTextNode(line));
+            if (idx < lines.length - 1) {
+              editable.appendChild(iframeDoc.createElement("br"));
+            }
+          });
           editable.dispatchEvent(new Event("input", { bubbles: true }));
           editable.dispatchEvent(new Event("change", { bubbles: true }));
           editable.dispatchEvent(new Event("blur", { bubbles: true }));
@@ -722,7 +758,7 @@ function bindPanelEvents() {
   const step1Btn = document.getElementById("ai-ext-step1-btn");
   step1Btn.onclick = async () => {
     if (!activeDraft) {
-      alert("Bitte wähle zuerst einen Entwurf aus.");
+      alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
       return;
     }
     const platform = detectPlatform();
@@ -752,7 +788,7 @@ function bindPanelEvents() {
   const step2Btn = document.getElementById("ai-ext-step2-btn");
   step2Btn.onclick = async () => {
     if (!activeDraft) {
-      alert("Bitte wähle zuerst einen Entwurf aus.");
+      alert("Bitte wähle zuerst einen Entwurf aus oder öffne 127.0.0.1:8000 zur Kopplung.");
       return;
     }
     const platform = detectPlatform();
@@ -824,8 +860,12 @@ function fetchDraftsList() {
         draftSelect.appendChild(opt);
       });
       activeDraft = currentDrafts[0];
+    } else if (response && (response.unauthorized || (response.error && response.error.includes("401")))) {
+      draftSelect.innerHTML = '<option value="">⚠️ Nicht gekoppelt: Einmalig 127.0.0.1:8000 im Browser öffnen</option>';
+      activeDraft = null;
     } else {
       draftSelect.innerHTML = '<option value="">Fehler beim Laden (Backend online?)</option>';
+      activeDraft = null;
     }
   });
 }
@@ -1021,8 +1061,9 @@ async function executeStep2(draft) {
 function sendToPage(payloadObj) {
   if (typeof window === "undefined") return;
   try {
-    // Send as JSON string to bypass Firefox Xray compartment restrictions on Object properties
-    window.postMessage(JSON.stringify(payloadObj), "*");
+    // Target current dashboard origin to prevent token/message interception
+    const targetOrigin = (window.location && window.location.origin && window.location.origin !== "null") ? window.location.origin : "*";
+    window.postMessage(JSON.stringify(payloadObj), targetOrigin);
   } catch (e) {
     console.warn("[OccAIsion] postMessage warning:", e);
   }
@@ -1038,6 +1079,7 @@ function setupDashboardBridge() {
 
   window.addEventListener("message", event => {
     if (!event || !event.data) return;
+    if (typeof window !== "undefined" && window.location && event.origin && event.origin !== window.location.origin) return;
 
     let msg = event.data;
     if (typeof msg === "string") {
@@ -1051,6 +1093,13 @@ function setupDashboardBridge() {
 
     if (msg.type === "OCCAISION_PING") {
       sendToPage({ type: "OCCAISION_PONG" });
+      return;
+    }
+
+    if (msg.type === "OCCAISION_SET_TOKEN" && msg.token) {
+      if (browserApi && browserApi.runtime && browserApi.runtime.sendMessage) {
+        browserApi.runtime.sendMessage({ action: "SET_AUTH_TOKEN", token: msg.token });
+      }
       return;
     }
 
@@ -1503,5 +1552,6 @@ if (typeof module !== "undefined" && module.exports) {
     getPlatformData,
     fillRicardoPrices,
     fillRicardoShipping,
+    fetchDraftsList,
   };
 }

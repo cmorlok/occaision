@@ -16,8 +16,7 @@
 | `backend/services/image_service.py` | ✅ Fertig | **Keine Änderung nötig** (HEIC, EXIF-Strip, 1024px-Resize, Blur & `rembg` sind plattformunabhängig). |
 | `backend/models.py` | 🔄 Erweitern (**Step 1**) | Neue Modelle `EbayDEListing` (Titel $\le 80$), `KleinanzeigenListing` (Titel $\le 65$, `PriceTypeDE`), `MarketCountry`; Erweiterung von `PresetSettings` (DE-Versand-Presets), `VerificationLinks`, `PriceAnalysis` & `Draft`. |
 | `backend/storage.py` | 🔄 Erweitern (**Step 1**) | `create_draft()` setzt DE-Defaults (`default_de_shipping_preset_id`, `default_offer_type`); `update_draft()` prüft zusätzlich Titellängen für `ebay_de` ($\le 80$) und `kleinanzeigen` ($\le 65$). |
-| `backend/services/ebay_service.py` | 🔄 Erweitern (**Step 2**) | `build_verification_links()` ergänzt `kleinanzeigen_search_url` und `idealo_url`. |
-| `backend/services/ai_service.py` | 🔄 Erweitern (**Step 2**) | `SYSTEM_INSTRUCTION`, `post_process_ai_output()` und `analyze_draft()` um DE-Preise (EUR), `ebay_de`- & `kleinanzeigen`-Texte, Erhalt von `ß` für DE und deutschen BGB-Disclaimer erweitern. |
+| `backend/services/ai_service.py` | 🔄 Erweitern (**Step 2**) | `build_verification_links()` ergänzt `kleinanzeigen_search_url` und `idealo_url`; `SYSTEM_INSTRUCTION`, `post_process_ai_output()` und `analyze_draft()` um DE-Preise (EUR), `ebay_de`- & `kleinanzeigen`-Texte, Erhalt von `ß` für DE und deutschen BGB-Disclaimer erweitern. |
 | `backend/main.py` | ✅ Kompatibel | Routen nutzen `Draft` und `PresetSettings` automatisch über Pydantic. |
 | `frontend/index.html` & `frontend/app.js` | 🔄 Erweitern (**Step 3**) | DE-Versand-Preset-Dropdown, DE-Preiskarten & Prüflinks (`Kleinanzeigen`, `Idealo`), sowie 2 neue editierbare Vorschau-Karten (**eBay.de** & **Kleinanzeigen.de**). |
 | `extension/manifest.json`, `background.js`, `content.js` | 🔄 Erweitern (**Step 4**) | Host-Permissions & Matches für `ebay.de` & `kleinanzeigen.de`, `detectPlatform()`, `setDescriptionValue()` (inkl. `iframe`/`contenteditable` für eBay.de) und Auto-Fill für alle 4 Plattformen. |
@@ -183,10 +182,10 @@ Erweitere `test_multi_draft_crud_persistence`:
 
 ---
 
-### STEP 2: Prüflinks (`backend/services/ebay_service.py`) & KI-Service (`backend/services/ai_service.py`)
+### STEP 2: Prüflinks & KI-Service (`backend/services/ai_service.py`)
 
-#### 2.1 Änderungen in `backend/services/ebay_service.py`
-Erweitere `build_verification_links(self, query: str) -> VerificationLinks`:
+#### 2.1 Änderungen in `backend/services/ai_service.py`
+Erweitere `build_verification_links(query: str) -> VerificationLinks`:
 ```python
 def build_verification_links(self, query: str) -> VerificationLinks:
     q = urllib.parse.quote_plus(query.strip())
@@ -384,7 +383,7 @@ Da Backend-Scraping häufig durch Captchas/Anti-Bot-Systeme blockiert wird und G
 
 ---
 
-### STEP 5: Datenmodelle (`backend/models.py`) & Prüflinks (`backend/services/ebay_service.py`)
+### STEP 5: Datenmodelle (`backend/models.py`) & Prüflinks (`backend/services/ai_service.py`)
 * Neues Modell `MarketSourceStats` in `backend/models.py`:
   ```python
   class MarketSourceStats(BaseModel):

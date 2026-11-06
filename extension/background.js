@@ -10,6 +10,31 @@ function getBrowserApi() {
 const browserApi = getBrowserApi();
 const BACKEND_BASE = "http://127.0.0.1:8000";
 
+let cachedAuthToken = null;
+
+async function getAuthToken() {
+  if (cachedAuthToken) return cachedAuthToken;
+  if (browserApi && browserApi.storage && browserApi.storage.local) {
+    try {
+      const data = await browserApi.storage.local.get(["occaision_auth_token"]);
+      if (data && data.occaision_auth_token) {
+        cachedAuthToken = data.occaision_auth_token;
+        return cachedAuthToken;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+async function getAuthHeaders() {
+  const token = await getAuthToken();
+  const headers = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
 const ALL_HOST_ORIGINS = [
   "http://127.0.0.1/*",
   "http://localhost/*",
@@ -238,31 +263,49 @@ function extractEbayItemsFromHtml(html) {
   return items.slice(0, 30);
 }
 
-function logEbayExtractedItems(items) {
+function logExtractedItems(sourceKey, label, items, currency = "EUR", isSingleTop = false) {
   if (!items || items.length === 0) {
-    console.log("[OccAIsion] [ebay_de_sold] Keine verkauften Artikel extrahiert (0 Treffer).");
+    console.log(`[OccAIsion] [${sourceKey}] Keine ${label} extrahiert (0 Treffer).`);
     return;
   }
-  console.group(`[OccAIsion] [ebay_de_sold] Extrahierte verkaufte Artikel (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition}] | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (€)": it.price,
-          "Zustand": it.condition,
-          "Titel": it.title,
-        }))
-      );
-    } catch (_) {}
+  if (isSingleTop) {
+    const top = items[0];
+    console.group(`[OccAIsion] [${sourceKey}] ${label} (Bestpreis des ersten Produkts):`);
+    console.log(`  Top-Treffer: ${top.price} ${currency} | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
+    console.groupEnd();
+    if (typeof console.table === "function") {
+      try {
+        console.table([{
+          [`Preis (${currency})`]: top.price,
+          "Zustand": top.condition || "Neu",
+          "Produktname": top.title,
+        }]);
+      } catch (_) {}
+    }
+  } else {
+    console.group(`[OccAIsion] [${sourceKey}] ${label} (${items.length} Treffer):`);
+    items.forEach((it, idx) => {
+      const extra = it.bidType ? ` | [${it.bidType}]` : (it.condition ? ` | Zustand: [${it.condition}]` : "");
+      console.log(`  #${idx + 1}: ${it.price} ${currency}${extra} | Titel: "${it.title}"`);
+    });
+    console.groupEnd();
+    if (typeof console.table === "function") {
+      try {
+        console.table(
+          items.map((it, idx) => ({
+            "#": idx + 1,
+            [`Preis (${currency})`]: it.price,
+            "Zustand": it.condition || it.bidType || "-",
+            "Titel": it.title,
+          }))
+        );
+      } catch (_) {}
+    }
   }
+}
+
+function logEbayExtractedItems(items) {
+  logExtractedItems("ebay_de_sold", "verkaufte Artikel", items, "€");
 }
 
 function extractKleinanzeigenItems(content) {
@@ -398,30 +441,7 @@ function extractKleinanzeigenItems(content) {
 }
 
 function logKleinanzeigenExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [kleinanzeigen] Keine Kleinanzeigen-Artikel extrahiert (0 Treffer).");
-    return;
-  }
-  console.group(`[OccAIsion] [kleinanzeigen] Extrahierte Kleinanzeigen-Artikel (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} € | Zustand: [${it.condition || "Gebraucht"}] | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (€)": it.price,
-          "Zustand": it.condition || "Gebraucht",
-          "Titel": it.title,
-        }))
-      );
-    } catch (_) {}
-  }
+  logExtractedItems("kleinanzeigen", "Kleinanzeigen-Artikel", items, "€");
 }
 
 function extractRicardoItems(html, priceNodes = [], ricardoCards = []) {
@@ -525,30 +545,7 @@ function extractRicardoItems(html, priceNodes = [], ricardoCards = []) {
 }
 
 function logRicardoExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [ricardo] Keine Ricardo-Angebote extrahiert (0 Treffer).");
-    return;
-  }
-  console.group(`[OccAIsion] [ricardo] Extrahierte Ricardo-Angebote (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} CHF | [${it.bidType || "Angebot"}] | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (CHF)": it.price,
-          "Art": it.bidType || "Angebot",
-          "Titel": it.title,
-        }))
-      );
-    } catch (_) {}
-  }
+  logExtractedItems("ricardo", "Ricardo-Angebote", items, "CHF");
 }
 
 function extractTuttiItems(html, priceNodes = [], tuttiCards = []) {
@@ -628,30 +625,7 @@ function extractTuttiItems(html, priceNodes = [], tuttiCards = []) {
 }
 
 function logTuttiExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [tutti] Keine Tutti-Preise extrahiert (0 Treffer).");
-    return;
-  }
-  console.group(`[OccAIsion] [tutti] Extrahierte Tutti.ch Inserate (${items.length} Treffer):`);
-  items.forEach((it, idx) => {
-    console.log(
-      `  #${idx + 1}: ${it.price} CHF | Titel: "${it.title}"`
-    );
-  });
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table(
-        items.map((it, idx) => ({
-          "#": idx + 1,
-          "Preis (CHF)": it.price,
-          "Titel": it.title,
-          "URL": it.url,
-        }))
-      );
-    } catch (_) {}
-  }
+  logExtractedItems("tutti", "Tutti.ch Inserate", items, "CHF");
 }
 
 function findIdealoProductsInNextData(obj) {
@@ -684,6 +658,34 @@ function findIdealoProductsInNextData(obj) {
   }
   walk(obj);
   return items;
+}
+
+function calculateTokenOverlap(query, candidateTitle) {
+  if (!query || !candidateTitle) return 0.0;
+  const tokenize = s => s.toLowerCase().replace(/[^a-z0-9äöüß]/gi, " ").split(/\s+/).filter(w => w.length > 1);
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return 1.0;
+  const tTokens = new Set(tokenize(candidateTitle));
+  let matchCount = 0;
+  for (const t of qTokens) {
+    if (tTokens.has(t)) matchCount++;
+  }
+  return Math.round((matchCount / qTokens.length) * 100) / 100;
+}
+
+function selectBestMatchingItem(items, query) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  if (!query || items.length === 1) return items[0];
+  let bestItem = items[0];
+  let bestScore = -1;
+  for (const item of items) {
+    const score = calculateTokenOverlap(query, item.title || "");
+    if (score > bestScore) {
+      bestScore = score;
+      bestItem = item;
+    }
+  }
+  return bestItem;
 }
 
 function extractIdealoItems(html, priceNodes = [], idealoCards = []) {
@@ -795,26 +797,7 @@ function extractIdealoItems(html, priceNodes = [], idealoCards = []) {
 }
 
 function logIdealoExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [idealo] Kein Idealo-Neupreis extrahiert (0 Treffer).");
-    return;
-  }
-  const top = items[0];
-  console.group(`[OccAIsion] [idealo] Idealo Neupreis (Bestpreis des ersten Produkts):`);
-  console.log(`  Top-Treffer: ${top.price} € | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table([
-        {
-          "Preis (€)": top.price,
-          "Zustand": top.condition || "Neu",
-          "Produktname": top.title,
-        }
-      ]);
-    } catch (_) {}
-  }
+  logExtractedItems("idealo", "Idealo Neupreis", items, "€", true);
 }
 
 function extractToppreiseItems(html, priceNodes = [], toppreiseCards = []) {
@@ -916,26 +899,7 @@ function extractToppreiseItems(html, priceNodes = [], toppreiseCards = []) {
 }
 
 function logToppreiseExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [toppreise] Kein Toppreise-Neupreis extrahiert (0 Treffer).");
-    return;
-  }
-  const top = items[0];
-  console.group(`[OccAIsion] [toppreise] Toppreise Neupreis (Bestpreis des ersten Produkts):`);
-  console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table([
-        {
-          "Preis (CHF)": top.price,
-          "Zustand": top.condition || "Neu",
-          "Produktname": top.title,
-        }
-      ]);
-    } catch (_) {}
-  }
+  logExtractedItems("toppreise", "Toppreise Neupreis", items, "CHF", true);
 }
 
 function extractDigitecItems(html, priceNodes = [], digitecCards = []) {
@@ -1039,26 +1003,7 @@ function extractDigitecItems(html, priceNodes = [], digitecCards = []) {
 }
 
 function logDigitecExtractedItems(items) {
-  if (!items || items.length === 0) {
-    console.log("[OccAIsion] [digitec] Kein Galaxus/Digitec-Neupreis extrahiert (0 Treffer).");
-    return;
-  }
-  const top = items[0];
-  console.group(`[OccAIsion] [digitec] Galaxus/Digitec Neupreis (Bestpreis des ersten Produkts):`);
-  console.log(`  Top-Treffer: ${top.price} CHF | Zustand: [${top.condition || "Neu"}] | Titel: "${top.title}"`);
-  console.groupEnd();
-
-  if (typeof console.table === "function") {
-    try {
-      console.table([
-        {
-          "Preis (CHF)": top.price,
-          "Zustand": top.condition || "Neu",
-          "Produktname": top.title,
-        }
-      ]);
-    } catch (_) {}
-  }
+  logExtractedItems("digitec", "Galaxus/Digitec Neupreis", items, "CHF", true);
 }
 
 function extractPricesFromHtml(sourceId, html) {
@@ -1208,6 +1153,9 @@ function computeSourceStats(
     login_required: Boolean(extra.login_required),
     error: extra.error || null,
     items: extra.items || null,
+    captured_at: new Date().toISOString(),
+    query: extra.query || "",
+    confidence: extra.confidence !== undefined ? extra.confidence : 1.0,
   };
 }
 
@@ -1911,26 +1859,30 @@ async function scrapeSourceHybrid(sourceConfig, query, eurToChfRate = 0.94, keep
       extra.items = kleinanzeigenItems;
       logKleinanzeigenExtractedItems(kleinanzeigenItems);
     }
+    extra.query = query || "";
   } else if (sourceConfig.id === "idealo") {
     if (idealoItems && idealoItems.length > 0) {
       extra.items = idealoItems;
       logIdealoExtractedItems(idealoItems);
-      // For Idealo: The first card (.sr-resultList_* .sr-detailedPriceInfo__price_*) is the primary product's best new price!
-      prices = [idealoItems[0].price];
+      const matched = selectBestMatchingItem(idealoItems, query);
+      extra.confidence = matched ? calculateTokenOverlap(query, matched.title || "") : 1.0;
+      prices = matched ? [matched.price] : [idealoItems[0].price];
     }
   } else if (sourceConfig.id === "toppreise") {
     if (toppreiseItems && toppreiseItems.length > 0) {
       extra.items = toppreiseItems;
       logToppreiseExtractedItems(toppreiseItems);
-      // For Toppreise: The first product in the list or product page is the primary product's best new price!
-      prices = [toppreiseItems[0].price];
+      const matched = selectBestMatchingItem(toppreiseItems, query);
+      extra.confidence = matched ? calculateTokenOverlap(query, matched.title || "") : 1.0;
+      prices = matched ? [matched.price] : [toppreiseItems[0].price];
     }
   } else if (sourceConfig.id === "digitec") {
     if (digitecItems && digitecItems.length > 0) {
       extra.items = digitecItems;
       logDigitecExtractedItems(digitecItems);
-      // For Galaxus/Digitec: The first product in the list or product page is the primary product's best new price!
-      prices = [digitecItems[0].price];
+      const matched = selectBestMatchingItem(digitecItems, query);
+      extra.confidence = matched ? calculateTokenOverlap(query, matched.title || "") : 1.0;
+      prices = matched ? [matched.price] : [digitecItems[0].price];
     }
   } else if (sourceConfig.id === "ricardo") {
     if (ricardoItems && ricardoItems.length > 0) {
@@ -2027,13 +1979,36 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources 
     sourceConfigs = sourceConfigs.filter(cfg => enabledSources.includes(cfg.id));
   }
 
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     sourceConfigs.map(cfg => scrapeSourceHybrid(cfg, query, eurToChfRate, keepTabsOpen))
   );
 
   const sourcesMap = {};
-  for (const r of results) {
-    sourcesMap[r.source_id] = r;
+  for (let i = 0; i < sourceConfigs.length; i++) {
+    const cfg = sourceConfigs[i];
+    const outcome = settled[i];
+    if (outcome.status === "fulfilled") {
+      const r = outcome.value;
+      sourcesMap[r.source_id || cfg.id] = r;
+    } else {
+      console.warn(`[OccAIsion] [${cfg.id}] Scraping fehlgeschlagen:`, outcome.reason);
+      const errMsg =
+        outcome.reason && outcome.reason.message
+          ? outcome.reason.message
+          : String(outcome.reason || "Unbekannter Fehler");
+      sourcesMap[cfg.id] = {
+        source_id: cfg.id,
+        label: cfg.label,
+        currency: cfg.currency,
+        url: cfg.url,
+        prices_raw: [],
+        prices_chf: [],
+        count: 0,
+        stats: null,
+        method: "error",
+        error: errMsg,
+      };
+    }
   }
 
   if (sourcesMap.tutti && sourcesMap.tutti.url) {
@@ -2050,52 +2025,73 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources 
 
 if (browserApi && browserApi.runtime && browserApi.runtime.onMessage) {
   browserApi.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === "SET_AUTH_TOKEN") {
+      cachedAuthToken = request.token || null;
+      if (browserApi && browserApi.storage && browserApi.storage.local && request.token) {
+        browserApi.storage.local.set({ occaision_auth_token: request.token });
+      }
+      sendResponse({ ok: true });
+      return true;
+    }
+
     if (request.action === "LIST_DRAFTS") {
-      fetch(`${BACKEND_BASE}/api/drafts`)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
-        .then(drafts => sendResponse({ ok: true, drafts }))
-        .catch(err => sendResponse({ ok: false, error: err.message }));
+      getAuthHeaders().then(headers => {
+        fetch(`${BACKEND_BASE}/api/drafts`, { headers })
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(drafts => sendResponse({ ok: true, drafts }))
+          .catch(err => {
+            const isAuth = String(err.message).includes("401");
+            sendResponse({ ok: false, error: err.message, unauthorized: isAuth });
+          });
+      });
       return true;
     }
 
     if (request.action === "GET_DRAFT") {
-      fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
-        .then(draft => sendResponse({ ok: true, draft }))
-        .catch(err => sendResponse({ ok: false, error: err.message }));
+      getAuthHeaders().then(headers => {
+        fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`, { headers })
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(draft => sendResponse({ ok: true, draft }))
+          .catch(err => {
+            const isAuth = String(err.message).includes("401");
+            sendResponse({ ok: false, error: err.message, unauthorized: isAuth });
+          });
+      });
       return true;
     }
 
     if (request.action === "FETCH_DRAFT_IMAGES") {
-      fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        })
-        .then(async draft => {
-          const imagePayloads = [];
-          for (const img of draft.images || []) {
-            const imgUrl = `${BACKEND_BASE}/api/drafts/${draft.id}/images/${img.id}/active`;
-            const imgRes = await fetch(imgUrl);
-            if (!imgRes.ok) continue;
-            const buf = await imgRes.arrayBuffer();
-            const dataUrl = arrayBufferToBase64DataUrl(buf, "image/jpeg");
-            imagePayloads.push({
-              id: img.id,
-              filename: `${img.id}_${img.active_mode}.jpg`,
-              mimeType: "image/jpeg",
-              dataUrl: dataUrl,
-            });
-          }
-          sendResponse({ ok: true, images: imagePayloads });
-        })
-        .catch(err => sendResponse({ ok: false, error: err.message }));
+      getAuthHeaders().then(headers => {
+        fetch(`${BACKEND_BASE}/api/drafts/${request.draftId}`, { headers })
+          .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          })
+          .then(async draft => {
+            const imagePayloads = [];
+            for (const img of draft.images || []) {
+              const imgUrl = `${BACKEND_BASE}/api/drafts/${draft.id}/images/${img.id}/active`;
+              const imgRes = await fetch(imgUrl, { headers });
+              if (!imgRes.ok) continue;
+              const buf = await imgRes.arrayBuffer();
+              const dataUrl = arrayBufferToBase64DataUrl(buf, "image/jpeg");
+              imagePayloads.push({
+                id: img.id,
+                filename: `${img.id}_${img.active_mode}.jpg`,
+                mimeType: "image/jpeg",
+                dataUrl: dataUrl,
+              });
+            }
+            sendResponse({ ok: true, images: imagePayloads });
+          })
+          .catch(err => sendResponse({ ok: false, error: err.message }));
+      });
       return true;
     }
 
@@ -2136,6 +2132,8 @@ if (typeof module !== "undefined" && module.exports) {
     logRicardoExtractedItems,
     extractTuttiItems,
     logTuttiExtractedItems,
+    calculateTokenOverlap,
+    selectBestMatchingItem,
     computeSourceStats,
     scrapeViaBackgroundTab,
     scrapeSourceHybrid,

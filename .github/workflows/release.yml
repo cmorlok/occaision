@@ -12,12 +12,11 @@ on:
         default: ''
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 jobs:
   test:
-    name: Run Test Suite
+    name: Run Pytest & Lint Checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -32,43 +31,51 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Set up Node.js 18
         uses: actions/setup-node@v4
         with:
           node-version: '18'
 
-      - name: Run Pytest
+      - name: Run All Checks (Lint & Test)
         run: |
-          pytest -v
+          make check
 
   build-and-release:
     name: Build & Publish Release
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Determine Release Tag & Version
         id: release_tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF: ${{ github.ref }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            RAW_TAG="${{ github.event.inputs.tag }}"
-          elif [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
-            RAW_TAG="${GITHUB_REF#refs/tags/}"
+          if [ -n "$INPUT_TAG" ]; then
+            RAW_TAG="$INPUT_TAG"
+          elif [[ "$REF" == refs/tags/* ]]; then
+            RAW_TAG="${REF#refs/tags/}"
           else
             RAW_TAG="v$(date +'%Y.%m.%d-%H%M')"
           fi
           CLEAN_VER="${RAW_TAG#v}"
-          echo "tag=${RAW_TAG}" >> $GITHUB_OUTPUT
-          echo "version=${CLEAN_VER}" >> $GITHUB_OUTPUT
+          echo "tag=${RAW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${CLEAN_VER}" >> "$GITHUB_OUTPUT"
           echo "Release Tag: ${RAW_TAG} (Version: ${CLEAN_VER})"
 
       - name: Build Firefox Extension (dist/occaision.zip)
+        env:
+          VERSION: ${{ steps.release_tag.outputs.version }}
         run: |
-          bash scripts/build_extension.sh "${{ steps.release_tag.outputs.version }}"
+          bash scripts/build_extension.sh "$VERSION"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -95,8 +102,9 @@ jobs:
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
 
       - name: Build and Export Standalone Docker Archive
+        env:
+          VERSION: ${{ steps.release_tag.outputs.version }}
         run: |
-          VERSION="${{ steps.release_tag.outputs.version }}"
           docker build -t occaision:latest -t "occaision:${VERSION}" .
           mkdir -p dist
           echo "Packaging Docker image to dist/occaision-docker.tar.gz..."

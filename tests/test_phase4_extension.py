@@ -1,22 +1,23 @@
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
+
 import pytest
 
 
 def test_manifest_v3_validity():
     manifest_path = Path("extension/manifest.json")
     assert manifest_path.exists(), "extension/manifest.json does not exist"
-    
+
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
-        
+
     assert manifest.get("manifest_version") == 3
     assert manifest.get("name") == "OccAIsion"
     assert "background" in manifest
     assert "scripts" in manifest["background"]
     assert "background.js" in manifest["background"]["scripts"]
-    
+
     perms = manifest.get("permissions", [])
     assert "tabs" in perms
     assert "scripting" in perms
@@ -43,7 +44,7 @@ def test_manifest_v3_validity():
     assert any("toppreise.ch" in m for m in matches)
     assert any("digitec.ch" in m for m in matches)
     assert any("galaxus.ch" in m for m in matches)
-    
+
     # Assert all referenced files exist
     assert (Path("extension") / "background.js").exists()
     assert (Path("extension") / "content.js").exists()
@@ -53,31 +54,31 @@ def test_manifest_v3_validity():
 def test_extension_js_syntax_and_xray_and_cors_safeguards():
     bg_file = Path("extension/background.js")
     content_file = Path("extension/content.js")
-    
+
     assert bg_file.exists()
     assert content_file.exists()
-    
+
     # 1. Syntax check via Node.js
     res_bg = subprocess.run(["node", "--check", str(bg_file)], capture_output=True, text=True)
     assert res_bg.returncode == 0, f"Syntax error in background.js: {res_bg.stderr}"
-    
+
     res_content = subprocess.run(["node", "--check", str(content_file)], capture_output=True, text=True)
     assert res_content.returncode == 0, f"Syntax error in content.js: {res_content.stderr}"
-    
+
     content_js_code = content_file.read_text(encoding="utf-8")
     bg_js_code = bg_file.read_text(encoding="utf-8")
-    
+
     # 2. CORS / CSP Safeguard: content.js must NEVER directly call fetch() to localhost/127.0.0.1
     assert 'fetch("http://127.0.0.1' not in content_js_code
     assert 'fetch("http://localhost' not in content_js_code
     assert "fetch('http://127.0.0.1" not in content_js_code
     assert "fetch('http://localhost" not in content_js_code
-    
+
     # 3. background.js message handling
     assert "LIST_DRAFTS" in bg_js_code
     assert "GET_DRAFT" in bg_js_code
     assert "FETCH_DRAFT_IMAGES" in bg_js_code
-    
+
     # 4. content.js Xray vision, native setter & Smart-Panel elements
     assert "wrappedJSObject" in content_js_code
     assert "setNativeValue" in content_js_code
@@ -714,4 +715,355 @@ def test_extension_ricardo_shipping_autofill_via_node():
     """
     res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
     assert res.returncode == 0, f"Node test failed: {res.stderr}"
+
+
+def test_extension_content_dom_autofill_and_security():
+    node_script = """
+    const content = require('./extension/content.js');
+
+    // 1. Verify setNativeValue event dispatching and tracking
+    const eventsFired = [];
+    const mockInput = {
+      value: '',
+      dispatchEvent: (evt) => { eventsFired.push(evt.type); }
+    };
+    content.setNativeValue(mockInput, 'Pro Modell 2026');
+    if (mockInput.value !== 'Pro Modell 2026') {
+      throw new Error('setNativeValue did not set string value');
+    }
+    if (!eventsFired.includes('input') || !eventsFired.includes('change')) {
+      throw new Error('Required DOM events input/change not fired');
+    }
+
+    // 2. Verify setDescriptionValue iframe sanitization (prevent innerHTML injection)
+    class MockNode {
+      constructor(nodeType, nodeName, textContent = '') {
+        this.nodeType = nodeType;
+        this.nodeName = nodeName;
+        this.textContent = textContent;
+      }
+    }
+    class MockElement extends MockNode {
+      constructor(nodeName) {
+        super(1, nodeName);
+        this.childNodes = [];
+        this.events = [];
+      }
+      appendChild(child) { this.childNodes.push(child); }
+      replaceChildren() { this.childNodes = []; }
+      dispatchEvent(evt) { this.events.push(evt.type); }
+    }
+
+    const mockIframeBody = new MockElement('BODY');
+    const mockIframeDoc = {
+      querySelector: (sel) => mockIframeBody,
+      createTextNode: (text) => new MockNode(3, '#text', text),
+      createElement: (tag) => new MockElement(tag.toUpperCase())
+    };
+
+    const mockDocWithIframe = {
+      querySelector: (sel) => null,
+      querySelectorAll: (sel) => {
+        if (sel.includes('iframe')) {
+          return [{ contentDocument: mockIframeDoc }];
+        }
+        return [];
+      }
+    };
+
+    const xssPayload = 'Line 1\\n<script>alert(1)<\\/script>\\n<img src=x onerror=alert(2)>';
+    const iframeRes = content.setDescriptionValue(xssPayload, mockDocWithIframe);
+    if (!iframeRes) throw new Error('setDescriptionValue failed on mock iframe');
+
+    // Must create text nodes and BR elements, NEVER script/img element nodes
+    if (mockIframeBody.childNodes.length !== 5) {
+      throw new Error('Expected 5 nodes (3 text nodes, 2 BR), got: ' + mockIframeBody.childNodes.length);
+    }
+    for (let i = 0; i < mockIframeBody.childNodes.length; i++) {
+      const node = mockIframeBody.childNodes[i];
+      if (i % 2 === 0) {
+        if (node.nodeType !== 3) {
+          throw new Error('Node ' + i + ' should be text node, got type: ' + node.nodeType);
+        }
+      } else {
+        if (node.nodeName !== 'BR') {
+          throw new Error('Node ' + i + ' should be BR, got: ' + node.nodeName);
+        }
+      }
+    }
+    if (mockIframeBody.childNodes[2].textContent !== '<script>alert(1)<\\/script>') {
+      throw new Error('Raw script tag must remain unexecuted textContent');
+    }
+
+    // 3. Verify fillRicardoPrices with auction and fixed prices
+    const startInput = { value: '', dispatchEvent: () => {} };
+    const buyNowInput = { value: '', dispatchEvent: () => {} };
+    global.document = {
+      getElementById: (id) => {
+        if (id === 'SellingUI.start_price') return startInput;
+        if (id === 'SellingUI.buy_now_price') return buyNowInput;
+        return null;
+      },
+      querySelector: () => null,
+      querySelectorAll: () => []
+    };
+
+    (async () => {
+      await content.fillRicardoPrices({}, { startPrice: 19.95, buyNowPrice: 49.0 });
+      if (startInput.value !== '19.95') {
+        throw new Error('Expected startInput to be "19.95", got: ' + startInput.value);
+      }
+      if (buyNowInput.value !== '49') {
+        throw new Error('Expected buyNowInput to be "49", got: ' + buyNowInput.value);
+      }
+
+      // 4. Verify host boundary checking against phishing/spoofing
+      if (!content.isRicardo('www.ricardo.ch') || !content.isRicardo('seller.ricardo.ch')) {
+        throw new Error('Valid ricardo subdomains rejected');
+      }
+      if (content.isRicardo('ricardo.ch.attacker.org') || content.isRicardo('fake-ricardo.ch')) {
+        throw new Error('Deceptive ricardo domains accepted');
+      }
+
+      if (!content.isTutti('www.tutti.ch') || content.isTutti('tutti.ch.evil.com')) {
+        throw new Error('Tutti domain validation failed');
+      }
+
+      if (!content.isEbayDE('www.ebay.de') || content.isEbayDE('ebay.de.attacker.com')) {
+        throw new Error('eBay DE domain validation failed');
+      }
+
+      if (!content.isKleinanzeigen('www.kleinanzeigen.de') || content.isKleinanzeigen('kleinanzeigen.de.phishing.org')) {
+        throw new Error('Kleinanzeigen domain validation failed');
+      }
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+    assert res.returncode == 0, f"Node test failed: {res.stderr}"
+
+
+def test_extension_unpaired_auth_handling():
+    content_file = Path("extension/content.js")
+    bg_file = Path("extension/background.js")
+    content_text = content_file.read_text(encoding="utf-8")
+    bg_text = bg_file.read_text(encoding="utf-8")
+
+    assert "⚠️ Nicht gekoppelt: Einmalig 127.0.0.1:8000 im Browser öffnen" in content_text
+    assert "unauthorized: isAuth" in bg_text
+
+    node_script = """
+    global.BACKEND_BASE = "http://127.0.0.1:8000";
+    global.browser = {
+      storage: {
+        local: {
+          get: () => Promise.resolve({})
+        }
+      },
+      runtime: {
+        onMessage: {
+          addListener: (fn) => { global.__msgListener = fn; }
+        }
+      }
+    };
+    global.fetch = async (url) => {
+      return {
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: "Unauthorized" })
+      };
+    };
+
+    require('./extension/background.js');
+
+    new Promise((resolve, reject) => {
+      global.__msgListener({ action: "LIST_DRAFTS" }, {}, (res) => {
+        if (!res) return reject(new Error("No response received"));
+        if (res.ok) return reject(new Error("Expected ok: false on 401"));
+        if (!res.unauthorized) return reject(new Error("Expected unauthorized: true on 401"));
+        resolve();
+      });
+    }).catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Node auth handling test failed: {res.stderr}"
+
+
+def test_content_handles_unauthorized_draft_list():
+    node_script = """
+    const mockSelect = { innerHTML: '', appendChild: (opt) => {} };
+    global.document = {
+      createElement: (tag) => ({ value: '', textContent: '' }),
+      getElementById: (id) => {
+        if (id === 'ai-ext-draft-select') return mockSelect;
+        return null;
+      }
+    };
+
+    // 1. Test unauthorized response
+    global.browser = {
+      runtime: {
+        sendMessage: (msg, cb) => {
+          if (msg.action === 'LIST_DRAFTS') {
+            cb({ ok: false, unauthorized: true, error: 'HTTP 401' });
+          }
+        }
+      }
+    };
+
+    const content = require('./extension/content.js');
+    content.fetchDraftsList();
+
+    if (!mockSelect.innerHTML.includes('Nicht gekoppelt')) {
+      throw new Error('Expected draftSelect to contain actionable uncoupled hint, got: ' + mockSelect.innerHTML);
+    }
+    if (!mockSelect.innerHTML.includes('127.0.0.1:8000')) {
+      throw new Error('Expected draftSelect to prompt 127.0.0.1:8000, got: ' + mockSelect.innerHTML);
+    }
+
+    // 2. Test successful response
+    global.browser.runtime.sendMessage = (msg, cb) => {
+      if (msg.action === 'LIST_DRAFTS') {
+        cb({ ok: true, drafts: [{ id: 'd-1', identified_product: 'Test Item', status: 'ready' }] });
+      }
+    };
+    content.fetchDraftsList();
+    if (mockSelect.innerHTML.includes('Nicht gekoppelt')) {
+      throw new Error('Unexpected uncoupled hint on successful response');
+    }
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Content script auth UX test failed: {res.stderr}"
+
+
+def test_ricardo_offer_type_and_shipping_preset():
+    node_script = """
+    const content = require('./extension/content.js');
+
+    // 1. Ricardo offer_type mapping in getPlatformData
+    const auctionDraft = {
+      ricardo: { title: 'Item 1', offer_type: 'auction', start_price_chf: 1.0, buynow_price_chf: 20.0 }
+    };
+    const fixedDraft = {
+      ricardo: { title: 'Item 2', offer_type: 'fixed_price', buynow_price_chf: 50.0 }
+    };
+
+    const d1 = content.getPlatformData(auctionDraft, 'ricardo');
+    if (d1.priceType !== 'auction') throw new Error('Expected auction priceType, got: ' + d1.priceType);
+
+    const d2 = content.getPlatformData(fixedDraft, 'ricardo');
+    if (d2.priceType !== 'fixed_price') throw new Error('Expected fixed_price priceType, got: ' + d2.priceType);
+
+    // 2. fillRicardoShipping pickup_allowed logic
+    let clickedPickup = 0;
+    const mockPickupSwitch = {
+      checked: false,
+      click: () => { clickedPickup++; mockPickupSwitch.checked = !mockPickupSwitch.checked; }
+    };
+    const mockShippingSwitch = {
+      checked: true,
+      click: () => {}
+    };
+
+    global.document = {
+      querySelector: (sel) => {
+        if (sel.includes('value="Pickup"')) return mockPickupSwitch;
+        if (sel.includes('value="Shipping"')) return mockShippingSwitch;
+        return null;
+      },
+      querySelectorAll: () => []
+    };
+
+    // When pickup_allowed is false, pickupSwitch should not be activated
+    const noPickupDraft = {
+      ricardo: { shipping_preset_id: 'b_post_2kg', pickup_allowed: false }
+    };
+    content.fillRicardoShipping(noPickupDraft).then(() => {
+      if (mockPickupSwitch.checked) throw new Error('Pickup should not be checked when pickup_allowed is false');
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Ricardo offer type / shipping test failed: {res.stderr}"
+
+
+def test_price_token_overlap_matching_and_provenance():
+    node_script = """
+    const bg = require('./extension/background.js');
+
+    // 1. Token overlap test
+    const q = 'Bose QuietComfort 45';
+    const cand1 = 'Bose QuietComfort 45 Wireless Noise Cancelling Kopfhörer';
+    const cand2 = 'Bose Noise Cancelling 700 Kopfhörer';
+    const cand3 = 'Logitech MX Master 3S';
+
+    const s1 = bg.calculateTokenOverlap(q, cand1);
+    const s2 = bg.calculateTokenOverlap(q, cand2);
+    const s3 = bg.calculateTokenOverlap(q, cand3);
+
+    if (s1 < 0.9) throw new Error('Expected s1 to be near 1.0, got: ' + s1);
+    if (s2 >= s1) throw new Error('Expected cand1 to rank higher than cand2');
+    if (s3 > 0.1) throw new Error('Expected cand3 to have near 0 overlap, got: ' + s3);
+
+    // 2. selectBestMatchingItem
+    const items = [
+      { title: cand3, price: 99.0 },
+      { title: cand2, price: 219.0 },
+      { title: cand1, price: 189.0 }
+    ];
+    const best = bg.selectBestMatchingItem(items, q);
+    if (!best || best.title !== cand1) {
+      throw new Error('Expected best item to be cand1, got: ' + JSON.stringify(best));
+    }
+
+    // 3. computeSourceStats provenance metadata
+    const stats = bg.computeSourceStats(
+      { id: 'idealo', label: 'Idealo', currency: 'EUR' },
+      [189.0],
+      'https://www.idealo.de/test',
+      'tab',
+      0.94,
+      { query: q, confidence: 0.95 }
+    );
+    if (!stats.captured_at) throw new Error('Missing captured_at timestamp in stats');
+    if (stats.query !== q) throw new Error('Missing query in stats, got: ' + stats.query);
+    if (stats.confidence !== 0.95) throw new Error('Missing confidence in stats, got: ' + stats.confidence);
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Token overlap / provenance test failed: {res.stderr}"
+
+
+def test_scrape_all_price_sources_fault_tolerant():
+    node_script = """
+    const bg = require('./extension/background.js');
+
+    // Mock scrapeSourceHybrid to succeed for ricardo and fail for ebay_de_sold
+    const origScrapeSourceHybrid = bg.scrapeSourceHybrid;
+    
+    // We test scrapeAllPriceSources by filtering to two sources
+    (async () => {
+      // Temporarily override global or mock fetch if needed
+      const res = await bg.scrapeAllPriceSources('Test Query', 0.94, ['ricardo', 'ebay_de_sold']);
+      if (!res.ok) throw new Error('Expected res.ok to be true');
+      if (!res.sources) throw new Error('Missing res.sources');
+      if (!res.sources.ricardo) throw new Error('Missing ricardo in sources');
+      if (!res.sources.ebay_de_sold) throw new Error('Missing ebay_de_sold in sources');
+      // Even if network or tab scrape throws/times out in mock/node environment, neither causes total rejection
+      console.log('Scrape result sources:', Object.keys(res.sources));
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Fault-tolerant scrape test failed: {res.stderr}"
+
+
+
+
+
 

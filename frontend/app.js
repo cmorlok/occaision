@@ -1,3 +1,14 @@
+if (typeof document === "undefined") {
+  // Support headless Node.js environments / automated tests
+  global.document = {
+    getElementById: () => null,
+    createElement: () => ({ setAttribute: () => {}, appendChild: () => {}, style: {}, classList: { add: () => {}, remove: () => {} } }),
+    addEventListener: () => {},
+  };
+}
+
+const api = (typeof window !== "undefined" && window.api) ? window.api : (typeof require !== "undefined" ? require("./api.js") : {});
+
 let currentDraft = null;
 let drafts = [];
 let settings = null;
@@ -98,11 +109,38 @@ const cfgGeminiKey = document.getElementById("cfg-gemini-key");
 const btnToggleKey = document.getElementById("btn-toggle-key");
 const cfgGeminiModel = document.getElementById("cfg-gemini-model");
 const cfgSearchGrounding = document.getElementById("cfg-search-grounding");
+const cfgEurRate = document.getElementById("cfg-eur-rate");
 const cfgKeyStatus = document.getElementById("cfg-key-status");
+const btnCreatePairingPin = document.getElementById("btn-create-pairing-pin");
+const pairingPinDisplay = document.getElementById("pairing-pin-display");
+const pairingPinHint = document.getElementById("pairing-pin-hint");
+const btnExportBackup = document.getElementById("btn-export-backup");
+const backupFileInput = document.getElementById("backup-file-input");
+const toastContainer = document.getElementById("toast-container");
+
+function showToast(message, type = "info", options = {}) {
+  if (typeof window !== "undefined" && typeof window.showToast === "function") {
+    return window.showToast(message, type, options);
+  }
+  console.log(`[${type}] ${message}`);
+  return null;
+}
 
 let systemConfig = null;
 
 async function init() {
+  try {
+    let pairData = await api.pairAuth().catch(() => null);
+    if (!pairData || !pairData.token) {
+      const codeResp = await api.createPairingCode().catch(() => null);
+      if (codeResp && codeResp.pairing_code) {
+        pairData = await api.pairAuth(codeResp.pairing_code).catch(() => null);
+      }
+    }
+    if (pairData && pairData.token && typeof window !== "undefined") {
+      window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairData.token }), window.location.origin);
+    }
+  } catch (_) {}
   await loadSettings();
   await loadSystemConfig();
   await loadDrafts();
@@ -111,12 +149,10 @@ async function init() {
 
 async function loadSystemConfig() {
   try {
-    const res = await fetch("/api/config");
-    if (res.ok) {
-      systemConfig = await res.json();
-      
-      // Dynamically populate available models from server
-      if (cfgGeminiModel && systemConfig.available_models && systemConfig.available_models.length > 0) {
+    systemConfig = await api.getConfig();
+    
+    // Dynamically populate available models from server
+    if (cfgGeminiModel && systemConfig.available_models && systemConfig.available_models.length > 0) {
         cfgGeminiModel.innerHTML = "";
         systemConfig.available_models.forEach(m => {
           const opt = document.createElement("option");
@@ -132,8 +168,10 @@ async function loadSystemConfig() {
       if (cfgSearchGrounding) {
         cfgSearchGrounding.checked = systemConfig.enable_search_grounding !== false;
       }
+      if (cfgEurRate && systemConfig.eur_to_chf_rate !== undefined) {
+        cfgEurRate.value = systemConfig.eur_to_chf_rate;
+      }
       updateKeyStatusUI();
-    }
   } catch (err) {
     console.error("Failed to load system config", err);
   }
@@ -215,6 +253,12 @@ async function saveSystemConfig() {
     gemini_model: newModel,
     enable_search_grounding: cfgSearchGrounding ? cfgSearchGrounding.checked : true,
   };
+  if (cfgEurRate) {
+    const rateVal = parseFloat(cfgEurRate.value);
+    if (!isNaN(rateVal) && rateVal > 0) {
+      payload.eur_to_chf_rate = rateVal;
+    }
+  }
   if (newKey) {
     payload.gemini_api_key = newKey;
   }
@@ -233,40 +277,23 @@ async function saveSystemConfig() {
 
   try {
     btnSaveSettings.disabled = true;
-    const res = await fetch("/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (res.ok) {
-      systemConfig = await res.json();
-      updateKeyStatusUI();
+    systemConfig = await api.updateConfig(payload);
+    updateKeyStatusUI();
 
-      // Also persist settings (enabled_price_sources, keep_tabs_open_after_search) in /api/settings
-      if (settings) {
-        const updatedSettings = Object.assign({}, settings, {
-          enabled_price_sources: enabledSources,
-          keep_tabs_open_after_search: keepTabsOpen,
-        });
-        const putRes = await fetch("/api/settings", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updatedSettings),
-        });
-        if (putRes.ok) {
-          settings = await putRes.json();
-        }
-      }
-      updatePriceSourcesVisibility();
-
-      closeSettingsModal();
-      alert("Einstellungen erfolgreich gespeichert!");
-    } else {
-      const err = await res.json().catch(() => ({}));
-      alert(`Fehler beim Speichern: ${err.detail || "Serverfehler"}`);
+    // Also persist settings (enabled_price_sources, keep_tabs_open_after_search) in /api/settings
+    if (settings) {
+      const updatedSettings = Object.assign({}, settings, {
+        enabled_price_sources: enabledSources,
+        keep_tabs_open_after_search: keepTabsOpen,
+      });
+      settings = await api.updateSettings(updatedSettings);
     }
+    updatePriceSourcesVisibility();
+
+    closeSettingsModal();
+    showToast("Einstellungen erfolgreich gespeichert!", "success");
   } catch (err) {
-    alert(`Fehler: ${err.message}`);
+    showToast(`Fehler beim Speichern: ${err.message}`, "error");
   } finally {
     btnSaveSettings.disabled = false;
   }
@@ -274,23 +301,20 @@ async function saveSystemConfig() {
 
 async function loadSettings() {
   try {
-    const res = await fetch("/api/settings");
-    if (res.ok) {
-      settings = await res.json();
-      updatePriceSourcesVisibility();
-      shippingPresetEl.innerHTML = "";
-      if (deShippingPresetEl) deShippingPresetEl.innerHTML = "";
-      settings.shipping_presets.forEach(p => {
-        const opt = document.createElement("option");
-        opt.value = p.id;
-        opt.textContent = p.label;
-        if (p.country === "DE") {
-          if (deShippingPresetEl) deShippingPresetEl.appendChild(opt);
-        } else {
-          shippingPresetEl.appendChild(opt);
-        }
-      });
-    }
+    settings = await api.getSettings();
+    updatePriceSourcesVisibility();
+    shippingPresetEl.innerHTML = "";
+    if (deShippingPresetEl) deShippingPresetEl.innerHTML = "";
+    settings.shipping_presets.forEach(p => {
+      const opt = document.createElement("option");
+      opt.value = p.id;
+      opt.textContent = p.label;
+      if (p.country === "DE") {
+        if (deShippingPresetEl) deShippingPresetEl.appendChild(opt);
+      } else {
+        shippingPresetEl.appendChild(opt);
+      }
+    });
   } catch (err) {
     console.error("Failed to load settings", err);
   }
@@ -299,18 +323,11 @@ async function loadSettings() {
 async function ensureDraft() {
   if (currentDraft) return currentDraft;
   try {
-    const res = await fetch("/api/drafts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_notes: "" })
-    });
-    if (res.ok) {
-      currentDraft = await res.json();
-      drafts = [currentDraft, ...drafts.filter(d => d.id !== currentDraft.id)];
-      renderDraftList();
-      populateForm();
-      return currentDraft;
-    }
+    currentDraft = await api.createDraft({ user_notes: "" });
+    drafts = [currentDraft, ...drafts.filter(d => d.id !== currentDraft.id)];
+    renderDraftList();
+    populateForm();
+    return currentDraft;
   } catch (err) {
     console.error("Failed to auto-create draft", err);
   }
@@ -319,56 +336,86 @@ async function ensureDraft() {
 
 async function loadDrafts() {
   try {
-    const res = await fetch("/api/drafts");
-    if (res.ok) {
-      drafts = await res.json();
-      renderDraftList();
-      if (drafts.length > 0) {
-        if (!currentDraft || !drafts.some(d => d.id === currentDraft.id)) {
-          await selectDraft(drafts[0].id);
-        }
-      } else if (!currentDraft) {
-        await ensureDraft();
+    drafts = await api.listDrafts();
+    renderDraftList();
+    if (drafts.length > 0) {
+      if (!currentDraft || !drafts.some(d => d.id === currentDraft.id)) {
+        await selectDraft(drafts[0].id);
       }
+    } else if (!currentDraft) {
+      await ensureDraft();
     }
   } catch (err) {
     console.error("Failed to load drafts", err);
+    if (err.data && err.data.error_code === "STORAGE_CORRUPTED") {
+      showToast(
+        "Datenbank-Datei beschädigt. Ein automatisches Backup wurde angelegt. Nutze die Wiederherstellung in den Einstellungen.",
+        "error",
+        {
+          duration: 15000,
+          actionText: "Einstellungen",
+          onAction: openSettingsModal,
+        }
+      );
+    }
   }
 }
 
 function renderDraftList() {
-  draftListEl.innerHTML = "";
+  draftListEl.replaceChildren();
   drafts.forEach(d => {
     const item = document.createElement("div");
     item.className = `draft-item ${currentDraft && currentDraft.id === d.id ? "active" : ""}`;
-    item.onclick = () => selectDraft(d.id);
+    item.addEventListener("click", () => selectDraft(d.id));
 
     const title = d.identified_product || d.user_notes || d.ricardo.title || "Neuer Entwurf";
     const statusClass = `status-${d.status}`;
     const dateStr = new Date(d.updated_at).toLocaleDateString("de-CH", { hour: "2-digit", minute: "2-digit" });
 
-    item.innerHTML = `
-      <div class="draft-item-header">
-        <span class="draft-item-title" title="${title}">${title}</span>
-        <span class="status-badge ${statusClass}">${d.status}</span>
-      </div>
-      <div class="draft-item-footer">
-        <span>${dateStr}</span>
-        <button class="btn-delete-draft" title="Löschen" onclick="event.stopPropagation(); deleteDraft('${d.id}')">🗑️</button>
-      </div>
-    `;
+    const header = document.createElement("div");
+    header.className = "draft-item-header";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "draft-item-title";
+    titleSpan.title = title;
+    titleSpan.textContent = title;
+
+    const statusBadge = document.createElement("span");
+    statusBadge.className = `status-badge ${statusClass}`;
+    statusBadge.textContent = d.status;
+
+    header.appendChild(titleSpan);
+    header.appendChild(statusBadge);
+
+    const footer = document.createElement("div");
+    footer.className = "draft-item-footer";
+
+    const dateSpan = document.createElement("span");
+    dateSpan.textContent = dateStr;
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "btn-delete-draft";
+    deleteBtn.title = "Löschen";
+    deleteBtn.textContent = "🗑️";
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      deleteDraft(d.id);
+    });
+
+    footer.appendChild(dateSpan);
+    footer.appendChild(deleteBtn);
+
+    item.appendChild(header);
+    item.appendChild(footer);
     draftListEl.appendChild(item);
   });
 }
 
 async function selectDraft(draftId) {
   try {
-    const res = await fetch(`/api/drafts/${draftId}`);
-    if (res.ok) {
-      currentDraft = await res.json();
-      populateForm();
-      renderDraftList();
-    }
+    currentDraft = await api.getDraft(draftId);
+    populateForm();
+    renderDraftList();
   } catch (err) {
     console.error("Failed to fetch draft", err);
   }
@@ -394,9 +441,15 @@ function populateForm() {
 
   // Analysis / hints
   if (currentDraft.missing_photo_hints && currentDraft.missing_photo_hints.length > 0) {
-    missingHintsList.innerHTML = currentDraft.missing_photo_hints.map(h => `<li>${h}</li>`).join("");
+    missingHintsList.replaceChildren();
+    currentDraft.missing_photo_hints.forEach(h => {
+      const li = document.createElement("li");
+      li.textContent = h;
+      missingHintsList.appendChild(li);
+    });
     missingHintsBox.classList.remove("hidden");
   } else {
+    missingHintsList.replaceChildren();
     missingHintsBox.classList.add("hidden");
   }
 
@@ -541,7 +594,7 @@ function populateForm() {
 }
 
 function renderGallery() {
-  imageGalleryEl.innerHTML = "";
+  imageGalleryEl.replaceChildren();
   if (!currentDraft || !currentDraft.images) return;
 
   currentDraft.images.forEach(img => {
@@ -551,17 +604,41 @@ function renderGallery() {
     const cacheBuster = `?t=${Date.now()}`;
     const previewUrl = `/api/drafts/${currentDraft.id}/images/${img.id}/active${cacheBuster}`;
 
-    card.innerHTML = `
-      <img src="${previewUrl}" class="image-preview" alt="${img.original_filename}" />
-      <div class="image-card-controls">
-        <div class="mode-selectors">
-          <button class="btn-mode ${img.active_mode === 'optimized' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'optimized')">Original</button>
-          <button class="btn-mode ${img.active_mode === 'blurred' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'blurred')">Weichzeichnen</button>
-          <button class="btn-mode ${img.active_mode === 'cutout' ? 'active' : ''}" onclick="changeImageMode('${img.id}', 'cutout')">Hintergrund entfernen</button>
-        </div>
-        <button class="btn-del-img" onclick="deleteImage('${img.id}')">Bild löschen 🗑️</button>
-      </div>
-    `;
+    const previewImg = document.createElement("img");
+    previewImg.src = previewUrl;
+    previewImg.className = "image-preview";
+    previewImg.alt = img.original_filename || "Draft Image";
+
+    const controls = document.createElement("div");
+    controls.className = "image-card-controls";
+
+    const modeSelectors = document.createElement("div");
+    modeSelectors.className = "mode-selectors";
+
+    const modes = [
+      { mode: "optimized", label: "Original" },
+      { mode: "blurred", label: "Weichzeichnen" },
+      { mode: "cutout", label: "Hintergrund entfernen" },
+    ];
+
+    modes.forEach(m => {
+      const btn = document.createElement("button");
+      btn.className = `btn-mode ${img.active_mode === m.mode ? "active" : ""}`;
+      btn.textContent = m.label;
+      btn.addEventListener("click", () => changeImageMode(img.id, m.mode));
+      modeSelectors.appendChild(btn);
+    });
+
+    const delBtn = document.createElement("button");
+    delBtn.className = "btn-del-img";
+    delBtn.textContent = "Bild löschen 🗑️";
+    delBtn.addEventListener("click", () => deleteImage(img.id));
+
+    controls.appendChild(modeSelectors);
+    controls.appendChild(delBtn);
+
+    card.appendChild(previewImg);
+    card.appendChild(controls);
     imageGalleryEl.appendChild(card);
   });
 }
@@ -598,23 +675,19 @@ async function changeImageMode(imageId, mode) {
   }
 
   try {
-    const res = await fetch(`/api/drafts/${currentDraft.id}/images/${imageId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ active_mode: mode })
-    });
+    const res = await api.setVariant(currentDraft.id, imageId, mode);
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
     } else {
       const err = await res.json().catch(() => ({}));
-      alert(`Fehler bei der Bildbearbeitung: ${err.detail || res.statusText || "Serverfehler"}`);
+      showToast(`Fehler bei der Bildbearbeitung: ${err.detail || res.statusText || "Serverfehler"}`, "error");
       if (overlay) overlay.remove();
       if (card) card.querySelectorAll("button").forEach(b => b.disabled = false);
     }
   } catch (err) {
     console.error("Failed to change mode", err);
-    alert(`Fehler bei der Bildbearbeitung: ${err.message}`);
+    showToast(`Fehler bei der Bildbearbeitung: ${err.message}`, "error");
     if (overlay) overlay.remove();
     if (card) card.querySelectorAll("button").forEach(b => b.disabled = false);
   }
@@ -629,14 +702,13 @@ async function deleteImage(imageId) {
     card.style.opacity = "0.5";
   }
   try {
-    const res = await fetch(`/api/drafts/${currentDraft.id}/images/${imageId}`, {
-      method: "DELETE"
-    });
+    const res = await api.deleteImage(currentDraft.id, imageId);
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
+      showToast("Foto gelöscht.", "info");
     } else {
-      alert("Fehler beim Löschen des Fotos.");
+      showToast("Fehler beim Löschen des Fotos.", "error");
       if (card) {
         card.style.opacity = "1";
         card.querySelectorAll("button").forEach(b => b.disabled = false);
@@ -644,6 +716,7 @@ async function deleteImage(imageId) {
     }
   } catch (err) {
     console.error("Failed to delete image", err);
+    showToast(`Fehler beim Löschen des Fotos: ${err.message}`, "error");
     if (card) {
       card.style.opacity = "1";
       card.querySelectorAll("button").forEach(b => b.disabled = false);
@@ -661,14 +734,55 @@ function updateCharCounter(inputEl, counterEl, max) {
   }
 }
 
+const MAX_UPLOAD_FILES = 15;
+const MAX_FILE_BYTES = 25 * 1024 * 1024;
+const ALLOWED_IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+
+function validateUploadFiles(files) {
+  if (!files || !files.length) {
+    return { valid: false, error: "Keine Dateien ausgewählt." };
+  }
+  if (files.length > MAX_UPLOAD_FILES) {
+    return {
+      valid: false,
+      error: `Maximal ${MAX_UPLOAD_FILES} Bilder pro Upload erlaubt (ausgewählt: ${files.length}).`,
+    };
+  }
+  for (const f of files) {
+    const name = f.name || "";
+    const ext = name.includes(".") ? name.slice(name.lastIndexOf(".")).toLowerCase() : "";
+    const isAllowedExt = ALLOWED_IMAGE_EXTENSIONS.includes(ext);
+    const isImageMime = f.type && (f.type.startsWith("image/") || f.type === "image/heic" || f.type === "image/heif");
+    if (!isAllowedExt && !isImageMime) {
+      return {
+        valid: false,
+        error: `Ungültiges Dateiformat für '${name || "Datei"}'. Erlaubt sind JPG, PNG, WEBP und HEIC/HEIF.`,
+      };
+    }
+    if (f.size && f.size > MAX_FILE_BYTES) {
+      return {
+        valid: false,
+        error: `Datei '${name || "Datei"}' überschreitet das Limit von 25 MB.`,
+      };
+    }
+  }
+  return { valid: true };
+}
+
 async function uploadFiles(files) {
   if (!files || !files.length) return;
+
+  const validation = validateUploadFiles(files);
+  if (!validation.valid) {
+    showToast(validation.error, "warning");
+    return;
+  }
 
   if (!currentDraft) {
     await ensureDraft();
   }
   if (!currentDraft) {
-    alert("Konnte keinen Entwurf für den Foto-Upload erstellen.");
+    showToast("Konnte keinen Entwurf für den Foto-Upload erstellen.", "error");
     return;
   }
 
@@ -683,21 +797,23 @@ async function uploadFiles(files) {
     formData.append("files", f);
   }
   try {
-    const res = await fetch(`/api/drafts/${currentDraft.id}/images`, {
-      method: "POST",
-      body: formData
-    });
+    const res = await api.uploadImages(currentDraft.id, formData);
     if (res.ok) {
       currentDraft = await res.json();
       renderGallery();
       await loadDrafts();
+      showToast("Fotos erfolgreich hochgeladen & verarbeitet.", "success");
     } else {
       const errData = await res.json().catch(() => ({}));
-      alert(`Upload fehlgeschlagen: ${errData.detail || res.statusText || "Serverfehler"}`);
+      if (res.status === 413) {
+        showToast("Upload abgelehnt: Dateigröße überschreitet maximales Limit (25 MB).", "error");
+      } else {
+        showToast(`Upload fehlgeschlagen: ${errData.detail || res.statusText || "Serverfehler"}`, "error");
+      }
     }
   } catch (err) {
     console.error("Upload error", err);
-    alert(`Fehler beim Upload: ${err.message}`);
+    showToast(`Fehler beim Upload: ${err.message}`, "error");
   } finally {
     if (dropzoneP) dropzoneP.textContent = originalText;
     dropzoneEl.style.opacity = "1";
@@ -708,17 +824,10 @@ async function uploadFiles(files) {
 function setupEventListeners() {
   btnNewDraft.onclick = async () => {
     try {
-      const res = await fetch("/api/drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_notes: "" })
-      });
-      if (res.ok) {
-        const newD = await res.json();
-        currentDraft = newD;
-        await loadDrafts();
-        selectDraft(newD.id);
-      }
+      const newD = await api.createDraft({ user_notes: "" });
+      currentDraft = newD;
+      await loadDrafts();
+      selectDraft(newD.id);
     } catch (err) {
       console.error("Failed to create draft", err);
     }
@@ -776,19 +885,34 @@ function setupEventListeners() {
     if (!currentDraft) return;
     syncDraftFromForm();
     try {
-      const res = await fetch(`/api/drafts/${currentDraft.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(currentDraft)
-      });
+      const res = await api.updateDraft(currentDraft);
       if (res.ok) {
         currentDraft = await res.json();
         await loadDrafts();
         populateForm();
-        alert("Entwurf erfolgreich gespeichert!");
+        showToast("Entwurf erfolgreich gespeichert!", "success");
+      } else if (res.status === 409) {
+        showToast(
+          "Entwurf wurde anderweitig aktualisiert (Konflikt). Änderungen wurden nicht überschrieben.",
+          "warning",
+          {
+            duration: 12000,
+            actionText: "Neu laden",
+            onAction: async () => {
+              if (currentDraft && currentDraft.id) {
+                await selectDraft(currentDraft.id);
+                showToast("Entwurf neu geladen.", "info");
+              }
+            }
+          }
+        );
+      } else {
+        const err = await res.json().catch(() => ({}));
+        showToast(`Fehler beim Speichern: ${err.detail || res.statusText || "Serverfehler"}`, "error");
       }
     } catch (err) {
       console.error("Failed to save draft", err);
+      showToast(`Fehler beim Speichern: ${err.message}`, "error");
     }
   };
 
@@ -803,32 +927,27 @@ function setupEventListeners() {
     if (!currentDraft) return;
     syncDraftFromForm();
     // Save draft first
-    await fetch(`/api/drafts/${currentDraft.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentDraft)
-    });
+    await api.updateDraft(currentDraft);
 
     btnAnalyze.disabled = true;
     analyzeSpinner.classList.remove("hidden");
     try {
-      const res = await fetch(`/api/drafts/${currentDraft.id}/analyze`, {
-        method: "POST"
-      });
+      const res = await api.analyzeDraft(currentDraft.id);
       if (res.ok) {
         currentDraft = await res.json();
         await loadDrafts();
         populateForm();
+        showToast("KI-Analyse abgeschlossen!", "success");
       } else {
         const err = await res.json().catch(() => ({}));
-        alert(`Analyse fehlgeschlagen: ${err.detail || "Serverfehler"}`);
+        showToast(`Analyse fehlgeschlagen: ${err.detail || "Serverfehler"}`, "error");
         if (err.detail && (err.detail.includes("API-Key") || err.detail.includes("Gemini"))) {
           openSettingsModal();
         }
       }
     } catch (err) {
       console.error("Analysis error", err);
-      alert("Fehler bei der Analyse.");
+      showToast("Fehler bei der Analyse.", "error");
     } finally {
       btnAnalyze.disabled = false;
       analyzeSpinner.classList.add("hidden");
@@ -843,6 +962,88 @@ function setupEventListeners() {
   if (btnToggleKey) {
     btnToggleKey.onclick = () => {
       cfgGeminiKey.type = cfgGeminiKey.type === "password" ? "text" : "password";
+    };
+  }
+
+  if (btnCreatePairingPin) {
+    btnCreatePairingPin.onclick = async () => {
+      try {
+        btnCreatePairingPin.disabled = true;
+        const res = await api.createPairingCode();
+        if (res && res.pairing_code) {
+          if (pairingPinDisplay) {
+            pairingPinDisplay.textContent = `PIN: ${res.pairing_code}`;
+            pairingPinDisplay.style.display = "inline-block";
+          }
+          if (pairingPinHint) {
+            pairingPinHint.textContent = `PIN ${res.pairing_code} aktiv (gültig 60s). Autorisierung wird an Extension übertragen...`;
+          }
+          const pairRes = await api.pairAuth(res.pairing_code).catch(() => null);
+          if (pairRes && pairRes.token && typeof window !== "undefined") {
+            window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairRes.token }), window.location.origin);
+            showToast("Extension erfolgreich autorisiert!", "success");
+            if (pairingPinHint) {
+              pairingPinHint.textContent = "Browser-Extension erfolgreich autorisiert.";
+            }
+          } else {
+            showToast(`PIN ${res.pairing_code} generiert.`, "info");
+          }
+        }
+      } catch (err) {
+        showToast(`Kopplung fehlgeschlagen: ${err.message}`, "error");
+      } finally {
+        btnCreatePairingPin.disabled = false;
+      }
+    };
+  }
+
+  if (btnExportBackup) {
+    btnExportBackup.onclick = async () => {
+      try {
+        const res = await api.exportBackup();
+        if (!res.ok) throw new Error(`Export fehlgeschlagen (${res.status})`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const disp = res.headers.get("content-disposition") || "";
+        const match = disp.match(/filename="?([^"]+)"?/);
+        a.download = match ? match[1] : `occaision_backup_${Date.now()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("Vollständiges Backup (.zip) erfolgreich heruntergeladen.", "success");
+      } catch (err) {
+        showToast(`Export fehlgeschlagen: ${err.message}`, "error");
+      }
+    };
+  }
+
+  if (backupFileInput) {
+    backupFileInput.onchange = async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const isZip = file.name.toLowerCase().endsWith(".zip");
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const res = isZip ? await api.restoreBackup(formData) : await api.importDrafts(formData);
+        if (res.ok) {
+          const result = await res.json();
+          await loadDrafts();
+          await loadSettings();
+          const count = result.restored_drafts ?? result.imported_count ?? 0;
+          showToast(`Backup erfolgreich wiederhergestellt (${count} Entwürfe geladen).`, "success");
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(`Wiederherstellung fehlgeschlagen: ${err.detail || res.statusText}`, "error");
+        }
+      } catch (err) {
+        showToast(`Wiederherstellung fehlgeschlagen: ${err.message}`, "error");
+      } finally {
+        backupFileInput.value = "";
+      }
     };
   }
 }
@@ -904,7 +1105,7 @@ async function scrapePricesViaExtension() {
   ).trim();
 
   if (!query) {
-    alert("Bitte gib zuerst oben einen Produktnamen / Modell für die Preisrecherche ein.");
+    showToast("Bitte gib zuerst oben einen Produktnamen / Modell für die Preisrecherche ein.", "warning");
     if (productNameEl) productNameEl.focus();
     return;
   }
@@ -1141,11 +1342,7 @@ async function scrapePricesViaExtension() {
       currentDraft.price_analysis.verification_links = extResult.verification_links;
     }
 
-    const res = await fetch(`/api/drafts/${currentDraft.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(currentDraft),
-    });
+    const res = await api.updateDraft(currentDraft);
     if (res.ok) {
       currentDraft = await res.json();
       await loadDrafts();
@@ -1153,7 +1350,7 @@ async function scrapePricesViaExtension() {
     }
   } catch (err) {
     console.error("Extension price scrape failed", err);
-    alert(err.message);
+    showToast(`Preisrecherche fehlgeschlagen: ${err.message}`, "error");
   } finally {
     if (btnScrapeExtension) btnScrapeExtension.disabled = false;
     if (analyzeSpinner) {
@@ -1166,21 +1363,29 @@ async function scrapePricesViaExtension() {
 async function deleteDraft(draftId) {
   if (!confirm("Entwurf wirklich löschen?")) return;
   try {
-    const res = await fetch(`/api/drafts/${draftId}`, { method: "DELETE" });
-    if (res.ok) {
-      if (currentDraft && currentDraft.id === draftId) {
-        currentDraft = null;
-      }
-      await loadDrafts();
-      if (!currentDraft && drafts.length > 0) {
-        selectDraft(drafts[0].id);
-      } else if (drafts.length === 0) {
-        await ensureDraft();
-      }
+    await api.deleteDraft(draftId);
+    if (currentDraft && currentDraft.id === draftId) {
+      currentDraft = null;
+    }
+    await loadDrafts();
+    if (!currentDraft && drafts.length > 0) {
+      selectDraft(drafts[0].id);
+    } else if (drafts.length === 0) {
+      await ensureDraft();
     }
   } catch (err) {
     console.error("Delete draft error", err);
   }
 }
 
-window.addEventListener("DOMContentLoaded", init);
+if (typeof window !== "undefined") {
+  window.addEventListener("DOMContentLoaded", init);
+}
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    validateUploadFiles,
+    MAX_UPLOAD_FILES,
+    MAX_FILE_BYTES,
+    ALLOWED_IMAGE_EXTENSIONS,
+  };
+}

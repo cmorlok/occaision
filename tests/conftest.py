@@ -1,11 +1,17 @@
 import io
 from pathlib import Path
+
+import pillow_heif
 import pytest
 from PIL import Image
-from PIL.ExifTags import Base, GPS
-import pillow_heif
+from PIL.ExifTags import GPS, Base
 
 pillow_heif.register_heif_opener()
+
+@pytest.fixture(autouse=True)
+def setup_test_env(monkeypatch):
+    # Default to False for existing tests that don't pass auth; security tests override with Settings(require_auth=True)
+    monkeypatch.setenv("REQUIRE_AUTH", "false")
 
 @pytest.fixture
 def temp_data_dir(tmp_path: Path) -> Path:
@@ -25,7 +31,7 @@ def synthetic_exif_jpeg() -> bytes:
     gps_ifd[GPS.GPSLatitudeRef] = "N"
     gps_ifd[GPS.GPSLongitude] = (8, 33, 0)
     gps_ifd[GPS.GPSLongitudeRef] = "E"
-    
+
     buf = io.BytesIO()
     img.save(buf, format="JPEG", exif=exif, quality=95)
     return buf.getvalue()

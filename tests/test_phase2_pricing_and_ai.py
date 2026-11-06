@@ -1,7 +1,9 @@
 import json
 import logging
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 
 from backend.models import (
@@ -27,32 +29,32 @@ from backend.storage import StorageService
 
 def test_verification_links_generation():
     links = build_verification_links("Sony WH-1000XM4")
-    
+
     assert "https://www.ebay.de/sch/i.html" in links.ebay_sold_url
     assert "LH_Sold=1" in links.ebay_sold_url
     assert "LH_Complete=1" in links.ebay_sold_url
     assert "LH_ItemCondition=3000" in links.ebay_sold_url
     assert "Sony" in links.ebay_sold_url
-    
+
     assert "kleinanzeigen.de" in links.kleinanzeigen_search_url
     assert "anbieter:privat" in links.kleinanzeigen_search_url
     assert "global.zustand:alright%2Clike_new%2Cok" in links.kleinanzeigen_search_url
     assert "Sony" in links.kleinanzeigen_search_url
-    
+
     assert "idealo.de" in links.idealo_url
     assert "Sony" in links.idealo_url
-    
+
     assert "https://www.ricardo.ch/de/s/" in links.ricardo_search_url
     assert "Sony" in links.ricardo_search_url
     assert "item_condition=used" in links.ricardo_search_url
     assert "seller_type=individual" in links.ricardo_search_url
-    
+
     assert "https://www.toppreise.ch/produktsuche" in links.toppreise_url
     assert "Sony" in links.toppreise_url
-    
+
     assert ("galaxus.ch/de/search" in links.digitec_url or "digitec.ch/de/search" in links.digitec_url)
     assert "Sony" in links.digitec_url
-    
+
     assert "tutti.ch" in links.tutti_search_url
 
 
@@ -62,7 +64,7 @@ def test_ai_json_extractor_and_grounding_config_compatibility():
         model_name="gemini-2.5-flash",
         enable_search_grounding=True,
     )
-    
+
     # Verify grounding config rules
     config = ai_service.get_generate_config()
     if ai_service.enable_search_grounding:
@@ -70,7 +72,7 @@ def test_ai_json_extractor_and_grounding_config_compatibility():
         assert getattr(config, "response_mime_type", None) != "application/json"
         assert config.tools is not None
         assert len(config.tools) > 0
-    
+
     # Test JSON extraction with markdown fences and preamble
     raw_ai_text = """
     Hier ist die strukturierte Analyse des Artikels:
@@ -122,9 +124,9 @@ def test_ai_post_processing_safeguards():
         "kleinanzeigen_title": "Großartiger Lautsprecher in weiß mit tollem Sound und extra Kabel",
         "kleinanzeigen_description": "Verkaufe schönen Lautsprecher in weiß.",
     }
-    
+
     processed = post_process_ai_output(raw_payload)
-    
+
     # 1. Ricardo title length limit: <= 60 chars
     assert len(processed["ricardo_title"]) <= 60
     # 2. Swiss German orthography: no 'ß' in strings or list of strings
@@ -135,7 +137,7 @@ def test_ai_post_processing_safeguards():
     assert "ß" not in processed["missing_photo_hints"][0]
     assert "grosses" in processed["missing_photo_hints"][0].lower()
     assert "gross" in processed["ricardo_title"].lower()
-    
+
     # 3. Mandatory Swiss warranty disclaimer
     assert "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme." in processed["ricardo_description"]
     assert "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme." in processed["tutti_description"]
@@ -154,7 +156,7 @@ async def test_iterative_reanalysis_preserves_draft_id_and_updates_hints(temp_da
     storage = StorageService(data_dir=temp_data_dir)
     draft = storage.create_draft(user_notes="Sony Kopfhörer")
     original_id = draft.id
-    
+
     # Add dummy image
     draft.images.append(
         DraftImage(
@@ -166,13 +168,13 @@ async def test_iterative_reanalysis_preserves_draft_id_and_updates_hints(temp_da
         )
     )
     storage.update_draft(draft)
-    
+
     ai_service = AIService(
         api_key="mock_key",
         model_name="gemini-2.5-flash",
         enable_search_grounding=False,
     )
-    
+
     # Mock LLM response 1: missing hints returned
     mock_response_1 = {
         "identified_product": "Sony WH-1000XM4",
@@ -190,22 +192,22 @@ async def test_iterative_reanalysis_preserves_draft_id_and_updates_hints(temp_da
         "tutti_description": "Beschreibung Tutti 1",
         "tutti_condition": "gebraucht"
     }
-    
+
     with patch.object(ai_service, "_call_gemini", new_callable=AsyncMock) as mock_call:
         mock_call.return_value = json.dumps(mock_response_1)
-        
+
         updated_draft_1 = await ai_service.analyze_draft(
             draft=draft,
             image_paths=[],
             ebay_stats=EbaySoldStats(query="Sony WH-1000XM4", sample_count=3, median_eur=140.0, median_chf=131.6),
         )
         storage.update_draft(updated_draft_1)
-        
+
         assert updated_draft_1.id == original_id
         assert updated_draft_1.missing_photo_hints == ["Bitte Typenschild fotografieren"]
         assert updated_draft_1.price_analysis.ebay_stats is not None
         assert updated_draft_1.price_analysis.ebay_stats.median_chf == 131.6
-        
+
         # User uploads second photo: label/serial photo
         updated_draft_1.images.append(
             DraftImage(
@@ -217,19 +219,19 @@ async def test_iterative_reanalysis_preserves_draft_id_and_updates_hints(temp_da
             )
         )
         storage.update_draft(updated_draft_1)
-        
+
         # Mock LLM response 2: missing hints resolved
         mock_response_2 = dict(mock_response_1)
         mock_response_2["missing_photo_hints"] = []
         mock_call.return_value = json.dumps(mock_response_2)
-        
+
         updated_draft_2 = await ai_service.analyze_draft(
             draft=updated_draft_1,
             image_paths=[],
             ebay_stats=EbaySoldStats(query="Sony WH-1000XM4", sample_count=3, median_eur=140.0, median_chf=131.6),
         )
         storage.update_draft(updated_draft_2)
-        
+
         assert updated_draft_2.id == original_id
         assert len(updated_draft_2.missing_photo_hints) == 0
         assert len(updated_draft_2.images) == 2
@@ -484,6 +486,45 @@ async def test_ai_filters_out_disabled_price_sources(temp_data_dir: Path):
         assert "eBay DE (Gebraucht & Beendet)" not in prompt_str
         assert "Idealo.de Neupreis" not in prompt_str
         assert "279.0" not in prompt_str
+
+
+def test_ai_service_model_discovery_offline_and_cache(monkeypatch):
+    svc = AIService(api_key="test_key")
+
+    # In test environment with dummy key, should return fallback models without touching client
+    models = svc.get_available_models()
+    assert len(models) >= 5
+    assert any(m["id"] == "gemini-3.8-flash" for m in models)
+
+    # With live-looking key, mock the Gemini client models.list()
+    svc.set_api_key("valid_live_api_key_12345")
+    mock_model = MagicMock()
+    mock_model.name = "models/gemini-3.8-flash"
+    mock_model.display_name = "Gemini 3.8 Flash"
+    mock_model.supported_actions = ["generateContent"]
+
+    mock_client = MagicMock()
+    mock_client.models.list.return_value = [mock_model]
+    svc._client = mock_client
+
+    # Force test env guard off temporarily to test remote success path & caching
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("OCCAISION_OFFLINE", "0")
+    with patch("sys.modules", {k: v for k, v in sys.modules.items() if k != "pytest"}):
+        res1 = svc.get_available_models()
+        assert len(res1) == 1
+        assert res1[0]["id"] == "gemini-3.8-flash"
+        assert mock_client.models.list.call_count == 1
+
+        # Second call must hit the TTL cache and NOT call models.list() again
+        res2 = svc.get_available_models()
+        assert res2 == res1
+        assert mock_client.models.list.call_count == 1
+
+        # Key change resets cache
+        svc.set_api_key("valid_live_api_key_67890")
+        assert svc._models_cache is None
+
 
 
 

@@ -29,3 +29,6 @@ Thumbs.db
 !.vscode/launch.json
 !.vscode/tasks.json
 .idea/
+
+#other
+.codebase-memory/

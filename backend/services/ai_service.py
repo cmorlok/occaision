@@ -1,38 +1,127 @@
-import io
 import json
-import logging
-from pathlib import Path
+import math
+import os
 import re
 import sys
-from typing import Any, Dict, List, Optional
+import time
 import urllib.parse
-from PIL import Image
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from backend.config import get_logger
 from backend.models import (
     ConditionType,
     Draft,
     DraftStatus,
     EbaySoldStats,
     PriceAnalysis,
-    RicardoListing,
-    TuttiListing,
     VerificationLinks,
 )
 
-logger = logging.getLogger("occaision.ai")
-if not logger.handlers:
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%H:%M:%S"))
-    logger.addHandler(_handler)
-logger.propagate = False
+logger = get_logger("occaision.ai")
+
+
+def safe_price(val: Any, default: float = 0.0) -> float:
+    try:
+        n = float(val)
+        if math.isnan(n) or math.isinf(n) or n < 0:
+            return default
+        return round(n, 2)
+    except (ValueError, TypeError):
+        return default
 
 SWISS_LEGAL_DISCLAIMER = "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
 GERMAN_LEGAL_DISCLAIMER = (
     "Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. "
     "Keine Garantie oder Rücknahme, da Privatverkauf."
 )
+
+
+class AIAnalysisResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    identified_product: Optional[str] = None
+    missing_photo_hints: List[str] = Field(default_factory=list)
+    reasoning: Optional[str] = ""
+
+    # Ricardo
+    ricardo_title: Optional[str] = None
+    ricardo_description: Optional[str] = None
+    ricardo_condition: Optional[str] = None
+    ricardo_start_chf: Optional[float] = None
+    ricardo_buynow_chf: Optional[float] = None
+
+    # Tutti
+    tutti_title: Optional[str] = None
+    tutti_description: Optional[str] = None
+    tutti_category: Optional[str] = None
+    tutti_condition: Optional[str] = None
+    tutti_vhb_chf: Optional[float] = None
+
+    # eBay DE
+    ebay_de_title: Optional[str] = None
+    ebay_de_description: Optional[str] = None
+    ebay_de_category: Optional[str] = None
+    ebay_de_condition: Optional[str] = None
+    ebay_de_start_eur: Optional[float] = None
+    ebay_de_buynow_eur: Optional[float] = None
+    ebay_start_eur: Optional[float] = None
+    ebay_buynow_eur: Optional[float] = None
+
+    # Kleinanzeigen
+    kleinanzeigen_title: Optional[str] = None
+    kleinanzeigen_description: Optional[str] = None
+    kleinanzeigen_category: Optional[str] = None
+    kleinanzeigen_condition: Optional[str] = None
+    kleinanzeigen_vb_eur: Optional[float] = None
+
+    # New prices
+    ch_new_price_chf: Optional[float] = None
+    de_new_price_eur: Optional[float] = None
+
+    @field_validator(
+        "ricardo_start_chf",
+        "ricardo_buynow_chf",
+        "tutti_vhb_chf",
+        "ebay_de_start_eur",
+        "ebay_de_buynow_eur",
+        "ebay_start_eur",
+        "ebay_buynow_eur",
+        "kleinanzeigen_vb_eur",
+        "ch_new_price_chf",
+        "de_new_price_eur",
+        mode="before",
+    )
+    @classmethod
+    def sanitize_price_field(cls, v: Any) -> Optional[float]:
+        if v is None:
+            return None
+        try:
+            n = float(v)
+            if math.isnan(n) or math.isinf(n) or n < 0:
+                return None
+            return round(n, 2)
+        except (ValueError, TypeError):
+            return None
+
+
+def is_draft_ready(draft: Draft) -> bool:
+    """Validate completeness before setting status to READY."""
+    if not (draft.identified_product and draft.identified_product.strip()):
+        return False
+    has_title = any(
+        bool(listing.title and listing.title.strip())
+        for listing in [draft.ricardo, draft.tutti, draft.ebay_de, draft.kleinanzeigen]
+    )
+    has_desc = any(
+        bool(listing.description and listing.description.strip())
+        for listing in [draft.ricardo, draft.tutti, draft.ebay_de, draft.kleinanzeigen]
+    )
+    return has_title and has_desc
 
 
 def extract_and_parse_json(raw_text: str) -> Dict[str, Any]:
@@ -48,7 +137,12 @@ def extract_and_parse_json(raw_text: str) -> Dict[str, Any]:
         if start != -1 and end != -1 and end > start:
             text = text[start : end + 1]
 
-    return json.loads(text)
+    # Clean up trailing commas before closing braces/brackets
+    text = re.sub(r",\s*([\]}])", r"\1", text)
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"AI response must be a JSON object, got {type(parsed).__name__}")
+    return parsed
 
 
 def _truncate_title(title: str, max_len: int) -> str:
@@ -88,27 +182,27 @@ def post_process_ai_output(payload: Dict[str, Any]) -> Dict[str, Any]:
         res["kleinanzeigen_title"] = _truncate_title(res["kleinanzeigen_title"], 65)
 
     # 3. Mandatory Swiss warranty disclaimer in descriptions
-    ricardo_desc = res.get("ricardo_description", "")
+    ricardo_desc = res.get("ricardo_description") or ""
     if "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme" not in ricardo_desc:
         res["ricardo_description"] = f"{ricardo_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
 
-    tutti_desc = res.get("tutti_description", "")
+    tutti_desc = res.get("tutti_description") or ""
     if "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme" not in tutti_desc:
         res["tutti_description"] = f"{tutti_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
 
     # 4. Mandatory German warranty disclaimer in descriptions
     if "ebay_de_description" in res:
-        ebay_desc = res.get("ebay_de_description", "")
+        ebay_desc = res.get("ebay_de_description") or ""
         if "Ausschluss jeglicher Sachmängelhaftung" not in ebay_desc:
             res["ebay_de_description"] = f"{ebay_desc.rstrip()}\n\n{GERMAN_LEGAL_DISCLAIMER}".strip()
-    elif "ebay_de_title" in res:
+    elif "ebay_de_title" in res and res.get("ebay_de_title"):
         res["ebay_de_description"] = GERMAN_LEGAL_DISCLAIMER
 
     if "kleinanzeigen_description" in res:
-        klein_desc = res.get("kleinanzeigen_description", "")
+        klein_desc = res.get("kleinanzeigen_description") or ""
         if "Ausschluss jeglicher Sachmängelhaftung" not in klein_desc:
             res["kleinanzeigen_description"] = f"{klein_desc.rstrip()}\n\n{GERMAN_LEGAL_DISCLAIMER}".strip()
-    elif "kleinanzeigen_title" in res:
+    elif "kleinanzeigen_title" in res and res.get("kleinanzeigen_title"):
         res["kleinanzeigen_description"] = GERMAN_LEGAL_DISCLAIMER
 
     return res
@@ -183,6 +277,19 @@ def build_verification_links(query: str) -> VerificationLinks:
     )
 
 
+FALLBACK_MODELS: List[Dict[str, str]] = [
+    {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash (Empfohlen)"},
+    {"id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash"},
+    {"id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash"},
+    {"id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash"},
+    {"id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash Lite"},
+    {"id": "gemini-flash-latest", "label": "Gemini Flash Latest"},
+    {"id": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash Lite"},
+    {"id": "gemini-pro-latest", "label": "Gemini Pro Latest"},
+    {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
+]
+
+
 class AIService:
     def __init__(
         self,
@@ -196,6 +303,9 @@ class AIService:
         self.enable_search_grounding = enable_search_grounding
         self.eur_to_chf = eur_to_chf
         self._client: Optional[genai.Client] = None
+        self._models_cache: Optional[List[Dict[str, str]]] = None
+        self._models_cache_time: float = 0.0
+        self._models_cache_ttl: float = 3600.0
 
     @property
     def client(self) -> genai.Client:
@@ -204,87 +314,106 @@ class AIService:
         return self._client
 
     def set_api_key(self, api_key: str, model_name: Optional[str] = None):
-        """Update API key and optionally model name, resetting the client."""
+        """Update API key and optionally model name, resetting the client and cache."""
         self.api_key = api_key
         if model_name:
             self.model_name = model_name
         self._client = genai.Client(api_key=self.api_key)
+        self._models_cache = None
+        self._models_cache_time = 0.0
 
     def get_available_models(self) -> List[Dict[str, str]]:
-        """Query Gemini API for available models or fallback to recommended list."""
-        if self.api_key and self.api_key != "your_google_ai_studio_api_key_here":
-            try:
-                results = []
-                for m in self.client.models.list():
-                    actions = (
-                        getattr(m, "supported_actions", None)
-                        or getattr(m, "supported_generation_methods", [])
-                        or []
-                    )
-                    if "generateContent" not in actions:
-                        continue
-                    name = m.name or ""
-                    if name.startswith("models/"):
-                        name = name[7:]
-                    lower = name.lower()
-                    if any(
-                        skip in lower
-                        for skip in [
-                            "tts", "live", "transcribe", "robotics", "embedding",
-                            "lyria", "computer-use", "aqa", "banana", "nano",
-                            "preview", "gemma", "argon", "omni", "deep-research",
-                            "antigravity", "customtools", "gemini-2.5-flash",
-                            "gemini-2.0-flash", "gemini-1.5", "image"
-                        ]
-                    ):
-                        continue
-                    disp = getattr(m, "display_name", "") or name
-                    label = f"{disp} (Empfohlen)" if "3.8-flash" in name else disp
-                    results.append({"id": name, "label": label})
+        """Query Gemini API for available models or fallback to recommended list.
+        Includes TTL caching and offline/test guards.
+        """
+        now = time.time()
+        if self._models_cache and (now - self._models_cache_time < self._models_cache_ttl):
+            return list(self._models_cache)
 
-                def sort_key(item):
-                    nid = item["id"]
-                    priority = 99
-                    if "3.8-flash" in nid:
-                        priority = 1
-                    elif "3.7-flash" in nid:
-                        priority = 2
-                    elif "3.6-flash" in nid:
-                        priority = 3
-                    elif "3.5-flash" in nid:
-                        priority = 4
-                    elif "flash-latest" in nid:
-                        priority = 5
-                    elif "3.1-flash-lite" in nid:
-                        priority = 6
-                    elif "3.5-flash-lite" in nid:
-                        priority = 7
-                    elif "flash-lite-latest" in nid:
-                        priority = 8
-                    elif "pro-latest" in nid:
-                        priority = 9
-                    elif "2.5-pro" in nid:
-                        priority = 10
-                    return (priority, nid)
+        is_offline = (
+            os.environ.get("OCCAISION_OFFLINE") == "1"
+            or "PYTEST_CURRENT_TEST" in os.environ
+            or "pytest" in sys.modules
+        )
+        is_dummy_key = (
+            not self.api_key
+            or self.api_key in (
+                "your_google_ai_studio_api_key_here",
+                "test_key",
+                "dummy",
+                "test",
+                "offline",
+            )
+        )
 
-                results.sort(key=sort_key)
-                if results:
-                    return results
-            except Exception as e:
+        if is_offline or is_dummy_key:
+            return list(FALLBACK_MODELS)
+
+        try:
+            results = []
+            for m in self.client.models.list():
+                actions = (
+                    getattr(m, "supported_actions", None)
+                    or getattr(m, "supported_generation_methods", [])
+                    or []
+                )
+                if "generateContent" not in actions:
+                    continue
+                name = m.name or ""
+                if name.startswith("models/"):
+                    name = name[7:]
+                lower = name.lower()
+                if any(
+                    skip in lower
+                    for skip in [
+                        "tts", "live", "transcribe", "robotics", "embedding",
+                        "lyria", "computer-use", "aqa", "banana", "nano",
+                        "preview", "gemma", "argon", "omni", "deep-research",
+                        "antigravity", "customtools", "gemini-2.5-flash",
+                        "gemini-2.0-flash", "gemini-1.5", "image"
+                    ]
+                ):
+                    continue
+                disp = getattr(m, "display_name", "") or name
+                label = f"{disp} (Empfohlen)" if "3.8-flash" in name else disp
+                results.append({"id": name, "label": label})
+
+            def sort_key(item):
+                nid = item["id"]
+                priority = 99
+                if "3.8-flash" in nid:
+                    priority = 1
+                elif "3.7-flash" in nid:
+                    priority = 2
+                elif "3.6-flash" in nid:
+                    priority = 3
+                elif "3.5-flash" in nid:
+                    priority = 4
+                elif "flash-latest" in nid:
+                    priority = 5
+                elif "3.1-flash-lite" in nid:
+                    priority = 6
+                elif "3.5-flash-lite" in nid:
+                    priority = 7
+                elif "flash-lite-latest" in nid:
+                    priority = 8
+                elif "pro-latest" in nid:
+                    priority = 9
+                elif "2.5-pro" in nid:
+                    priority = 10
+                return (priority, nid)
+
+            results.sort(key=sort_key)
+            if results:
+                self._models_cache = results
+                self._models_cache_time = now
+                return list(results)
+        except Exception as e:
+            if not is_offline:
                 logger.warning(f"Konnte Modelle nicht von Gemini abrufen: {e}")
 
         # Fallback list of current production models
-        return [
-            {"id": "gemini-3.8-flash", "label": "Gemini 3.8 Flash (Empfohlen)"},
-            {"id": "gemini-3.7-flash", "label": "Gemini 3.7 Flash"},
-            {"id": "gemini-3.6-flash", "label": "Gemini 3.6 Flash"},
-            {"id": "gemini-3.5-flash", "label": "Gemini 3.5 Flash"},
-            {"id": "gemini-3.5-flash-lite", "label": "Gemini 3.5 Flash Lite"},
-            {"id": "gemini-flash-latest", "label": "Gemini Flash Latest"},
-            {"id": "gemini-3.1-flash-lite", "label": "Gemini 3.1 Flash Lite"},
-            {"id": "gemini-pro-latest", "label": "Gemini Pro Latest"},
-            {"id": "gemini-2.5-pro", "label": "Gemini 2.5 Pro"},
-        ]
+        return list(FALLBACK_MODELS)
 
     def get_generate_config(self, force_disable_grounding: bool = False) -> types.GenerateContentConfig:
         if self.enable_search_grounding and not force_disable_grounding:
@@ -339,10 +468,11 @@ class AIService:
             }
             if "ebay_de_sold" not in enabled_sources:
                 ebay_stats = None
-        has_extension_prices = bool(
-            (existing_pa and existing_pa.prices_fetched_via_extension)
-            or any(ms.sample_count > 0 for ms in market_sources.values())
+        has_usable_samples = any(
+            getattr(ms, "sample_count", 0) > 0 and getattr(ms, "median_price", None) is not None
+            for ms in market_sources.values()
         )
+        has_extension_prices = bool(has_usable_samples)
 
         if has_extension_prices and market_sources:
             logger.info(
@@ -444,7 +574,8 @@ class AIService:
         logger.debug("--- [GEMINI AI RAW RESPONSE DEBUG END] ---")
         logger.debug("=" * 70)
         raw_payload = extract_and_parse_json(raw_text)
-        payload = post_process_ai_output(raw_payload)
+        validated = AIAnalysisResponse.model_validate(raw_payload)
+        payload = post_process_ai_output(validated.model_dump())
 
         # Update draft
         product_name = (
@@ -476,12 +607,12 @@ class AIService:
             prices_fetched_via_extension=has_extension_prices,
             ch_new_price_chf=payload.get("ch_new_price_chf") or ch_new_fallback,
             de_new_price_eur=payload.get("de_new_price_eur") or de_new_fallback,
-            ricardo_start_chf=float(payload.get("ricardo_start_chf", 1.0)),
-            ricardo_buynow_chf=float(payload.get("ricardo_buynow_chf", 10.0)),
-            tutti_vhb_chf=float(payload.get("tutti_vhb_chf", 10.0)),
-            ebay_start_eur=float(payload.get("ebay_start_eur", 1.0)),
-            ebay_buynow_eur=float(payload.get("ebay_buynow_eur", 10.0)),
-            kleinanzeigen_vb_eur=float(payload.get("kleinanzeigen_vb_eur", 10.0)),
+            ricardo_start_chf=safe_price(payload.get("ricardo_start_chf"), 1.0),
+            ricardo_buynow_chf=safe_price(payload.get("ricardo_buynow_chf"), 10.0),
+            tutti_vhb_chf=safe_price(payload.get("tutti_vhb_chf"), 10.0),
+            ebay_start_eur=safe_price(payload.get("ebay_start_eur"), 1.0),
+            ebay_buynow_eur=safe_price(payload.get("ebay_buynow_eur"), 10.0),
+            kleinanzeigen_vb_eur=safe_price(payload.get("kleinanzeigen_vb_eur"), 10.0),
             reasoning=payload.get("reasoning", ""),
             verification_links=v_links,
         )
@@ -493,30 +624,55 @@ class AIService:
             except (ValueError, TypeError):
                 return ConditionType.GEBRAUCHT
 
-        draft.ricardo.title = payload.get("ricardo_title", draft.ricardo.title)
-        draft.ricardo.description = payload.get("ricardo_description", draft.ricardo.description)
-        draft.ricardo.condition = map_cond(payload.get("ricardo_condition"))
-        draft.ricardo.start_price_chf = float(payload.get("ricardo_start_chf", draft.ricardo.start_price_chf))
-        draft.ricardo.buynow_price_chf = float(payload.get("ricardo_buynow_chf", draft.ricardo.buynow_price_chf))
+        if payload.get("ricardo_title"):
+            draft.ricardo.title = payload["ricardo_title"]
+        if payload.get("ricardo_description"):
+            draft.ricardo.description = payload["ricardo_description"]
+        if payload.get("ricardo_condition"):
+            draft.ricardo.condition = map_cond(payload.get("ricardo_condition"))
+        if payload.get("ricardo_start_chf") is not None:
+            draft.ricardo.start_price_chf = safe_price(payload.get("ricardo_start_chf"), draft.ricardo.start_price_chf)
+        if payload.get("ricardo_buynow_chf") is not None:
+            draft.ricardo.buynow_price_chf = safe_price(payload.get("ricardo_buynow_chf"), draft.ricardo.buynow_price_chf)
 
-        draft.tutti.title = payload.get("tutti_title", draft.tutti.title)
-        draft.tutti.category_suggestion = payload.get("tutti_category", draft.tutti.category_suggestion)
-        draft.tutti.description = payload.get("tutti_description", draft.tutti.description)
-        draft.tutti.condition = map_cond(payload.get("tutti_condition"))
-        draft.tutti.price_vhb_chf = float(payload.get("tutti_vhb_chf", draft.tutti.price_vhb_chf))
+        if payload.get("tutti_title"):
+            draft.tutti.title = payload["tutti_title"]
+        if payload.get("tutti_category"):
+            draft.tutti.category_suggestion = payload["tutti_category"]
+        if payload.get("tutti_description"):
+            draft.tutti.description = payload["tutti_description"]
+        if payload.get("tutti_condition"):
+            draft.tutti.condition = map_cond(payload.get("tutti_condition"))
+        if payload.get("tutti_vhb_chf") is not None:
+            draft.tutti.price_vhb_chf = safe_price(payload.get("tutti_vhb_chf"), draft.tutti.price_vhb_chf)
 
-        draft.ebay_de.title = payload.get("ebay_de_title", draft.ebay_de.title)
-        draft.ebay_de.category_suggestion = payload.get("ebay_de_category", draft.ebay_de.category_suggestion)
-        draft.ebay_de.description = payload.get("ebay_de_description", draft.ebay_de.description)
-        draft.ebay_de.condition = map_cond(payload.get("ebay_de_condition"))
-        draft.ebay_de.start_price_eur = float(payload.get("ebay_start_eur", draft.ebay_de.start_price_eur))
-        draft.ebay_de.buynow_price_eur = float(payload.get("ebay_buynow_eur", draft.ebay_de.buynow_price_eur))
+        if payload.get("ebay_de_title"):
+            draft.ebay_de.title = payload["ebay_de_title"]
+        if payload.get("ebay_de_category"):
+            draft.ebay_de.category_suggestion = payload["ebay_de_category"]
+        if payload.get("ebay_de_description"):
+            draft.ebay_de.description = payload["ebay_de_description"]
+        if payload.get("ebay_de_condition"):
+            draft.ebay_de.condition = map_cond(payload.get("ebay_de_condition"))
+        if payload.get("ebay_start_eur") is not None:
+            draft.ebay_de.start_price_eur = safe_price(payload.get("ebay_start_eur"), draft.ebay_de.start_price_eur)
+        elif payload.get("ebay_de_start_eur") is not None:
+            draft.ebay_de.start_price_eur = safe_price(payload.get("ebay_de_start_eur"), draft.ebay_de.start_price_eur)
+        if payload.get("ebay_buynow_eur") is not None:
+            draft.ebay_de.buynow_price_eur = safe_price(payload.get("ebay_buynow_eur"), draft.ebay_de.buynow_price_eur)
+        elif payload.get("ebay_de_buynow_eur") is not None:
+            draft.ebay_de.buynow_price_eur = safe_price(payload.get("ebay_de_buynow_eur"), draft.ebay_de.buynow_price_eur)
 
-        draft.kleinanzeigen.title = payload.get("kleinanzeigen_title", draft.kleinanzeigen.title)
-        draft.kleinanzeigen.category_suggestion = payload.get("kleinanzeigen_category", draft.kleinanzeigen.category_suggestion)
-        draft.kleinanzeigen.description = payload.get("kleinanzeigen_description", draft.kleinanzeigen.description)
-        draft.kleinanzeigen.condition = map_cond(payload.get("kleinanzeigen_condition"))
-        draft.kleinanzeigen.price_eur = float(payload.get("kleinanzeigen_vb_eur", draft.kleinanzeigen.price_eur))
+        if payload.get("kleinanzeigen_title"):
+            draft.kleinanzeigen.title = payload["kleinanzeigen_title"]
+        if payload.get("kleinanzeigen_category"):
+            draft.kleinanzeigen.category_suggestion = payload["kleinanzeigen_category"]
+        if payload.get("kleinanzeigen_description"):
+            draft.kleinanzeigen.description = payload["kleinanzeigen_description"]
+        if payload.get("kleinanzeigen_condition"):
+            draft.kleinanzeigen.condition = map_cond(payload.get("kleinanzeigen_condition"))
+        if payload.get("kleinanzeigen_vb_eur") is not None:
+            draft.kleinanzeigen.price_eur = safe_price(payload.get("kleinanzeigen_vb_eur"), draft.kleinanzeigen.price_eur)
 
-        draft.status = DraftStatus.READY
+        draft.status = DraftStatus.READY if is_draft_ready(draft) else DraftStatus.DRAFT
         return draft

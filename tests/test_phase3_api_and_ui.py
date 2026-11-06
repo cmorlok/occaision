@@ -1,9 +1,11 @@
 import io
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-import pytest
 
 from backend.config import Settings
 from backend.main import create_app
@@ -50,12 +52,12 @@ def test_app(temp_data_dir: Path):
 
 def test_full_rest_lifecycle(test_app):
     client = TestClient(test_app)
-    
+
     # 1. Health check
     res_health = client.get("/api/health")
     assert res_health.status_code == 200
     assert res_health.json()["status"] == "ok"
-    
+
     # 2. POST /api/drafts
     res_create = client.post("/api/drafts", json={"user_notes": "Logitech MX Master 3"})
     assert res_create.status_code == 200
@@ -63,11 +65,11 @@ def test_full_rest_lifecycle(test_app):
     draft_id = draft_data["id"]
     assert draft_data["user_notes"] == "Logitech MX Master 3"
     assert draft_data["status"] == DraftStatus.DRAFT
-    
+
     # 3. POST /api/drafts/{id}/images (upload 2 test images)
     img1_bytes = create_test_jpeg(800, 600)
     img2_bytes = create_test_jpeg(1200, 900)
-    
+
     files = [
         ("files", ("mouse1.jpg", img1_bytes, "image/jpeg")),
         ("files", ("mouse2.jpg", img2_bytes, "image/jpeg")),
@@ -77,7 +79,7 @@ def test_full_rest_lifecycle(test_app):
     updated_draft = res_img.json()
     assert len(updated_draft["images"]) == 2
     img1_id = updated_draft["images"][0]["id"]
-    
+
     # 4. PATCH image 1 to 'blurred'
     res_patch = client.patch(
         f"/api/drafts/{draft_id}/images/{img1_id}",
@@ -85,13 +87,13 @@ def test_full_rest_lifecycle(test_app):
     )
     assert res_patch.status_code == 200
     assert res_patch.json()["images"][0]["active_mode"] == "blurred"
-    
+
     # 5. GET /api/drafts/{id}/images/{img_id}/active -> should serve image/jpeg
     res_active_img = client.get(f"/api/drafts/{draft_id}/images/{img1_id}/active")
     assert res_active_img.status_code == 200
     assert "image/jpeg" in res_active_img.headers["content-type"]
     assert len(res_active_img.content) > 0
-    
+
     # 6. POST /api/drafts/{id}/analyze (with mocked AI & eBay services)
     mock_ai_response = {
         "identified_product": "Logitech MX Master 3",
@@ -109,11 +111,11 @@ def test_full_rest_lifecycle(test_app):
         "tutti_description": "Funktioniert einwandfrei.\\n\\nPrivatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme.",
         "tutti_condition": "gebraucht"
     }
-    
+
     with patch("backend.services.ai_service.AIService._call_gemini", new_callable=AsyncMock) as mock_gemini:
         import json
         mock_gemini.return_value = json.dumps(mock_ai_response)
-        
+
         res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
         assert res_analyze.status_code == 200
         analyzed = res_analyze.json()
@@ -121,7 +123,7 @@ def test_full_rest_lifecycle(test_app):
         assert analyzed["identified_product"] == "Logitech MX Master 3"
         assert analyzed["price_analysis"]["ricardo_start_chf"] == 40.0
         assert analyzed["price_analysis"]["verification_links"]["ebay_sold_url"] is not None
-            
+
     # 7. PUT /api/drafts/{id} (manual edit with Ricardo title > 60 chars)
     analyzed["ricardo"]["title"] = "X" * 75
     analyzed["tutti"]["title"] = "Y" * 95
@@ -134,12 +136,12 @@ def test_full_rest_lifecycle(test_app):
     assert len(saved["tutti"]["title"]) <= 80
     assert len(saved["ebay_de"]["title"]) <= 80
     assert len(saved["kleinanzeigen"]["title"]) <= 65
-    
+
     # 8. DELETE /api/drafts/{id}
     res_del = client.delete(f"/api/drafts/{draft_id}")
     assert res_del.status_code == 200
     assert res_del.json()["ok"] is True
-    
+
     # Verify 404 after deletion
     res_get_deleted = client.get(f"/api/drafts/{draft_id}")
     assert res_get_deleted.status_code == 404
@@ -150,7 +152,7 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
     res = client.get("/")
     assert res.status_code == 200
     html = res.text
-    
+
     required_ids = [
         "btn-new-draft",
         "dropzone",
@@ -195,7 +197,7 @@ def test_dashboard_static_html_served_and_contains_required_elements(test_app):
 
 def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     client = TestClient(test_app)
-    
+
     # 1. GET /api/config & GET /api/models
     res_cfg = client.get("/api/config")
     assert res_cfg.status_code == 200
@@ -211,25 +213,27 @@ def test_system_config_and_invalid_api_key_defensive_handling(test_app):
     assert res_models.status_code == 200
     models_data = res_models.json()
     assert len(models_data) > 0
-    
-    # 2. POST /api/config with a new key and disable search grounding
+
+    # 2. POST /api/config with a new key and disable search grounding and custom exchange rate
     res_update = client.post(
         "/api/config",
         json={
             "gemini_api_key": "AIzaSyTestValidLengthKey12345",
             "enable_search_grounding": False,
+            "eur_to_chf_rate": 0.96,
         },
     )
     assert res_update.status_code == 200
     updated_cfg = res_update.json()
     assert updated_cfg["gemini_api_key_configured"] is True
     assert updated_cfg["enable_search_grounding"] is False
+    assert updated_cfg["eur_to_chf_rate"] == 0.96
     assert "AIza" in updated_cfg["masked_key"]
-    
+
     # 3. Create a draft and test defensive handling when Gemini raises an invalid key error
     res_create = client.post("/api/drafts", json={"user_notes": "Test Article"})
     draft_id = res_create.json()["id"]
-    
+
     with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=Exception("API_KEY_INVALID: API key not valid")):
         res_analyze = client.post(f"/api/drafts/{draft_id}/analyze")
         assert res_analyze.status_code == 400
@@ -428,6 +432,243 @@ def test_analyze_skips_ebay_and_filters_sources_when_disabled_in_settings(test_a
         # Disabled sources must not be in analyzed market_sources
         assert "ebay_de_sold" not in sources
         assert analyzed["price_analysis"]["ebay_stats"] is None
+
+
+def test_drafts_export_and_import_api(test_app):
+    client = TestClient(test_app)
+
+    # 1. Create a draft
+    create_res = client.post("/api/drafts", json={"user_notes": "API Export Note"})
+    assert create_res.status_code == 200
+    draft_id = create_res.json()["id"]
+
+    # 2. Export drafts
+    export_res = client.get("/api/drafts/export")
+    assert export_res.status_code == 200
+    assert "attachment" in export_res.headers.get("content-disposition", "")
+    backup_data = export_res.json()
+    assert backup_data["version"] == 1
+    assert any(d["id"] == draft_id for d in backup_data["drafts"])
+
+    # 3. Import via JSON payload
+    import_res = client.post("/api/drafts/import", json=backup_data)
+    assert import_res.status_code == 200
+    assert import_res.json()["imported_count"] >= 1
+
+    # 4. Import via multipart file upload
+    import json
+    file_bytes = json.dumps(backup_data).encode("utf-8")
+    files = {"file": ("backup.json", file_bytes, "application/json")}
+    file_res = client.post("/api/drafts/import", files=files)
+    assert file_res.status_code == 200
+    assert file_res.json()["imported_count"] >= 1
+
+    # 5. Invalid JSON import
+    bad_res = client.post("/api/drafts/import", json={"drafts": "invalid_type"})
+    assert bad_res.status_code == 400
+
+
+def test_frontend_api_client_contract():
+    node_script = """
+    const api = require('./frontend/api.js');
+    const recordedCalls = [];
+
+    global.fetch = async (url, options = {}) => {
+      recordedCalls.push({ url, options });
+
+      if (url === '/api/error-test') {
+        return { ok: false, status: 500 };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, data: 'mock-response' })
+      };
+    };
+
+    (async () => {
+      // 1. Auth pairing
+      await api.pairAuth();
+      const call1 = recordedCalls[recordedCalls.length - 1];
+      if (call1.url !== '/api/auth/pair' || call1.options.method !== 'POST') {
+        throw new Error('pairAuth contract failed');
+      }
+
+      // 2. Config & Settings
+      await api.getConfig();
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/config') throw new Error('getConfig failed');
+
+      await api.updateConfig({ key: 'val' });
+      const call3 = recordedCalls[recordedCalls.length - 1];
+      if (call3.url !== '/api/config' || call3.options.method !== 'POST' || call3.options.body !== '{"key":"val"}') {
+        throw new Error('updateConfig contract failed');
+      }
+
+      await api.getSettings();
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/settings') throw new Error('getSettings failed');
+
+      await api.updateSettings({ preset: 1 });
+      const call5 = recordedCalls[recordedCalls.length - 1];
+      if (call5.url !== '/api/settings' || call5.options.method !== 'PUT') throw new Error('updateSettings failed');
+
+      // 3. Draft operations
+      await api.listDrafts();
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/drafts') throw new Error('listDrafts failed');
+
+      await api.getDraft('draft 1');
+      if (recordedCalls[recordedCalls.length - 1].url !== '/api/drafts/draft%201') throw new Error('getDraft encoding failed');
+
+      await api.createDraft({ user_notes: 'note' });
+      const call8 = recordedCalls[recordedCalls.length - 1];
+      if (call8.url !== '/api/drafts' || call8.options.method !== 'POST') throw new Error('createDraft failed');
+
+      await api.updateDraft({ id: 'd-1', notes: 'updated' });
+      const call9 = recordedCalls[recordedCalls.length - 1];
+      if (call9.url !== '/api/drafts/d-1' || call9.options.method !== 'PUT') throw new Error('updateDraft failed');
+
+      await api.deleteDraft('d-1');
+      const call10 = recordedCalls[recordedCalls.length - 1];
+      if (call10.url !== '/api/drafts/d-1' || call10.options.method !== 'DELETE') throw new Error('deleteDraft failed');
+
+      await api.analyzeDraft('d-1');
+      const call11 = recordedCalls[recordedCalls.length - 1];
+      if (call11.url !== '/api/drafts/d-1/analyze' || call11.options.method !== 'POST') throw new Error('analyzeDraft failed');
+
+      // 4. Image operations
+      const mockForm = { dummy: true };
+      await api.uploadImages('d-1', mockForm);
+      const call12 = recordedCalls[recordedCalls.length - 1];
+      if (call12.url !== '/api/drafts/d-1/images' || call12.options.method !== 'POST' || call12.options.body !== mockForm) {
+        throw new Error('uploadImages failed');
+      }
+
+      await api.deleteImage('d-1', 'img 1');
+      const call13 = recordedCalls[recordedCalls.length - 1];
+      if (call13.url !== '/api/drafts/d-1/images/img%201' || call13.options.method !== 'DELETE') throw new Error('deleteImage failed');
+
+      await api.setVariant('d-1', 'img-1', 'white_bg');
+      const call14 = recordedCalls[recordedCalls.length - 1];
+      if (call14.url !== '/api/drafts/d-1/images/img-1' || call14.options.method !== 'PATCH' || call14.options.body !== '{"active_mode":"white_bg"}') {
+        throw new Error('setVariant failed');
+      }
+
+      // 5. Backup operations
+      await api.exportDrafts();
+      const call15 = recordedCalls[recordedCalls.length - 1];
+      if (call15.url !== '/api/drafts/export') throw new Error('exportDrafts failed');
+
+      await api.importDrafts(mockForm);
+      const call16 = recordedCalls[recordedCalls.length - 1];
+      if (call16.url !== '/api/drafts/import' || call16.options.method !== 'POST' || call16.options.body !== mockForm) {
+        throw new Error('importDrafts failed');
+      }
+
+      // 6. Error handling rejection verification
+      global.fetch = async () => ({ ok: false, status: 404 });
+      let threw = false;
+      try {
+        await api.getDraft('missing');
+      } catch (err) {
+        threw = true;
+        if (!err.message.includes('404')) throw new Error('Expected 404 in error message, got: ' + err.message);
+      }
+      if (!threw) throw new Error('Expected getDraft to throw on 404');
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Frontend API client test failed: {res.stderr}"
+
+
+def test_analyze_draft_concurrency_guard(test_app):
+    client = TestClient(test_app)
+    res_create = client.post("/api/drafts", json={"user_notes": "Concurrency Test"})
+    assert res_create.status_code == 200
+    draft_id = res_create.json()["id"]
+
+    import asyncio
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    real_draft = Draft.model_validate(res_create.json())
+    real_draft.status = DraftStatus.READY
+
+    async def slow_analyze(*args, **kwargs):
+        await asyncio.sleep(0.3)
+        return real_draft
+
+    with patch("backend.services.ai_service.AIService.analyze_draft", side_effect=slow_analyze):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            fut1 = executor.submit(lambda: client.post(f"/api/drafts/{draft_id}/analyze"))
+            time.sleep(0.05)
+            fut2 = executor.submit(lambda: client.post(f"/api/drafts/{draft_id}/analyze"))
+
+            res1 = fut1.result()
+            res2 = fut2.result()
+
+        statuses = {res1.status_code, res2.status_code}
+        assert 200 in statuses
+        assert 409 in statuses
+
+        conflict_res = res1 if res1.status_code == 409 else res2
+        assert "Analyse für diesen Entwurf läuft bereits" in conflict_res.json()["detail"]
+
+    # After completion, subsequent request can acquire lock and succeed
+    with patch("backend.services.ai_service.AIService.analyze_draft", return_value=real_draft):
+        res3 = client.post(f"/api/drafts/{draft_id}/analyze")
+        assert res3.status_code == 200
+
+
+def test_frontend_upload_validation():
+    node_script = """
+    const { validateUploadFiles, MAX_UPLOAD_FILES, MAX_FILE_BYTES } = require('./frontend/app.js');
+
+    // 1. Empty files
+    const resEmpty = validateUploadFiles([]);
+    if (resEmpty.valid !== false || !resEmpty.error.includes('Keine Dateien')) {
+      throw new Error('Empty files validation failed: ' + JSON.stringify(resEmpty));
+    }
+
+    // 2. Excess files (>15)
+    const excessFiles = Array(16).fill({ name: 'photo.jpg', size: 1000, type: 'image/jpeg' });
+    const resExcess = validateUploadFiles(excessFiles);
+    if (resExcess.valid !== false || !resExcess.error.includes('Maximal 15 Bilder')) {
+      throw new Error('Excess files validation failed: ' + JSON.stringify(resExcess));
+    }
+
+    // 3. Unsupported extension
+    const invalidExtFiles = [{ name: 'payload.exe', size: 1000, type: 'application/octet-stream' }];
+    const resInvalidExt = validateUploadFiles(invalidExtFiles);
+    if (resInvalidExt.valid !== false || !resInvalidExt.error.includes('Ungültiges Dateiformat')) {
+      throw new Error('Invalid extension validation failed: ' + JSON.stringify(resInvalidExt));
+    }
+
+    // 4. File exceeding 25MB
+    const oversizedFiles = [{ name: 'giant.png', size: 26 * 1024 * 1024, type: 'image/png' }];
+    const resOversized = validateUploadFiles(oversizedFiles);
+    if (resOversized.valid !== false || !resOversized.error.includes('25 MB')) {
+      throw new Error('Oversized validation failed: ' + JSON.stringify(resOversized));
+    }
+
+    // 5. Valid files batch
+    const validBatch = [
+      { name: 'photo1.JPG', size: 2 * 1024 * 1024, type: 'image/jpeg' },
+      { name: 'photo2.webp', size: 500 * 1024, type: 'image/webp' },
+      { name: 'photo3.heic', size: 10 * 1024 * 1024, type: 'image/heic' }
+    ];
+    const resValid = validateUploadFiles(validBatch);
+    if (resValid.valid !== true) {
+      throw new Error('Valid batch unexpectedly failed: ' + JSON.stringify(resValid));
+    }
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Frontend upload validation failed: {res.stderr}"
+
+
+
+
 
 
 

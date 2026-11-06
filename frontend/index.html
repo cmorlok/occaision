@@ -429,6 +429,14 @@
         </div>
 
         <div class="form-group">
+          <label for="cfg-eur-rate">EUR / CHF Wechselkurs:</label>
+          <input type="number" id="cfg-eur-rate" step="0.01" min="0.5" max="2.0" placeholder="0.94" style="max-width: 140px;" />
+          <span class="field-hint">
+            Verwendet für die Umrechnung von Preisen aus deutschen Quellen (eBay DE, Kleinanzeigen, Idealo) in CHF. Standard: 0.94.
+          </span>
+        </div>
+
+        <div class="form-group">
           <label><strong>Preisquellen für Marktrecherche:</strong></label>
           <span class="field-hint">Nur aktivierte Quellen werden abgefragt, in der Übersicht angezeigt und an die KI übergeben.</span>
           <div class="price-sources-checkboxes" style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px;">
@@ -476,6 +484,31 @@
           </div>
         </div>
 
+        <div class="form-group" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;">
+          <label><strong>Browser-Extension koppeln:</strong></label>
+          <div style="display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap;">
+            <button id="btn-create-pairing-pin" type="button" class="btn btn-secondary">🔗 Extension neu koppeln (PIN erzeugen)</button>
+            <span id="pairing-pin-display" style="font-family: monospace; font-size: 1.1rem; font-weight: bold; padding: 4px 10px; background: var(--bg); border: 1px dashed var(--border); border-radius: 4px; display: none;"></span>
+          </div>
+          <span class="field-hint" id="pairing-pin-hint">
+            Überträgt den Autorisierungs-Token an die Browser-Extension für Preisrecherche und Übernahme der Formulardaten.
+          </span>
+        </div>
+
+        <div class="form-group" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;">
+          <label><strong>Datensicherung & Wiederherstellung:</strong></label>
+          <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+            <button id="btn-export-backup" type="button" class="btn btn-secondary">📥 Vollständiges Backup exportieren (.zip)</button>
+            <label class="btn btn-secondary" style="margin: 0; cursor: pointer;">
+              📤 Backup wiederherstellen (.zip / .json)
+              <input type="file" id="backup-file-input" accept=".zip,.json" style="display: none;" />
+            </label>
+          </div>
+          <span class="field-hint">
+            Sichert alle Entwürfe inklusive Fotos und Einstellungen als vollständiges ZIP-Archiv. Unterstützt auch die Wiederherstellung früherer JSON-Metadaten.
+          </span>
+        </div>
+
         <div class="form-group">
           <label>Konfigurationsdatei (.env):</label>
           <span class="field-hint">Alternativ kannst du den Key direkt in der Datei <code>.env</code> im Projektordner als <code>GEMINI_API_KEY=...</code> eintragen.</span>
@@ -488,6 +521,10 @@
     </div>
   </div>
 
+  <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="api.js?v=1"></script>
+  <script src="toast.js?v=1"></script>
   <script src="app.js?v=15"></script>
 </body>
 </html>
