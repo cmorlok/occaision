@@ -1516,6 +1516,25 @@ def test_extension_ebay_de_3step_workflow_via_node():
       if (!ricardoPanel || !ricardoPanel.innerHTML.includes('ai-ext-step1-btn') || !ricardoPanel.innerHTML.includes('ai-ext-step2-btn') || ricardoPanel.innerHTML.includes('ai-ext-step3-btn')) {
         throw new Error('Expected 2 buttons (and no step3) for Ricardo Smart Panel, got: ' + ricardoPanel?.innerHTML);
       }
+
+      // 6. Test sessionStorage automation across page navigation
+      const sessionStore = {};
+      global.sessionStorage = {
+        getItem: (k) => sessionStore[k] || null,
+        setItem: (k, v) => { sessionStore[k] = String(v); },
+        removeItem: (k) => { delete sessionStore[k]; }
+      };
+
+      global.sessionStorage.setItem(content.EBAY_AUTO_KEY, JSON.stringify({
+        draftId: 'draft-auto',
+        startedAt: Date.now()
+      }));
+
+      // When executeEbayStep1 finishes with condition selected, it clears the auto key
+      await content.executeEbayStep1(step1Draft, mockStep1Doc);
+      if (global.sessionStorage.getItem(content.EBAY_AUTO_KEY)) {
+        throw new Error('Expected EBAY_AUTO_KEY to be cleared after step 1 completes');
+      }
     })().catch(err => {
       console.error(err);
       process.exit(1);
