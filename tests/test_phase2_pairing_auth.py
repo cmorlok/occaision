@@ -156,3 +156,43 @@ def test_pairing_code_expiration(temp_data_dir: Path):
         )
         assert res_expired.status_code == 401
         assert "Invalid or expired" in res_expired.json()["detail"]
+
+
+def test_pairing_codes_capacity_and_pruning(temp_data_dir: Path, monkeypatch):
+    import backend.main as b_main
+    monkeypatch.setattr(b_main, "MAX_PAIRING_CODES", 5)
+
+    test_settings = Settings(data_dir=temp_data_dir, require_auth=True)
+    storage = StorageService(data_dir=temp_data_dir)
+    image_service = ImageService(data_dir=temp_data_dir)
+    app = create_app(settings=test_settings, storage_service=storage, image_service=image_service)
+    auth_token = (temp_data_dir / "auth_token.txt").read_text(encoding="utf-8").strip()
+
+    client = TestClient(app)
+    client.cookies.set("occaision_token", auth_token)
+
+    # Generate 6 codes with capacity=5
+    codes = []
+    for _ in range(6):
+        res = client.post("/api/auth/pairing-code")
+        assert res.status_code == 200
+        codes.append(res.json()["pairing_code"])
+
+    # First code should have been evicted due to capacity bound (5)
+    ext_client = TestClient(app)
+    res_first = ext_client.post(
+        "/api/auth/pair",
+        headers={"Origin": "http://127.0.0.1:8000"},
+        json={"pairing_code": codes[0]},
+    )
+    assert res_first.status_code == 401
+
+    # Latest code must still pair successfully
+    res_latest = ext_client.post(
+        "/api/auth/pair",
+        headers={"Origin": "http://127.0.0.1:8000"},
+        json={"pairing_code": codes[-1]},
+    )
+    assert res_latest.status_code == 200
+    assert res_latest.json()["token"] == auth_token
+

@@ -49,6 +49,7 @@ logger = get_logger("occaision.api")
 
 MAX_IMPORT_SIZE = 10 * 1024 * 1024  # 10 MB
 MAX_BACKUP_SIZE = 500 * 1024 * 1024  # 500 MB maximum backup archive size
+MAX_PAIRING_CODES = 100              # Maximum active pairing codes in memory
 UPLOAD_CHUNK_SIZE = 256 * 1024       # 256 KB streaming chunks
 
 
@@ -392,9 +393,13 @@ def create_app(
         now = time.time()
         with pairing_lock:
             # Prune expired codes
-            expired = [c for c, exp in pairing_codes.items() if exp < now]
-            for c in expired:
+            for c in [k for k, exp in pairing_codes.items() if exp < now]:
                 del pairing_codes[c]
+
+            # Enforce max capacity by evicting oldest
+            if len(pairing_codes) >= MAX_PAIRING_CODES:
+                oldest = sorted(pairing_codes.items(), key=lambda x: x[1])[0][0]
+                del pairing_codes[oldest]
 
             code = f"{secrets.randbelow(900000) + 100000:06d}"
             pairing_codes[code] = now + 60.0
@@ -424,6 +429,10 @@ def create_app(
         code = body.pairing_code.strip()
         now = time.time()
         with pairing_lock:
+            # Prune expired codes
+            for c in [k for k, exp in pairing_codes.items() if exp < now]:
+                del pairing_codes[c]
+
             exp = pairing_codes.get(code)
             if not exp or exp < now:
                 if code in pairing_codes:
