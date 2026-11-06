@@ -1979,13 +1979,36 @@ async function scrapeAllPriceSources(query, eurToChfRate = 0.94, enabledSources 
     sourceConfigs = sourceConfigs.filter(cfg => enabledSources.includes(cfg.id));
   }
 
-  const results = await Promise.all(
+  const settled = await Promise.allSettled(
     sourceConfigs.map(cfg => scrapeSourceHybrid(cfg, query, eurToChfRate, keepTabsOpen))
   );
 
   const sourcesMap = {};
-  for (const r of results) {
-    sourcesMap[r.source_id] = r;
+  for (let i = 0; i < sourceConfigs.length; i++) {
+    const cfg = sourceConfigs[i];
+    const outcome = settled[i];
+    if (outcome.status === "fulfilled") {
+      const r = outcome.value;
+      sourcesMap[r.source_id || cfg.id] = r;
+    } else {
+      console.warn(`[OccAIsion] [${cfg.id}] Scraping fehlgeschlagen:`, outcome.reason);
+      const errMsg =
+        outcome.reason && outcome.reason.message
+          ? outcome.reason.message
+          : String(outcome.reason || "Unbekannter Fehler");
+      sourcesMap[cfg.id] = {
+        source_id: cfg.id,
+        label: cfg.label,
+        currency: cfg.currency,
+        url: cfg.url,
+        prices_raw: [],
+        prices_chf: [],
+        count: 0,
+        stats: null,
+        method: "error",
+        error: errMsg,
+      };
+    }
   }
 
   if (sourcesMap.tutti && sourcesMap.tutti.url) {

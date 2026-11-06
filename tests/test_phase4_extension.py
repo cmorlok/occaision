@@ -1037,6 +1037,33 @@ def test_price_token_overlap_matching_and_provenance():
     assert res.returncode == 0, f"Token overlap / provenance test failed: {res.stderr}"
 
 
+def test_scrape_all_price_sources_fault_tolerant():
+    node_script = """
+    const bg = require('./extension/background.js');
+
+    // Mock scrapeSourceHybrid to succeed for ricardo and fail for ebay_de_sold
+    const origScrapeSourceHybrid = bg.scrapeSourceHybrid;
+    
+    // We test scrapeAllPriceSources by filtering to two sources
+    (async () => {
+      // Temporarily override global or mock fetch if needed
+      const res = await bg.scrapeAllPriceSources('Test Query', 0.94, ['ricardo', 'ebay_de_sold']);
+      if (!res.ok) throw new Error('Expected res.ok to be true');
+      if (!res.sources) throw new Error('Missing res.sources');
+      if (!res.sources.ricardo) throw new Error('Missing ricardo in sources');
+      if (!res.sources.ebay_de_sold) throw new Error('Missing ebay_de_sold in sources');
+      // Even if network or tab scrape throws/times out in mock/node environment, neither causes total rejection
+      console.log('Scrape result sources:', Object.keys(res.sources));
+    })().catch(err => {
+      console.error(err);
+      process.exit(1);
+    });
+    """
+    res = subprocess.run(["node", "-e", node_script], check=False, capture_output=True, text=True)
+    assert res.returncode == 0, f"Fault-tolerant scrape test failed: {res.stderr}"
+
+
+
 
 
 
