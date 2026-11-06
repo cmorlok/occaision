@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.config import get_logger
 from backend.models import (
@@ -40,6 +41,89 @@ GERMAN_LEGAL_DISCLAIMER = (
 )
 
 
+class AIAnalysisResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    identified_product: Optional[str] = None
+    missing_photo_hints: List[str] = Field(default_factory=list)
+    reasoning: Optional[str] = ""
+
+    # Ricardo
+    ricardo_title: Optional[str] = None
+    ricardo_description: Optional[str] = None
+    ricardo_condition: Optional[str] = None
+    ricardo_start_chf: Optional[float] = None
+    ricardo_buynow_chf: Optional[float] = None
+
+    # Tutti
+    tutti_title: Optional[str] = None
+    tutti_description: Optional[str] = None
+    tutti_category: Optional[str] = None
+    tutti_condition: Optional[str] = None
+    tutti_vhb_chf: Optional[float] = None
+
+    # eBay DE
+    ebay_de_title: Optional[str] = None
+    ebay_de_description: Optional[str] = None
+    ebay_de_category: Optional[str] = None
+    ebay_de_condition: Optional[str] = None
+    ebay_de_start_eur: Optional[float] = None
+    ebay_de_buynow_eur: Optional[float] = None
+    ebay_start_eur: Optional[float] = None
+    ebay_buynow_eur: Optional[float] = None
+
+    # Kleinanzeigen
+    kleinanzeigen_title: Optional[str] = None
+    kleinanzeigen_description: Optional[str] = None
+    kleinanzeigen_category: Optional[str] = None
+    kleinanzeigen_condition: Optional[str] = None
+    kleinanzeigen_vb_eur: Optional[float] = None
+
+    # New prices
+    ch_new_price_chf: Optional[float] = None
+    de_new_price_eur: Optional[float] = None
+
+    @field_validator(
+        "ricardo_start_chf",
+        "ricardo_buynow_chf",
+        "tutti_vhb_chf",
+        "ebay_de_start_eur",
+        "ebay_de_buynow_eur",
+        "ebay_start_eur",
+        "ebay_buynow_eur",
+        "kleinanzeigen_vb_eur",
+        "ch_new_price_chf",
+        "de_new_price_eur",
+        mode="before",
+    )
+    @classmethod
+    def sanitize_price_field(cls, v: Any) -> Optional[float]:
+        if v is None:
+            return None
+        try:
+            n = float(v)
+            if math.isnan(n) or math.isinf(n) or n < 0:
+                return None
+            return round(n, 2)
+        except (ValueError, TypeError):
+            return None
+
+
+def is_draft_ready(draft: Draft) -> bool:
+    """Validate completeness before setting status to READY."""
+    if not (draft.identified_product and draft.identified_product.strip()):
+        return False
+    has_title = any(
+        bool(listing.title and listing.title.strip())
+        for listing in [draft.ricardo, draft.tutti, draft.ebay_de, draft.kleinanzeigen]
+    )
+    has_desc = any(
+        bool(listing.description and listing.description.strip())
+        for listing in [draft.ricardo, draft.tutti, draft.ebay_de, draft.kleinanzeigen]
+    )
+    return has_title and has_desc
+
+
 def extract_and_parse_json(raw_text: str) -> Dict[str, Any]:
     text = raw_text.strip()
     # Check for Markdown code block ```json ... ```
@@ -53,7 +137,12 @@ def extract_and_parse_json(raw_text: str) -> Dict[str, Any]:
         if start != -1 and end != -1 and end > start:
             text = text[start : end + 1]
 
-    return json.loads(text)
+    # Clean up trailing commas before closing braces/brackets
+    text = re.sub(r",\s*([\]}])", r"\1", text)
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError(f"AI response must be a JSON object, got {type(parsed).__name__}")
+    return parsed
 
 
 def _truncate_title(title: str, max_len: int) -> str:
@@ -93,27 +182,27 @@ def post_process_ai_output(payload: Dict[str, Any]) -> Dict[str, Any]:
         res["kleinanzeigen_title"] = _truncate_title(res["kleinanzeigen_title"], 65)
 
     # 3. Mandatory Swiss warranty disclaimer in descriptions
-    ricardo_desc = res.get("ricardo_description", "")
+    ricardo_desc = res.get("ricardo_description") or ""
     if "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme" not in ricardo_desc:
         res["ricardo_description"] = f"{ricardo_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
 
-    tutti_desc = res.get("tutti_description", "")
+    tutti_desc = res.get("tutti_description") or ""
     if "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme" not in tutti_desc:
         res["tutti_description"] = f"{tutti_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
 
     # 4. Mandatory German warranty disclaimer in descriptions
     if "ebay_de_description" in res:
-        ebay_desc = res.get("ebay_de_description", "")
+        ebay_desc = res.get("ebay_de_description") or ""
         if "Ausschluss jeglicher Sachmängelhaftung" not in ebay_desc:
             res["ebay_de_description"] = f"{ebay_desc.rstrip()}\n\n{GERMAN_LEGAL_DISCLAIMER}".strip()
-    elif "ebay_de_title" in res:
+    elif "ebay_de_title" in res and res.get("ebay_de_title"):
         res["ebay_de_description"] = GERMAN_LEGAL_DISCLAIMER
 
     if "kleinanzeigen_description" in res:
-        klein_desc = res.get("kleinanzeigen_description", "")
+        klein_desc = res.get("kleinanzeigen_description") or ""
         if "Ausschluss jeglicher Sachmängelhaftung" not in klein_desc:
             res["kleinanzeigen_description"] = f"{klein_desc.rstrip()}\n\n{GERMAN_LEGAL_DISCLAIMER}".strip()
-    elif "kleinanzeigen_title" in res:
+    elif "kleinanzeigen_title" in res and res.get("kleinanzeigen_title"):
         res["kleinanzeigen_description"] = GERMAN_LEGAL_DISCLAIMER
 
     return res
@@ -485,7 +574,8 @@ class AIService:
         logger.debug("--- [GEMINI AI RAW RESPONSE DEBUG END] ---")
         logger.debug("=" * 70)
         raw_payload = extract_and_parse_json(raw_text)
-        payload = post_process_ai_output(raw_payload)
+        validated = AIAnalysisResponse.model_validate(raw_payload)
+        payload = post_process_ai_output(validated.model_dump())
 
         # Update draft
         product_name = (
@@ -534,30 +624,55 @@ class AIService:
             except (ValueError, TypeError):
                 return ConditionType.GEBRAUCHT
 
-        draft.ricardo.title = payload.get("ricardo_title", draft.ricardo.title)
-        draft.ricardo.description = payload.get("ricardo_description", draft.ricardo.description)
-        draft.ricardo.condition = map_cond(payload.get("ricardo_condition"))
-        draft.ricardo.start_price_chf = safe_price(payload.get("ricardo_start_chf"), draft.ricardo.start_price_chf)
-        draft.ricardo.buynow_price_chf = safe_price(payload.get("ricardo_buynow_chf"), draft.ricardo.buynow_price_chf)
+        if payload.get("ricardo_title"):
+            draft.ricardo.title = payload["ricardo_title"]
+        if payload.get("ricardo_description"):
+            draft.ricardo.description = payload["ricardo_description"]
+        if payload.get("ricardo_condition"):
+            draft.ricardo.condition = map_cond(payload.get("ricardo_condition"))
+        if payload.get("ricardo_start_chf") is not None:
+            draft.ricardo.start_price_chf = safe_price(payload.get("ricardo_start_chf"), draft.ricardo.start_price_chf)
+        if payload.get("ricardo_buynow_chf") is not None:
+            draft.ricardo.buynow_price_chf = safe_price(payload.get("ricardo_buynow_chf"), draft.ricardo.buynow_price_chf)
 
-        draft.tutti.title = payload.get("tutti_title", draft.tutti.title)
-        draft.tutti.category_suggestion = payload.get("tutti_category", draft.tutti.category_suggestion)
-        draft.tutti.description = payload.get("tutti_description", draft.tutti.description)
-        draft.tutti.condition = map_cond(payload.get("tutti_condition"))
-        draft.tutti.price_vhb_chf = safe_price(payload.get("tutti_vhb_chf"), draft.tutti.price_vhb_chf)
+        if payload.get("tutti_title"):
+            draft.tutti.title = payload["tutti_title"]
+        if payload.get("tutti_category"):
+            draft.tutti.category_suggestion = payload["tutti_category"]
+        if payload.get("tutti_description"):
+            draft.tutti.description = payload["tutti_description"]
+        if payload.get("tutti_condition"):
+            draft.tutti.condition = map_cond(payload.get("tutti_condition"))
+        if payload.get("tutti_vhb_chf") is not None:
+            draft.tutti.price_vhb_chf = safe_price(payload.get("tutti_vhb_chf"), draft.tutti.price_vhb_chf)
 
-        draft.ebay_de.title = payload.get("ebay_de_title", draft.ebay_de.title)
-        draft.ebay_de.category_suggestion = payload.get("ebay_de_category", draft.ebay_de.category_suggestion)
-        draft.ebay_de.description = payload.get("ebay_de_description", draft.ebay_de.description)
-        draft.ebay_de.condition = map_cond(payload.get("ebay_de_condition"))
-        draft.ebay_de.start_price_eur = safe_price(payload.get("ebay_start_eur"), draft.ebay_de.start_price_eur)
-        draft.ebay_de.buynow_price_eur = safe_price(payload.get("ebay_buynow_eur"), draft.ebay_de.buynow_price_eur)
+        if payload.get("ebay_de_title"):
+            draft.ebay_de.title = payload["ebay_de_title"]
+        if payload.get("ebay_de_category"):
+            draft.ebay_de.category_suggestion = payload["ebay_de_category"]
+        if payload.get("ebay_de_description"):
+            draft.ebay_de.description = payload["ebay_de_description"]
+        if payload.get("ebay_de_condition"):
+            draft.ebay_de.condition = map_cond(payload.get("ebay_de_condition"))
+        if payload.get("ebay_start_eur") is not None:
+            draft.ebay_de.start_price_eur = safe_price(payload.get("ebay_start_eur"), draft.ebay_de.start_price_eur)
+        elif payload.get("ebay_de_start_eur") is not None:
+            draft.ebay_de.start_price_eur = safe_price(payload.get("ebay_de_start_eur"), draft.ebay_de.start_price_eur)
+        if payload.get("ebay_buynow_eur") is not None:
+            draft.ebay_de.buynow_price_eur = safe_price(payload.get("ebay_buynow_eur"), draft.ebay_de.buynow_price_eur)
+        elif payload.get("ebay_de_buynow_eur") is not None:
+            draft.ebay_de.buynow_price_eur = safe_price(payload.get("ebay_de_buynow_eur"), draft.ebay_de.buynow_price_eur)
 
-        draft.kleinanzeigen.title = payload.get("kleinanzeigen_title", draft.kleinanzeigen.title)
-        draft.kleinanzeigen.category_suggestion = payload.get("kleinanzeigen_category", draft.kleinanzeigen.category_suggestion)
-        draft.kleinanzeigen.description = payload.get("kleinanzeigen_description", draft.kleinanzeigen.description)
-        draft.kleinanzeigen.condition = map_cond(payload.get("kleinanzeigen_condition"))
-        draft.kleinanzeigen.price_eur = safe_price(payload.get("kleinanzeigen_vb_eur"), draft.kleinanzeigen.price_eur)
+        if payload.get("kleinanzeigen_title"):
+            draft.kleinanzeigen.title = payload["kleinanzeigen_title"]
+        if payload.get("kleinanzeigen_category"):
+            draft.kleinanzeigen.category_suggestion = payload["kleinanzeigen_category"]
+        if payload.get("kleinanzeigen_description"):
+            draft.kleinanzeigen.description = payload["kleinanzeigen_description"]
+        if payload.get("kleinanzeigen_condition"):
+            draft.kleinanzeigen.condition = map_cond(payload.get("kleinanzeigen_condition"))
+        if payload.get("kleinanzeigen_vb_eur") is not None:
+            draft.kleinanzeigen.price_eur = safe_price(payload.get("kleinanzeigen_vb_eur"), draft.kleinanzeigen.price_eur)
 
-        draft.status = DraftStatus.READY
+        draft.status = DraftStatus.READY if is_draft_ready(draft) else DraftStatus.DRAFT
         return draft

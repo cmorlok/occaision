@@ -24,12 +24,13 @@ from backend.config import settings as default_settings
 from backend.models import (
     DEFAULT_PRICE_SOURCES,
     Draft,
+    DraftStatus,
     ImageVariantMode,
     PresetSettings,
     UpdateDraftRequest,
 )
 from backend.path_utils import PathTraversalError
-from backend.services.ai_service import AIService
+from backend.services.ai_service import AIService, is_draft_ready
 from backend.services.image_service import ImageService
 from backend.storage import (
     MAX_FILE_SIZE,
@@ -225,7 +226,7 @@ def merge_analysis_results(base: Draft, current: Draft, analyzed: Draft) -> Draf
     # Hints, Price Analysis & Status
     current.price_analysis = analyzed.price_analysis
     current.missing_photo_hints = analyzed.missing_photo_hints
-    current.status = analyzed.status
+    current.status = DraftStatus.READY if is_draft_ready(current) else DraftStatus.DRAFT
 
     return current
 
@@ -777,6 +778,7 @@ def create_app(
             draft = storage.get_draft(draft_id)
             if not draft:
                 raise HTTPException(status_code=404, detail="Draft not found")
+            base = draft.model_copy(deep=True)
 
             # 0. Load enabled price sources from settings
             preset_settings = storage.get_settings()
@@ -840,7 +842,7 @@ def create_app(
             if not current:
                 raise HTTPException(status_code=404, detail="Draft was deleted during analysis")
 
-            merged = merge_analysis_results(base=draft, current=current, analyzed=analyzed_draft)
+            merged = merge_analysis_results(base=base, current=current, analyzed=analyzed_draft)
 
             try:
                 return storage.update_draft(merged)
