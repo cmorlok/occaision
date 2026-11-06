@@ -111,6 +111,9 @@ const cfgGeminiModel = document.getElementById("cfg-gemini-model");
 const cfgSearchGrounding = document.getElementById("cfg-search-grounding");
 const cfgEurRate = document.getElementById("cfg-eur-rate");
 const cfgKeyStatus = document.getElementById("cfg-key-status");
+const btnCreatePairingPin = document.getElementById("btn-create-pairing-pin");
+const pairingPinDisplay = document.getElementById("pairing-pin-display");
+const pairingPinHint = document.getElementById("pairing-pin-hint");
 const btnExportBackup = document.getElementById("btn-export-backup");
 const backupFileInput = document.getElementById("backup-file-input");
 const toastContainer = document.getElementById("toast-container");
@@ -127,7 +130,13 @@ let systemConfig = null;
 
 async function init() {
   try {
-    const pairData = await api.pairAuth().catch(() => null);
+    let pairData = await api.pairAuth().catch(() => null);
+    if (!pairData || !pairData.token) {
+      const codeResp = await api.createPairingCode().catch(() => null);
+      if (codeResp && codeResp.pairing_code) {
+        pairData = await api.pairAuth(codeResp.pairing_code).catch(() => null);
+      }
+    }
     if (pairData && pairData.token && typeof window !== "undefined") {
       window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairData.token }), window.location.origin);
     }
@@ -953,6 +962,38 @@ function setupEventListeners() {
   if (btnToggleKey) {
     btnToggleKey.onclick = () => {
       cfgGeminiKey.type = cfgGeminiKey.type === "password" ? "text" : "password";
+    };
+  }
+
+  if (btnCreatePairingPin) {
+    btnCreatePairingPin.onclick = async () => {
+      try {
+        btnCreatePairingPin.disabled = true;
+        const res = await api.createPairingCode();
+        if (res && res.pairing_code) {
+          if (pairingPinDisplay) {
+            pairingPinDisplay.textContent = `PIN: ${res.pairing_code}`;
+            pairingPinDisplay.style.display = "inline-block";
+          }
+          if (pairingPinHint) {
+            pairingPinHint.textContent = `PIN ${res.pairing_code} aktiv (gültig 60s). Autorisierung wird an Extension übertragen...`;
+          }
+          const pairRes = await api.pairAuth(res.pairing_code).catch(() => null);
+          if (pairRes && pairRes.token && typeof window !== "undefined") {
+            window.postMessage(JSON.stringify({ type: "OCCAISION_SET_TOKEN", token: pairRes.token }), window.location.origin);
+            showToast("Extension erfolgreich autorisiert!", "success");
+            if (pairingPinHint) {
+              pairingPinHint.textContent = "Browser-Extension erfolgreich autorisiert.";
+            }
+          } else {
+            showToast(`PIN ${res.pairing_code} generiert.`, "info");
+          }
+        }
+      } catch (err) {
+        showToast(`Kopplung fehlgeschlagen: ${err.message}`, "error");
+      } finally {
+        btnCreatePairingPin.disabled = false;
+      }
     };
   }
 

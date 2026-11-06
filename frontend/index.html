@@ -485,6 +485,17 @@
         </div>
 
         <div class="form-group" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;">
+          <label><strong>Browser-Extension koppeln:</strong></label>
+          <div style="display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap;">
+            <button id="btn-create-pairing-pin" type="button" class="btn btn-secondary">🔗 Extension neu koppeln (PIN erzeugen)</button>
+            <span id="pairing-pin-display" style="font-family: monospace; font-size: 1.1rem; font-weight: bold; padding: 4px 10px; background: var(--bg); border: 1px dashed var(--border); border-radius: 4px; display: none;"></span>
+          </div>
+          <span class="field-hint" id="pairing-pin-hint">
+            Überträgt den Autorisierungs-Token an die Browser-Extension für Preisrecherche und Übernahme der Formulardaten.
+          </span>
+        </div>
+
+        <div class="form-group" style="border-top: 1px solid var(--border); padding-top: 14px; margin-top: 14px;">
           <label><strong>Datensicherung & Wiederherstellung:</strong></label>
           <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
             <button id="btn-export-backup" type="button" class="btn btn-secondary">📥 Entwürfe exportieren (Backup)</button>
