@@ -215,8 +215,23 @@ class TuttiListing(BaseModel):
     @field_validator("title", mode="before")
     @classmethod
     def truncate_title(cls, v: str) -> str:
-        if isinstance(v, str) and len(v) > 80:
-            return v[:80].rstrip()
+        if isinstance(v, str) and len(v) > 60:
+            return v[:60].rstrip()
+        return v
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def truncate_description(cls, v: str) -> str:
+        if isinstance(v, str) and len(v) > 4000:
+            disclaimer = "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
+            if disclaimer in v:
+                idx = v.rfind(disclaimer)
+                body = v[:idx].rstrip()
+                tail = v[idx:]
+                avail = 4000 - len(tail) - 2  # account for \n\n
+                if avail > 0:
+                    return f"{body[:avail].rstrip()}\n\n{tail}".strip()
+            return v[:4000].rstrip()
         return v
 
 

@@ -188,11 +188,13 @@ def test_multi_draft_crud_persistence(temp_data_dir: Path):
     # Test title safeguard: longer than 60 chars must be truncated <= 60
     d2.ricardo.title = "A" * 75
     d2.tutti.title = "B" * 90
+    d2.tutti.description = "T" * 4500
     d2.ebay_de.title = "C" * 95
     d2.kleinanzeigen.title = "D" * 80
     saved_d2 = storage.update_draft(d2)
     assert len(saved_d2.ricardo.title) <= 60
-    assert len(saved_d2.tutti.title) <= 80
+    assert len(saved_d2.tutti.title) <= 60
+    assert len(saved_d2.tutti.description) <= 4000
     assert len(saved_d2.ebay_de.title) <= 80
     assert len(saved_d2.kleinanzeigen.title) <= 65
     assert saved_d2.price_analysis.prices_fetched_via_extension is True

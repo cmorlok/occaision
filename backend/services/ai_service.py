@@ -172,8 +172,7 @@ def post_process_ai_output(payload: Dict[str, Any]) -> Dict[str, Any]:
         res["ricardo_title"] = _truncate_title(res["ricardo_title"], 60)
 
     if "tutti_title" in res and isinstance(res["tutti_title"], str):
-        if len(res["tutti_title"]) > 80:
-            res["tutti_title"] = res["tutti_title"][:80].strip()
+        res["tutti_title"] = _truncate_title(res["tutti_title"], 60)
 
     if "ebay_de_title" in res and isinstance(res["ebay_de_title"], str):
         res["ebay_de_title"] = _truncate_title(res["ebay_de_title"], 80)
@@ -187,8 +186,24 @@ def post_process_ai_output(payload: Dict[str, Any]) -> Dict[str, Any]:
         res["ricardo_description"] = f"{ricardo_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
 
     tutti_desc = res.get("tutti_description") or ""
+    disclaimer = SWISS_LEGAL_DISCLAIMER
+    disclaimer_block = f"\n\n{disclaimer}"
     if "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme" not in tutti_desc:
-        res["tutti_description"] = f"{tutti_desc.rstrip()}\n\n{SWISS_LEGAL_DISCLAIMER}".strip()
+        max_body_len = 4000 - len(disclaimer_block)
+        if len(tutti_desc) > max_body_len:
+            tutti_desc = tutti_desc[:max_body_len].rstrip()
+        res["tutti_description"] = f"{tutti_desc.rstrip()}{disclaimer_block}".strip()
+    else:
+        if len(tutti_desc) > 4000:
+            idx = tutti_desc.rfind(disclaimer)
+            body = tutti_desc[:idx].rstrip()
+            tail = tutti_desc[idx:]
+            avail = 4000 - len(tail)
+            if avail > 0:
+                tutti_desc = f"{body[:avail].rstrip()}\n\n{tail}".strip()
+            else:
+                tutti_desc = tutti_desc[:4000].rstrip()
+        res["tutti_description"] = tutti_desc
 
     # 4. Mandatory German warranty disclaimer in descriptions
     if "ebay_de_description" in res:
@@ -226,7 +241,7 @@ Deine Aufgabe:
      * Empfehle eine Kleinanzeigen Verhandlungsbasis 'kleinanzeigen_vb_eur'.
 4. Erstelle suchbegriffsoptimierte Inserate für alle 4 Plattformen:
    - Ricardo: Titel STRIKT maximal 60 Zeichen (Marke Modell Kern-Specs Zustand). Strukturierte Beschreibung (Zustand, Lieferumfang, Technische Daten, Versand/Abholung). Schweizer Hochdeutsch (IMMER 'ss', NIEMALS 'ß'!). Pflichtklausel: "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
-   - Tutti: Titel bis 80 Zeichen. Passende Tutti-Kategorie. Freundlicher Kleinanzeigentext inkl. Abholung/Versand und TWINT. Schweizer Hochdeutsch (IMMER 'ss', NIEMALS 'ß'!). Pflichtklausel: "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
+   - Tutti: Titel STRIKT maximal 60 Zeichen. Beschreibung maximal 4000 Zeichen. Passende Tutti-Kategorie. Freundlicher Kleinanzeigentext inkl. Abholung/Versand und TWINT. Schweizer Hochdeutsch (IMMER 'ss', NIEMALS 'ß'!). Pflichtklausel: "Privatverkauf, ohne Gewährleistung/Garantie, keine Rücknahme."
    - eBay.de: Titel STRIKT maximal 80 Zeichen (suchbegriffsoptimiert). Passende eBay-Kategorie. Strukturierter Text in Standard-Deutsch (inkl. 'ß'). Pflichtklausel: "Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. Keine Garantie oder Rücknahme, da Privatverkauf."
    - Kleinanzeigen.de: Titel STRIKT maximal 65 Zeichen. Passende Kleinanzeigen-Kategorie. Freundlicher Text in Standard-Deutsch (inkl. 'ß') mit Hinweis auf Abholung/DHL/Direkt kaufen. Pflichtklausel: "Der Verkauf erfolgt unter Ausschluss jeglicher Sachmängelhaftung. Keine Garantie oder Rücknahme, da Privatverkauf."
 
@@ -246,9 +261,9 @@ Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt mit folgender Struktur:
   "ricardo_title": "string (max 60 Zeichen)",
   "ricardo_description": "string",
   "ricardo_condition": "neu" | "wie_neu" | "gebraucht" | "defekt",
-  "tutti_title": "string (max 80 Zeichen)",
+  "tutti_title": "string (max 60 Zeichen)",
   "tutti_category": "string",
-  "tutti_description": "string",
+  "tutti_description": "string (max 4000 Zeichen)",
   "tutti_condition": "neu" | "wie_neu" | "gebraucht" | "defekt",
   "ebay_de_title": "string (max 80 Zeichen, Standard-Deutsch)",
   "ebay_de_category": "string",

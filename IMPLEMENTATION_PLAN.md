@@ -166,8 +166,8 @@ class PresetSettings(BaseModel):
   ```python
   if len(draft.ricardo.title) > 60:
       draft.ricardo.title = draft.ricardo.title[:60].rstrip()
-  if len(draft.tutti.title) > 80:
-      draft.tutti.title = draft.tutti.title[:80].rstrip()
+  if len(draft.tutti.title) > 60:
+      draft.tutti.title = draft.tutti.title[:60].rstrip()
   if len(draft.ebay_de.title) > 80:
       draft.ebay_de.title = draft.ebay_de.title[:80].rstrip()
   if len(draft.kleinanzeigen.title) > 65:
@@ -212,7 +212,8 @@ def build_verification_links(self, query: str) -> VerificationLinks:
    * **Schweizer Rechtschreibung (`ß` $\rightarrow$ `ss`):** Nur auf CH- und allgemeine Felder anwenden (`identified_product`, `missing_photo_hints`, `reasoning`, `ricardo_title`, `ricardo_description`, `tutti_title`, `tutti_category`, `tutti_description`). **Nicht** auf `ebay_de_*` und `kleinanzeigen_*` anwenden (dort bleibt `ß` erhalten!).
    * **Titellängen-Kappung (mit Wortgrenzen-Logik):**
      * `ricardo_title`: $\le 60$ Zeichen
-     * `tutti_title`: $\le 80$ Zeichen
+     * `tutti_title`: $\le 60$ Zeichen
+     * `tutti_description`: $\le 4000$ Zeichen
      * `ebay_de_title`: $\le 80$ Zeichen
      * `kleinanzeigen_title`: $\le 65$ Zeichen
    * **Pflicht-Rechtstexte:**

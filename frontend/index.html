@@ -242,15 +242,15 @@
           <div class="platform-card tutti-card">
             <div class="platform-header">
               <h3>Tutti.ch</h3>
-              <span class="platform-tag">80-Zeichen Titel</span>
+              <span class="platform-tag">60-Zeichen Titel</span>
             </div>
 
             <div class="form-group">
               <div class="label-with-counter">
-                <label for="tutti-title">Titel (max. 80 Zeichen):</label>
-                <span id="tutti-title-count" class="counter">0/80</span>
+                <label for="tutti-title">Titel (max. 60 Zeichen):</label>
+                <span id="tutti-title-count" class="counter">0/60</span>
               </div>
-              <input type="text" id="tutti-title" maxlength="80" placeholder="z.B. Sony WH-1000XM4 Bluetooth Over-Ear Kopfhörer schwarz">
+              <input type="text" id="tutti-title" maxlength="60" placeholder="z.B. Sony WH-1000XM4 Bluetooth Over-Ear Kopfhörer schwarz">
             </div>
 
             <div class="form-row">
@@ -274,8 +274,11 @@
             </div>
 
             <div class="form-group">
-              <label for="tutti-description">Beschreibung:</label>
-              <textarea id="tutti-description" rows="12"></textarea>
+              <div class="label-with-counter">
+                <label for="tutti-description">Beschreibung (max. 4000 Zeichen):</label>
+                <span id="tutti-description-count" class="counter">0/4000</span>
+              </div>
+              <textarea id="tutti-description" rows="12" maxlength="4000"></textarea>
             </div>
           </div>
 

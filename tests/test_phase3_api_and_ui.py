@@ -127,13 +127,15 @@ def test_full_rest_lifecycle(test_app):
     # 7. PUT /api/drafts/{id} (manual edit with Ricardo title > 60 chars)
     analyzed["ricardo"]["title"] = "X" * 75
     analyzed["tutti"]["title"] = "Y" * 95
+    analyzed["tutti"]["description"] = "Z" * 5000
     analyzed["ebay_de"]["title"] = "E" * 95
     analyzed["kleinanzeigen"]["title"] = "K" * 80
     res_put = client.put(f"/api/drafts/{draft_id}", json=analyzed)
     assert res_put.status_code == 200
     saved = res_put.json()
     assert len(saved["ricardo"]["title"]) <= 60
-    assert len(saved["tutti"]["title"]) <= 80
+    assert len(saved["tutti"]["title"]) <= 60
+    assert len(saved["tutti"]["description"]) <= 4000
     assert len(saved["ebay_de"]["title"]) <= 80
     assert len(saved["kleinanzeigen"]["title"]) <= 65
 

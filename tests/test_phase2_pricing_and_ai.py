@@ -115,9 +115,9 @@ def test_ai_post_processing_safeguards():
         "ricardo_title": "Großartiger Lautsprecher mit fantastischem Sound und weißem Gehäuse Top!",
         "ricardo_description": "Zustand: Sehr gut, wenig genutzt.",
         "ricardo_condition": "gebraucht",
-        "tutti_title": "Großartiger Lautsprecher weiß guter Zustand",
+        "tutti_title": "Großartiger Lautsprecher in weiß mit fantastischem Sound und bestem Bass Top Zustand",
         "tutti_category": "Audio & TV",
-        "tutti_description": "Schöner weißer Lautsprecher zu verkaufen.",
+        "tutti_description": "Schöner weißer Lautsprecher zu verkaufen. " + ("Sehr detailreich. " * 300),
         "tutti_condition": "gebraucht",
         "ebay_de_title": "Großartiger Lautsprecher mit fantastischem Sound in perfekter Größe und Zustand für Musikliebhaber",
         "ebay_de_description": "Hier verkaufe ich einen tollen Lautsprecher in Top Zustand.",
@@ -127,8 +127,10 @@ def test_ai_post_processing_safeguards():
 
     processed = post_process_ai_output(raw_payload)
 
-    # 1. Ricardo title length limit: <= 60 chars
+    # 1. Ricardo and Tutti title length limits: <= 60 chars
     assert len(processed["ricardo_title"]) <= 60
+    assert len(processed["tutti_title"]) <= 60
+    assert len(processed["tutti_description"]) <= 4000
     # 2. Swiss German orthography: no 'ß' in strings or list of strings
     assert "ß" not in processed["ricardo_title"]
     assert "ß" not in processed["tutti_title"]
